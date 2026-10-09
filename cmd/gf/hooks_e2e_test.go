@@ -190,14 +190,18 @@ func TestHookStageAgentLifecycle_EndToEnd(t *testing.T) {
 	assert.Empty(t, r.hook(nil, "subagent-stop", subagentEvent("SubagentStop", "gofast:implement", false)))
 	assert.Equal(t, block("'implement' is still open (attempt 2 of 3). Run the gofast:implement agent."), r.hook(nil, "stop", stop(false)))
 
-	// Escalation lets the session stop and tells the owner the options.
+	// Escalation lets the session stop, tells the owner the options and ends drive mode.
 	r.run(asAgent, "submit", "--failed", "still failing")
 	r.run(asAgent, "submit", "--failed", "still failing")
 	assert.Equal(t,
-		tell("Budget exhausted on 'implement'. Review `"+artifact+"`, then run `gf extend <n>` or `gf abandon \"<reason>\"` in your own terminal."),
+		tell("Budget exhausted on 'implement'. Review `"+artifact+"`, then run `gf extend <n>` or `gf abandon \"<reason>\"` in your own terminal. After you act, run /gofast:drive to continue."),
 		r.hook(nil, "stop", stop(false)))
+	r.gf("extend", "1")
+	assert.Empty(t, r.hook(nil, "stop", stop(false)), "drive mode ended when the owner was needed")
 
-	// Abandoned: no active work, the session stops and is no longer driving.
+	// /gofast:drive again resumes; abandoning ends the work and drive mode.
+	assert.Empty(t, r.hook(nil, "user-prompt-expansion", driveExpansion()))
+	assert.Equal(t, block("'implement' is still open (attempt 4 of 4). Run the gofast:implement agent."), r.hook(nil, "stop", stop(false)))
 	r.gf("abandon", "wrong approach")
 	assert.Empty(t, r.hook(nil, "stop", stop(false)))
 	r.gf("start", "--type", "fix-bug", "next bug")
@@ -215,8 +219,12 @@ func TestHookStop_WaitingForApproval_TellsTheOwnerWhatToReview(t *testing.T) {
 	r.hook(nil, "user-prompt-expansion", driveExpansion())
 
 	assert.Equal(t,
-		tell("'discovery' is waiting for your approval. Review `"+artifact+"`, then run `gf approve` or `gf reject \"<feedback>\"` in your own terminal."),
+		tell("'discovery' is waiting for your approval. Review `"+artifact+"`, then run `gf approve` or `gf reject \"<feedback>\"` in your own terminal. After you act, run /gofast:drive to continue."),
 		r.hook(nil, "stop", stop(false)))
+
+	// Drive mode ended: once the owner approves, the session is not held on the next stage.
+	r.gf("approve")
+	assert.Empty(t, r.hook(nil, "stop", stop(false)))
 }
 
 func TestHookMarkers_StayOutOfTheEventLog(t *testing.T) {

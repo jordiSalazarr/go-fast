@@ -74,8 +74,9 @@ func subagentStop(in claudehooks.Input, facts assignmentFacts, start agentsessio
 }
 
 // sessionStop keeps a driving session going while the stage is open, and lets
-// it stop, saying what the owner must do, once the owner is needed. It
-// reports whether the session's driving marker should be cleared.
+// it stop, saying what the owner must do, once the owner is needed. Drive mode
+// ends when the owner is needed or the work is over: it reports whether the
+// session's driving marker should be cleared.
 func sessionStop(in claudehooks.Input, facts assignmentFacts, driving bool) (out claudehooks.Output, clearDriving bool) {
 	if !driving || in.InSubagent() {
 		return claudehooks.Nothing(), false
@@ -98,14 +99,17 @@ func sessionStop(in claudehooks.Input, facts assignmentFacts, driving bool) (out
 		return claudehooks.Block(fmt.Sprintf("'%s' is still open (attempt %d of %d). Run the %s%s agent.",
 			facts.stage, attempt, budget, agentPrefix, facts.stage)), false
 	case domain.AwaitingApproval:
-		return claudehooks.Tell(fmt.Sprintf("'%s' is waiting for your approval. Review `%s`, then run `gf approve` or `gf reject \"<feedback>\"` in your own terminal.",
-			facts.stage, facts.artifact)), false
+		return claudehooks.Tell(fmt.Sprintf("'%s' is waiting for your approval. Review `%s`, then run `gf approve` or `gf reject \"<feedback>\"` in your own terminal. %s",
+			facts.stage, facts.artifact, resumeHint)), true
 	case domain.Escalated:
-		return claudehooks.Tell(fmt.Sprintf("Budget exhausted on '%s'. Review `%s`, then run `gf extend <n>` or `gf abandon \"<reason>\"` in your own terminal.",
-			facts.stage, facts.artifact)), false
+		return claudehooks.Tell(fmt.Sprintf("Budget exhausted on '%s'. Review `%s`, then run `gf extend <n>` or `gf abandon \"<reason>\"` in your own terminal. %s",
+			facts.stage, facts.artifact, resumeHint)), true
 	}
 	return claudehooks.Nothing(), false
 }
+
+// resumeHint ends the message when drive mode ends because the owner is needed.
+const resumeHint = "After you act, run /gofast:drive to continue."
 
 func isOpen(state domain.AssignmentState) bool {
 	switch state.(type) {

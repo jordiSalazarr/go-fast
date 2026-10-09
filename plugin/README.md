@@ -69,6 +69,10 @@ The guard hook and `GF_ACTOR=agent` (below) cover those.
 5. **The owner is needed.** On a human gate (discovery, specify) the session
    stops once the stage is waiting for approval, and tells you which artifact
    to read. When a budget is exhausted, it stops and tells you the options.
+   Either way, drive mode ends there: after you approve, reject, extend or
+   abandon in your own terminal, run `/gofast:drive` to continue. Until you
+   do, the session behaves like any other and is never held. Drive mode also
+   ends when there is no active work left on the branch.
 
 Write scopes per stage:
 

@@ -175,23 +175,24 @@ func TestStop_DrivingWithTheStageOpen_ButStopHookActive_IsAllowedWithAMessage(t 
 	assert.False(t, clear)
 }
 
-func TestStop_DrivingAndAwaitingApproval_IsAllowedTellingTheOwnerWhatToReview(t *testing.T) {
+func TestStop_DrivingAndAwaitingApproval_IsAllowedTellingTheOwnerWhatToReview_AndStopsDriving(t *testing.T) {
 	facts := on(t, domain.StageSpecify, true, SubmittedForApproval(domain.StageSpecify, 1))
 
 	out, clear := sessionStop(mainStops(false), facts, true)
 
-	assert.Equal(t, claudehooks.Tell("'specify' is waiting for your approval. Review `.gofast/works/w1/specify-v1.md`, then run `gf approve` or `gf reject \"<feedback>\"` in your own terminal."), out)
-	assert.False(t, clear)
+	assert.Equal(t, claudehooks.Tell("'specify' is waiting for your approval. Review `.gofast/works/w1/specify-v1.md`, then run `gf approve` or `gf reject \"<feedback>\"` in your own terminal. After you act, run /gofast:drive to continue."), out)
+	assert.True(t, clear)
 }
 
-func TestStop_DrivingAndEscalated_IsAllowedTellingTheOwnerTheOptions(t *testing.T) {
+func TestStop_DrivingAndEscalated_IsAllowedTellingTheOwnerTheOptions_AndStopsDriving(t *testing.T) {
 	facts := on(t, domain.StageImplement, true,
 		Failed(domain.StageImplement, 1, "a"), Failed(domain.StageImplement, 2, "b"), Failed(domain.StageImplement, 3, "c"),
 		Escalated(domain.StageImplement, 3, 3))
 
-	out, _ := sessionStop(mainStops(false), facts, true)
+	out, clear := sessionStop(mainStops(false), facts, true)
 
-	assert.Equal(t, claudehooks.Tell("Budget exhausted on 'implement'. Review `.gofast/works/w1/implement-v1.md`, then run `gf extend <n>` or `gf abandon \"<reason>\"` in your own terminal."), out)
+	assert.Equal(t, claudehooks.Tell("Budget exhausted on 'implement'. Review `.gofast/works/w1/implement-v1.md`, then run `gf extend <n>` or `gf abandon \"<reason>\"` in your own terminal. After you act, run /gofast:drive to continue."), out)
+	assert.True(t, clear)
 }
 
 func TestStop_DrivingWithNoActiveWork_IsAllowedAndStopsDriving(t *testing.T) {
