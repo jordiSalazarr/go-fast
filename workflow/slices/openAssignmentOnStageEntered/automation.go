@@ -36,6 +36,7 @@ func assignmentToOpen(entered domain.StageEntered, alreadyOpened bool) (openAssi
 }
 
 // Run opens every missing assignment and returns how many events it appended.
+// It reads the log once, and again only after appending.
 func Run(log Log) (int, error) {
 	records, err := log.ReadAll()
 	if err != nil {
@@ -61,6 +62,17 @@ func Run(log Log) (int, error) {
 			return appended, fmt.Errorf("%s: %w", Name, err)
 		}
 		appended += len(events)
+		if history, err = reread(log); err != nil {
+			return appended, err
+		}
 	}
 	return appended, nil
+}
+
+func reread(log Log) (eventlog.History, error) {
+	records, err := log.ReadAll()
+	if err != nil {
+		return eventlog.History{}, fmt.Errorf("%s: %w", Name, err)
+	}
+	return eventlog.NewHistory(records), nil
 }

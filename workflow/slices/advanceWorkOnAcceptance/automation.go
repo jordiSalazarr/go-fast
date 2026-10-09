@@ -28,24 +28,21 @@ func workToAdvance(accepted domain.AssignmentAccepted, work domain.WorkState) (d
 }
 
 // Run advances every work whose current stage visit was accepted and returns
-// how many events it appended.
+// how many events it appended. It reads the log once, and again only after
+// appending, so every decision sees the latest work.
 func Run(log Log) (int, error) {
 	records, err := log.ReadAll()
 	if err != nil {
 		return 0, fmt.Errorf("%s: %w", Name, err)
 	}
+	history := eventlog.NewHistory(records)
 	appended := 0
 	for _, r := range records {
 		accepted, ok := r.Event.(domain.AssignmentAccepted)
 		if !ok {
 			continue
 		}
-		// Re-read after each append so every decision sees the latest work.
-		current, err := log.ReadAll()
-		if err != nil {
-			return appended, fmt.Errorf("%s: %w", Name, err)
-		}
-		work, version, err := eventlog.NewHistory(current).Work(accepted.WorkID)
+		work, version, err := history.Work(accepted.WorkID)
 		if err != nil {
 			return appended, fmt.Errorf("%s: %w", Name, err)
 		}
@@ -61,6 +58,17 @@ func Run(log Log) (int, error) {
 			return appended, fmt.Errorf("%s: %w", Name, err)
 		}
 		appended += len(events)
+		if history, err = reread(log); err != nil {
+			return appended, err
+		}
 	}
 	return appended, nil
+}
+
+func reread(log Log) (eventlog.History, error) {
+	records, err := log.ReadAll()
+	if err != nil {
+		return eventlog.History{}, fmt.Errorf("%s: %w", Name, err)
+	}
+	return eventlog.NewHistory(records), nil
 }
