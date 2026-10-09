@@ -41,10 +41,24 @@ func newRepo(t *testing.T) *repo {
 	return &repo{t: t, dir: dir}
 }
 
+// run runs gf as if typed in a terminal, like the owner does.
 func (r *repo) run(env map[string]string, args ...string) result {
 	r.t.Helper()
+	return r.runWith(true, env, args...)
+}
+
+// runWithoutTerminal runs gf the way Claude Code's Bash tool does: stdin is
+// not a terminal.
+func (r *repo) runWithoutTerminal(env map[string]string, args ...string) result {
+	r.t.Helper()
+	return r.runWith(false, env, args...)
+}
+
+func (r *repo) runWith(terminal bool, env map[string]string, args ...string) result {
+	r.t.Helper()
 	var stdout, stderr bytes.Buffer
-	code := execute(append([]string{"--dir", r.dir}, args...), func(k string) string { return env[k] }, strings.NewReader(""), &stdout, &stderr)
+	code := execute(append([]string{"--dir", r.dir}, args...), func(k string) string { return env[k] },
+		func() bool { return terminal }, strings.NewReader(""), &stdout, &stderr)
 	return result{code: code, stdout: stdout.String(), stderr: stderr.String()}
 }
 
@@ -190,6 +204,30 @@ func TestFixBugPath_EndToEnd(t *testing.T) {
 	// A new work can start once the previous one is completed.
 	r.gf("start", "--type", "fix-bug", "next bug")
 	r.expect("discovery", progress.AssignmentOpen, 0, 3)
+}
+
+func TestOwnerCommands_NeedATerminal_EvenWithoutGF_ACTOR(t *testing.T) {
+	r := newRepo(t)
+	r.gf("start", "--type", "fix-bug", "crash on save")
+	submitted := r.runWithoutTerminal(nil, "submit", "--passed")
+	require.Equal(t, 0, submitted.code, "agent commands need no terminal: %s", submitted.stderr)
+	r.expect("discovery", progress.AssignmentAwaitingApproval, 0, 3)
+
+	cases := map[string][]string{
+		"Only the owner can approve, from their own terminal. Run `gf approve` there.\n":                     {"approve"},
+		"Only the owner can reject, from their own terminal. Run `gf reject \"<feedback>\"` there.\n":        {"reject", "x"},
+		"Only the owner can extend the budget, from their own terminal. Run `gf extend <attempts>` there.\n": {"extend", "1"},
+		"Only the owner can abandon work, from their own terminal. Run `gf abandon \"<reason>\"` there.\n":   {"abandon", "x"},
+	}
+	for want, args := range cases {
+		res := r.runWithoutTerminal(nil, args...)
+		assert.Equal(t, 1, res.code, args)
+		assert.Equal(t, want, res.stderr, args)
+	}
+	r.expect("discovery", progress.AssignmentAwaitingApproval, 0, 3)
+
+	r.gf("approve")
+	r.expect("specify", progress.AssignmentOpen, 0, 3)
 }
 
 func TestAbandon_CancelsTheOpenAssignment(t *testing.T) {

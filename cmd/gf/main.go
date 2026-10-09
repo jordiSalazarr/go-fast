@@ -28,23 +28,24 @@ import (
 )
 
 func main() {
-	os.Exit(execute(os.Args[1:], os.Getenv, os.Stdin, os.Stdout, os.Stderr))
+	os.Exit(execute(os.Args[1:], os.Getenv, caller.StdinIsTerminal, os.Stdin, os.Stdout, os.Stderr))
 }
 
 // app holds what the commands share, resolved lazily once flags are parsed.
 type app struct {
-	getenv  func(string) string
-	dir     string // --dir
-	root    string
-	store   *eventlog.Store
-	logger  *slog.Logger
-	logFile *os.File
-	ran     bool // a command's RunE started: flags and arguments were valid
+	getenv   func(string) string
+	terminal func() bool // whether stdin is a terminal
+	dir      string      // --dir
+	root     string
+	store    *eventlog.Store
+	logger   *slog.Logger
+	logFile  *os.File
+	ran      bool // a command's RunE started: flags and arguments were valid
 }
 
 // execute runs gf and returns its exit code.
-func execute(args []string, getenv func(string) string, stdin io.Reader, stdout, stderr io.Writer) int {
-	a := &app{getenv: getenv}
+func execute(args []string, getenv func(string) string, terminal func() bool, stdin io.Reader, stdout, stderr io.Writer) int {
+	a := &app{getenv: getenv, terminal: terminal}
 	defer a.close()
 
 	root := a.rootCommand()
@@ -179,7 +180,7 @@ func (a *app) resolveCaller() (caller.Caller, error) {
 	if err != nil {
 		return caller.Caller{}, err
 	}
-	return caller.Resolve(a.getenv, caller.GitConfig(root))
+	return caller.Resolve(a.getenv, caller.GitConfig(root), a.terminal())
 }
 
 func (a *app) currentBranch() (domain.Branch, error) {

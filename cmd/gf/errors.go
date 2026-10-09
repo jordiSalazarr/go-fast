@@ -27,6 +27,8 @@ func friendly(err error, cmd *cobra.Command, ran bool) string {
 	switch {
 	case errors.Is(err, gitbranch.ErrDetachedHead):
 		return "You are not on a branch. Check out a branch before running gf."
+	case errors.As(err, &ownerOnly) && ownerOnly.NoTerminal:
+		return fmt.Sprintf("Only the owner can %s, from their own terminal. Run `%s` there.", ownerOnly.Action, ownerOnly.Command)
 	case errors.As(err, &ownerOnly):
 		return fmt.Sprintf("Only the owner can %s. Ask the owner to run `%s`.", ownerOnly.Action, ownerOnly.Command)
 	case errors.As(err, &active):

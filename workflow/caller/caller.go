@@ -1,5 +1,6 @@
 // Package caller resolves who runs gf: the owner, identified by git config,
-// or an agent, when GF_ACTOR=agent.
+// or an agent, when GF_ACTOR=agent. Owner-only commands also need a terminal:
+// Claude Code's Bash tool has none, whatever its environment says.
 package caller
 
 import (
@@ -22,13 +23,18 @@ var (
 	ErrOwnerOnly       = errors.New("only the owner can run this command")
 )
 
-// OwnerOnlyError is returned when an agent runs an owner-only command.
+// OwnerOnlyError is returned when an agent, or a caller without a terminal,
+// runs an owner-only command.
 type OwnerOnlyError struct {
-	Action  string // e.g. "approve"
-	Command string // e.g. "gf approve"
+	Action     string // e.g. "approve"
+	Command    string // e.g. "gf approve"
+	NoTerminal bool   // refused because stdin is not a terminal, not because of GF_ACTOR
 }
 
 func (e *OwnerOnlyError) Error() string {
+	if e.NoTerminal {
+		return fmt.Sprintf("%s: %s refused: stdin is not a terminal", ErrOwnerOnly, e.Action)
+	}
 	return fmt.Sprintf("%s: %s refused for agent", ErrOwnerOnly, e.Action)
 }
 
@@ -36,14 +42,16 @@ func (e *OwnerOnlyError) Unwrap() error { return ErrOwnerOnly }
 
 // Caller is who runs the current command.
 type Caller struct {
-	agent bool
-	owner domain.Owner
+	agent    bool
+	terminal bool
+	owner    domain.Owner
 }
 
-// Resolve works out the caller from the environment and git config.
-func Resolve(getenv func(string) string, gitConfig func(key string) (string, error)) (Caller, error) {
+// Resolve works out the caller from the environment, git config and whether
+// stdin is a terminal.
+func Resolve(getenv func(string) string, gitConfig func(key string) (string, error), terminal bool) (Caller, error) {
 	if getenv(EnvActor) == agentValue {
-		return Caller{agent: true}, nil
+		return Caller{agent: true, terminal: terminal}, nil
 	}
 	name, err := gitConfig("user.name")
 	if err != nil {
@@ -57,7 +65,7 @@ func Resolve(getenv func(string) string, gitConfig func(key string) (string, err
 	if err != nil {
 		return Caller{}, fmt.Errorf("resolve owner: %w: %w", ErrNoOwnerIdentity, err)
 	}
-	return Caller{owner: owner}, nil
+	return Caller{owner: owner, terminal: terminal}, nil
 }
 
 // Actor is how the caller is recorded on events.
@@ -68,11 +76,15 @@ func (c Caller) Actor() eventlog.Actor {
 	return eventlog.OwnerActor(c.owner)
 }
 
-// RequireOwner returns the owner, or refuses an agent before the command
-// reaches the domain.
+// RequireOwner returns the owner, or refuses before the command reaches the
+// domain: an agent (GF_ACTOR=agent), and anyone without a terminal, since
+// GF_ACTOR is easy to remove (`env -i`).
 func (c Caller) RequireOwner(action, command string) (domain.Owner, error) {
 	if c.agent {
 		return domain.Owner{}, &OwnerOnlyError{Action: action, Command: command}
+	}
+	if !c.terminal {
+		return domain.Owner{}, &OwnerOnlyError{Action: action, Command: command, NoTerminal: true}
 	}
 	return c.owner, nil
 }

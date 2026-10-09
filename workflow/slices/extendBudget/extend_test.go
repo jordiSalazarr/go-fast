@@ -47,7 +47,7 @@ func TestGivenNoActiveWork_WhenTheOwnerExtendsTheBudget_ThenItIsRejected(t *test
 }
 
 func TestGivenAnAgent_WhenRunningExtend_ThenItIsRefusedBeforeTouchingTheLog(t *testing.T) {
-	agent := Must(caller.Resolve(func(string) string { return "agent" }, nil))
+	agent := Must(caller.Resolve(func(string) string { return "agent" }, nil, true))
 	opened := false
 	cmd := extendbudget.NewCommand(
 		func() (*eventlog.Store, error) { opened = true; return nil, errors.New("must not open") },

@@ -39,7 +39,7 @@ func TestGivenNoActiveWork_WhenTheOwnerAbandons_ThenItIsRejected(t *testing.T) {
 }
 
 func TestGivenAnAgent_WhenRunningAbandon_ThenItIsRefusedBeforeTouchingTheLog(t *testing.T) {
-	agent := Must(caller.Resolve(func(string) string { return "agent" }, nil))
+	agent := Must(caller.Resolve(func(string) string { return "agent" }, nil, true))
 	opened := false
 	cmd := abandonwork.NewCommand(
 		func() (*eventlog.Store, error) { opened = true; return nil, errors.New("must not open") },

@@ -28,7 +28,7 @@ func (r *repo) hook(env map[string]string, event string, input map[string]any) s
 	raw, err := json.Marshal(input)
 	require.NoError(r.t, err)
 	var stdout, stderr bytes.Buffer
-	code := execute([]string{"hook", event}, func(k string) string { return env[k] }, bytes.NewReader(raw), &stdout, &stderr)
+	code := execute([]string{"hook", event}, func(k string) string { return env[k] }, func() bool { return false }, bytes.NewReader(raw), &stdout, &stderr)
 	require.Equal(r.t, 0, code, stderr.String())
 	assert.Empty(r.t, stderr.String())
 	return stdout.String()
