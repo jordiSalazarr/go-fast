@@ -1,4 +1,4 @@
-package status_test
+package progress_test
 
 import (
 	"strings"
@@ -11,22 +11,22 @@ import (
 	. "github.com/jordiSalazarr/go-fast/workflow/domain/domaintest"
 	"github.com/jordiSalazarr/go-fast/workflow/eventlog"
 	"github.com/jordiSalazarr/go-fast/workflow/eventlog/eventlogtest"
-	"github.com/jordiSalazarr/go-fast/workflow/slices/status"
+	"github.com/jordiSalazarr/go-fast/workflow/progress"
 )
 
-// whenQueried returns the status view of the given history.
-func whenQueried(t *testing.T, s *eventlogtest.Scenario) status.View {
+// whenQueried returns the progress view of the given history.
+func whenQueried(t *testing.T, s *eventlogtest.Scenario) progress.View {
 	t.Helper()
-	var view status.View
+	var view progress.View
 	s.WhenQueried(func(log *eventlog.Snapshot) error {
 		var err error
-		view, err = status.Status(log, Branch)
+		view, err = progress.Read(log, Branch)
 		return err
 	})
 	return view
 }
 
-func stageStatuses(v status.View) map[string]string {
+func stageStatuses(v progress.View) map[string]string {
 	m := map[string]string{}
 	for _, s := range v.Work.Stages {
 		m[s.Stage] = s.Status
@@ -37,11 +37,11 @@ func stageStatuses(v status.View) map[string]string {
 func TestGivenNoWork_WhenQueryingStatus_ThenItSaysHowToStart(t *testing.T) {
 	v := whenQueried(t, eventlogtest.Given(t))
 
-	assert.Equal(t, status.View{Schema: 1, Next: status.NextView{
-		Actor:    status.NextAnyone,
+	assert.Equal(t, progress.View{Schema: 1, Next: progress.NextView{
+		Actor:    progress.NextAnyone,
 		Message:  "No active work on branch main. Start one with `gf start --type fix-bug \"<description>\"`.",
 		Commands: []string{`gf start --type fix-bug "<description>"`},
-	}, OtherBranches: []status.OtherBranchView{}}, v)
+	}, OtherBranches: []progress.OtherBranchView{}}, v)
 }
 
 func TestGivenCompletedWork_WhenQueryingStatus_ThenThereIsNoActiveWork(t *testing.T) {
@@ -59,16 +59,16 @@ func TestGivenAFailedAttemptOnImplement_WhenQueryingStatus_ThenTheAgentIsToldToW
 	assert.Equal(t, "fix-bug", v.Work.Type)
 	assert.Equal(t, "login button does nothing", v.Work.Description)
 	assert.Equal(t, map[string]string{
-		"discovery": status.StageDone, "specify": status.StageDone, "implement": status.StageCurrent,
-		"review": status.StagePending, "integration-testing": status.StagePending,
+		"discovery": progress.StageDone, "specify": progress.StageDone, "implement": progress.StageCurrent,
+		"review": progress.StagePending, "integration-testing": progress.StagePending,
 	}, stageStatuses(v))
-	assert.Equal(t, &status.CurrentView{
-		Stage: "implement", Visit: 1, Gate: "auto", Assignment: status.AssignmentOpen, AttemptsUsed: 1, Budget: 3,
+	assert.Equal(t, &progress.CurrentView{
+		Stage: "implement", Visit: 1, Gate: "auto", Assignment: progress.AssignmentOpen, AttemptsUsed: 1, Budget: 3,
 		Artifact:    ".gofast/works/w1/implement-v1.md",
-		LastProblem: &status.ProblemView{Kind: status.ProblemFailedCheck, Attempt: 1, Text: "unit tests fail"},
+		LastProblem: &progress.ProblemView{Kind: progress.ProblemFailedCheck, Attempt: 1, Text: "unit tests fail"},
 	}, v.Current)
-	assert.Equal(t, status.NextView{
-		Actor:    status.NextAgent,
+	assert.Equal(t, progress.NextView{
+		Actor:    progress.NextAgent,
 		Message:  "Work on 'implement', then run `gf submit --passed` or `gf submit --failed \"<reason>\"`.",
 		Commands: []string{"gf submit --passed", `gf submit --failed "<reason>"`},
 	}, v.Next)
@@ -77,11 +77,11 @@ func TestGivenAFailedAttemptOnImplement_WhenQueryingStatus_ThenTheAgentIsToldToW
 func TestGivenASubmissionAwaitingApproval_WhenQueryingStatus_ThenTheOwnerIsAskedToApproveOrReject(t *testing.T) {
 	v := whenQueried(t, eventlogtest.Given(t, OpenOn(domain.StageSpecify, SubmittedForApproval(domain.StageSpecify, 1))...))
 
-	assert.Equal(t, status.AssignmentAwaitingApproval, v.Current.Assignment)
+	assert.Equal(t, progress.AssignmentAwaitingApproval, v.Current.Assignment)
 	assert.Equal(t, "human", v.Current.Gate)
 	assert.Nil(t, v.Current.LastProblem)
-	assert.Equal(t, status.NextView{
-		Actor:    status.NextOwner,
+	assert.Equal(t, progress.NextView{
+		Actor:    progress.NextOwner,
 		Message:  "Waiting for the owner to approve 'specify': run `gf approve` or `gf reject \"<feedback>\"`.",
 		Commands: []string{"gf approve", `gf reject "<feedback>"`},
 	}, v.Next)
@@ -92,18 +92,18 @@ func TestGivenARejection_WhenQueryingStatus_ThenItShowsTheFeedback(t *testing.T)
 		Failed(domain.StageDiscovery, 1, "no repro"),
 		SubmittedForApproval(domain.StageDiscovery, 2), Rejected(domain.StageDiscovery, 2, "add console output"))...))
 
-	assert.Equal(t, status.AssignmentOpen, v.Current.Assignment)
+	assert.Equal(t, progress.AssignmentOpen, v.Current.Assignment)
 	assert.Equal(t, 2, v.Current.AttemptsUsed)
-	assert.Equal(t, &status.ProblemView{Kind: status.ProblemRejection, Attempt: 2, Text: "add console output"}, v.Current.LastProblem)
+	assert.Equal(t, &progress.ProblemView{Kind: progress.ProblemRejection, Attempt: 2, Text: "add console output"}, v.Current.LastProblem)
 }
 
 func TestGivenAnEscalation_WhenQueryingStatus_ThenTheOwnerIsAskedToExtendOrAbandon(t *testing.T) {
 	v := whenQueried(t, eventlogtest.Given(t, EscalatedOn(domain.StageReview)...))
 
-	assert.Equal(t, status.AssignmentEscalated, v.Current.Assignment)
+	assert.Equal(t, progress.AssignmentEscalated, v.Current.Assignment)
 	assert.Equal(t, 3, v.Current.AttemptsUsed)
 	assert.Equal(t, 3, v.Current.Budget)
-	assert.Equal(t, status.NextOwner, v.Next.Actor)
+	assert.Equal(t, progress.NextOwner, v.Next.Actor)
 	assert.Equal(t, "Escalated: budget exhausted on 'review'; the owner can run `gf extend <n>` or `gf abandon \"<reason>\"`.", v.Next.Message)
 }
 
@@ -112,7 +112,7 @@ func TestGivenAnExtendedBudget_WhenQueryingStatus_ThenItShowsTheNewBudget(t *tes
 
 	v := whenQueried(t, eventlogtest.Given(t, append(EscalatedOn(domain.StageReview), extended)...))
 
-	assert.Equal(t, status.AssignmentOpen, v.Current.Assignment)
+	assert.Equal(t, progress.AssignmentOpen, v.Current.Assignment)
 	assert.Equal(t, 3, v.Current.AttemptsUsed)
 	assert.Equal(t, 5, v.Current.Budget)
 }
@@ -123,11 +123,11 @@ func TestGivenAnExtendedBudget_WhenQueryingStatus_ThenItShowsTheNewBudget(t *tes
 func TestGivenAStageWhoseAssignmentIsNotOpenedYet_WhenQueryingStatus_ThenItIsShownOpen(t *testing.T) {
 	v := whenQueried(t, eventlogtest.Given(t, WorkOn(domain.StageSpecify)...))
 
-	assert.Equal(t, &status.CurrentView{
-		Stage: "specify", Visit: 1, Gate: "human", Assignment: status.AssignmentOpen, AttemptsUsed: 0, Budget: 3,
+	assert.Equal(t, &progress.CurrentView{
+		Stage: "specify", Visit: 1, Gate: "human", Assignment: progress.AssignmentOpen, AttemptsUsed: 0, Budget: 3,
 		Artifact: ".gofast/works/w1/specify-v1.md",
 	}, v.Current)
-	assert.Equal(t, status.NextAgent, v.Next.Actor)
+	assert.Equal(t, progress.NextAgent, v.Next.Actor)
 }
 
 func TestGivenWorkOnReview_WhenQueryingStatus_ThenItShowsTheArtifactPaths(t *testing.T) {
@@ -152,7 +152,7 @@ func TestGivenWorkOnReview_WhenRenderingStatusText_ThenItShowsTheCurrentArtifact
 	v := whenQueried(t, eventlogtest.Given(t, OpenOn(domain.StageReview)...))
 	var text strings.Builder
 
-	status.Render(&text, v)
+	progress.RenderText(&text, v)
 
 	assert.Contains(t, text.String(), "Artifact: .gofast/works/w1/review-v1.md")
 }
@@ -172,11 +172,11 @@ func TestGivenWorkOnlyOnAnotherBranch_WhenQueryingStatus_ThenItListsIt(t *testin
 	v := whenQueried(t, s)
 
 	assert.Nil(t, v.Work)
-	assert.Equal(t, []status.OtherBranchView{{
+	assert.Equal(t, []progress.OtherBranchView{{
 		Branch: "fix/double-charge", WorkID: "w1", Type: "fix-bug", Description: "orders double-charge", Stage: "specify",
 	}}, v.OtherBranches)
 	var text strings.Builder
-	status.Render(&text, v)
+	progress.RenderText(&text, v)
 	assert.Contains(t, text.String(), "No active work on branch main.")
 	assert.Contains(t, text.String(), "fix-bug 'orders double-charge' is in progress on branch fix/double-charge.")
 }

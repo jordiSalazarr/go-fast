@@ -13,7 +13,7 @@ import (
 	"github.com/jordiSalazarr/go-fast/workflow/claudehooks"
 	"github.com/jordiSalazarr/go-fast/workflow/domain"
 	"github.com/jordiSalazarr/go-fast/workflow/eventlog"
-	"github.com/jordiSalazarr/go-fast/workflow/slices/status"
+	"github.com/jordiSalazarr/go-fast/workflow/progress"
 )
 
 const driveHint = "To drive this work, run /gofast:drive."
@@ -66,11 +66,11 @@ func statusText(repo claudehooks.Repo, branchOf func(root string) (domain.Branch
 	}
 	var text strings.Builder
 	err = repo.Store.Shared(func(s *eventlog.Snapshot) error {
-		view, err := status.Status(s, branch)
+		view, err := progress.Read(s, branch)
 		if err != nil {
 			return err
 		}
-		status.Render(&text, view)
+		progress.RenderText(&text, view)
 		return nil
 	})
 	return text.String(), err

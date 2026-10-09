@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/jordiSalazarr/go-fast/workflow/slices/status"
+	"github.com/jordiSalazarr/go-fast/workflow/progress"
 )
 
 // Work belongs to the branch it was started on, end to end.
@@ -35,7 +35,7 @@ func TestBranches_EachBranchHasItsOwnActiveWork(t *testing.T) {
 	r.git("checkout", "-q", "-b", "b")
 	v := r.status()
 	assert.Nil(t, v.Work, "no active work on b")
-	assert.Equal(t, []status.OtherBranchView{{
+	assert.Equal(t, []progress.OtherBranchView{{
 		Branch: "main", WorkID: onMain.Work.ID, Type: "fix-bug", Description: "orders double-charge", Stage: "discovery",
 	}}, v.OtherBranches)
 	text := r.gf("status")
@@ -56,9 +56,9 @@ func TestBranches_EachBranchHasItsOwnActiveWork(t *testing.T) {
 
 	// Commands act on the current branch's work only.
 	r.gf("submit", "--passed")
-	assert.Equal(t, status.AssignmentAwaitingApproval, r.status().Current.Assignment)
+	assert.Equal(t, progress.AssignmentAwaitingApproval, r.status().Current.Assignment)
 	r.git("checkout", "-q", "b")
-	assert.Equal(t, status.AssignmentOpen, r.status().Current.Assignment)
+	assert.Equal(t, progress.AssignmentOpen, r.status().Current.Assignment)
 }
 
 func TestBranches_DetachedHead_GetsAFriendlyMessage(t *testing.T) {
@@ -96,13 +96,13 @@ func TestBranches_ConcatenatedLogsOfTwoBranches_StillWorkOnEach(t *testing.T) {
 
 	v := r.status()
 	assert.Equal(t, "work on b", v.Work.Description)
-	assert.Equal(t, status.AssignmentOpen, v.Current.Assignment)
+	assert.Equal(t, progress.AssignmentOpen, v.Current.Assignment)
 	assert.Equal(t, "work on a", v.OtherBranches[0].Description)
 
 	r.git("checkout", "-q", "a")
 	v = r.status()
 	assert.Equal(t, "work on a", v.Work.Description)
-	assert.Equal(t, status.AssignmentAwaitingApproval, v.Current.Assignment)
+	assert.Equal(t, progress.AssignmentAwaitingApproval, v.Current.Assignment)
 
 	// Writing after the merge continues from the highest position.
 	r.gf("approve")

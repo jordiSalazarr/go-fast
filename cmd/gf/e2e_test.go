@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/jordiSalazarr/go-fast/workflow/slices/status"
+	"github.com/jordiSalazarr/go-fast/workflow/progress"
 )
 
 // repo is a temporary git repository driven through the root command.
@@ -64,15 +64,15 @@ func (r *repo) gfFails(env map[string]string, args ...string) result {
 	return res
 }
 
-func (r *repo) status() status.View {
+func (r *repo) status() progress.View {
 	r.t.Helper()
-	var v status.View
+	var v progress.View
 	require.NoError(r.t, json.Unmarshal([]byte(r.gf("status", "--json")), &v))
 	return v
 }
 
 // expect checks the current stage visit as reported by `gf status --json`.
-func (r *repo) expect(stage, assignment string, attemptsUsed, budget int) status.View {
+func (r *repo) expect(stage, assignment string, attemptsUsed, budget int) progress.View {
 	r.t.Helper()
 	v := r.status()
 	require.NotNil(r.t, v.Current, "expected active work")
@@ -108,10 +108,10 @@ func TestFixBugPath_EndToEnd(t *testing.T) {
 	assert.Contains(t, v.Next.Message, "gf start --type fix-bug")
 
 	r.gf("start", "--type", "fix-bug", "login button does nothing")
-	v = r.expect("discovery", status.AssignmentOpen, 0, 3)
+	v = r.expect("discovery", progress.AssignmentOpen, 0, 3)
 	assert.Equal(t, "fix-bug", v.Work.Type)
 	assert.Equal(t, "login button does nothing", v.Work.Description)
-	assert.Equal(t, status.NextAgent, v.Next.Actor)
+	assert.Equal(t, progress.NextAgent, v.Next.Actor)
 	assert.Equal(t, []string{"current", "pending", "pending", "pending", "pending"}, stageStatuses(v))
 
 	// A second start while work is active is rejected, naming the active work.
@@ -122,12 +122,12 @@ func TestFixBugPath_EndToEnd(t *testing.T) {
 	// Discovery: a failed attempt, a rejection, then approval.
 	out := r.run(asAgent, "submit", "--failed", "cannot reproduce yet")
 	require.Equal(t, 0, out.code, out.stderr)
-	v = r.expect("discovery", status.AssignmentOpen, 1, 3)
-	assert.Equal(t, &status.ProblemView{Kind: status.ProblemFailedCheck, Attempt: 1, Text: "cannot reproduce yet"}, v.Current.LastProblem)
+	v = r.expect("discovery", progress.AssignmentOpen, 1, 3)
+	assert.Equal(t, &progress.ProblemView{Kind: progress.ProblemFailedCheck, Attempt: 1, Text: "cannot reproduce yet"}, v.Current.LastProblem)
 
 	r.run(asAgent, "submit", "--passed")
-	v = r.expect("discovery", status.AssignmentAwaitingApproval, 1, 3)
-	assert.Equal(t, status.NextOwner, v.Next.Actor)
+	v = r.expect("discovery", progress.AssignmentAwaitingApproval, 1, 3)
+	assert.Equal(t, progress.NextOwner, v.Next.Actor)
 	assert.Contains(t, v.Next.Message, "gf approve")
 
 	// Owner-only commands refuse an agent.
@@ -137,43 +137,43 @@ func TestFixBugPath_EndToEnd(t *testing.T) {
 		res = r.gfFails(asAgent, args...)
 		assert.Contains(t, res.stderr, "Only the owner can")
 	}
-	r.expect("discovery", status.AssignmentAwaitingApproval, 1, 3)
+	r.expect("discovery", progress.AssignmentAwaitingApproval, 1, 3)
 
 	r.gf("reject", "add the browser console output")
-	v = r.expect("discovery", status.AssignmentOpen, 2, 3)
-	assert.Equal(t, &status.ProblemView{Kind: status.ProblemRejection, Attempt: 2, Text: "add the browser console output"}, v.Current.LastProblem)
+	v = r.expect("discovery", progress.AssignmentOpen, 2, 3)
+	assert.Equal(t, &progress.ProblemView{Kind: progress.ProblemRejection, Attempt: 2, Text: "add the browser console output"}, v.Current.LastProblem)
 
 	r.gf("submit", "--passed")
 	r.gf("approve")
 
 	// Specify: straight approval on the second human gate.
-	v = r.expect("specify", status.AssignmentOpen, 0, 3)
+	v = r.expect("specify", progress.AssignmentOpen, 0, 3)
 	assert.Equal(t, []string{"done", "current", "pending", "pending", "pending"}, stageStatuses(v))
 	r.gf("submit", "--passed")
-	r.expect("specify", status.AssignmentAwaitingApproval, 0, 3)
+	r.expect("specify", progress.AssignmentAwaitingApproval, 0, 3)
 	r.gf("approve")
 
 	// Implement: three failures escalate; the owner extends the budget.
-	r.expect("implement", status.AssignmentOpen, 0, 3)
+	r.expect("implement", progress.AssignmentOpen, 0, 3)
 	r.gf("submit", "--failed", "unit tests fail")
 	r.gf("submit", "--failed", "unit tests still fail")
 	out2 := r.gf("submit", "--failed", "flaky test")
 	assert.Contains(t, out2, "Escalated")
-	v = r.expect("implement", status.AssignmentEscalated, 3, 3)
-	assert.Equal(t, status.NextOwner, v.Next.Actor)
+	v = r.expect("implement", progress.AssignmentEscalated, 3, 3)
+	assert.Equal(t, progress.NextOwner, v.Next.Actor)
 	assert.Contains(t, v.Next.Message, "gf extend")
 
 	res = r.gfFails(nil, "submit", "--passed")
 	assert.Contains(t, res.stderr, "nothing to submit")
 
 	r.gf("extend", "2")
-	r.expect("implement", status.AssignmentOpen, 3, 5)
+	r.expect("implement", progress.AssignmentOpen, 3, 5)
 	r.gf("submit", "--passed") // auto gate: accepted, work advances
 
 	// Review and integration testing pass on auto gates.
-	r.expect("review", status.AssignmentOpen, 0, 3)
+	r.expect("review", progress.AssignmentOpen, 0, 3)
 	r.gf("submit", "--passed")
-	r.expect("integration-testing", status.AssignmentOpen, 0, 3)
+	r.expect("integration-testing", progress.AssignmentOpen, 0, 3)
 	r.gf("submit", "--passed")
 
 	v = r.status()
@@ -189,14 +189,14 @@ func TestFixBugPath_EndToEnd(t *testing.T) {
 
 	// A new work can start once the previous one is completed.
 	r.gf("start", "--type", "fix-bug", "next bug")
-	r.expect("discovery", status.AssignmentOpen, 0, 3)
+	r.expect("discovery", progress.AssignmentOpen, 0, 3)
 }
 
 func TestAbandon_CancelsTheOpenAssignment(t *testing.T) {
 	r := newRepo(t)
 	r.gf("start", "--type", "fix-bug", "crash on save")
 	r.gf("submit", "--passed")
-	r.expect("discovery", status.AssignmentAwaitingApproval, 0, 3)
+	r.expect("discovery", progress.AssignmentAwaitingApproval, 0, 3)
 
 	out := r.gf("abandon", "not reproducible")
 
@@ -243,7 +243,7 @@ func TestOwnerWithoutGitIdentity_IsToldHowToFixIt(t *testing.T) {
 	assert.Contains(t, res.stderr, "git config user.name")
 }
 
-func stageStatuses(v status.View) []string {
+func stageStatuses(v progress.View) []string {
 	var s []string
 	for _, st := range v.Work.Stages {
 		s = append(s, st.Status)
