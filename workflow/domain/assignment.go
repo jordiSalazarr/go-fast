@@ -71,13 +71,15 @@ func OpenAssignment(work WorkID, stage Stage, visit Visit, gate Gate, budget Att
 	}}, nil
 }
 
-// SubmitForAcceptance interprets the outcome of the stage's exit check. A
+// SubmitForAcceptance interprets the stage's exit check: the agent's claim,
+// and the files the stage visit changed checked against its write scope. A
 // failed check uses an attempt; a passing one is accepted on an auto gate and
 // waits for the owner on a human gate.
-func (a Open) SubmitForAcceptance(outcome ExitCheckOutcome) ([]AssignmentEvent, error) {
-	if err := requirePresent(required{"exit check outcome", outcome}); err != nil {
+func (a Open) SubmitForAcceptance(claim AgentClaim, changed ChangedFiles) ([]AssignmentEvent, error) {
+	if err := requirePresent(required{"agent claim", claim}); err != nil {
 		return nil, fmt.Errorf("submit assignment %s for acceptance: %w", a.id, err)
 	}
+	outcome := NewExitCheckOutcome(claim, CheckWriteScope(a.stage, a.work, changed))
 	attempt := a.attemptsUsed.currentAttempt()
 	switch {
 	case !outcome.Passed():

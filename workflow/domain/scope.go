@@ -3,6 +3,7 @@ package domain
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -97,6 +98,35 @@ func (s WriteScope) Allows(path RepoPath, work WorkID) bool {
 	}
 	return false
 }
+
+// Violations returns the changed paths the scope does not allow, in path order.
+func (s WriteScope) Violations(changed ChangedFiles, work WorkID) []RepoPath {
+	var violations []RepoPath
+	for _, p := range changed.paths {
+		if !s.Allows(p, work) {
+			violations = append(violations, p)
+		}
+	}
+	return violations
+}
+
+// ChangedFiles is the set of files a stage visit changed, however they were
+// written. The zero value is the empty set.
+type ChangedFiles struct{ paths []RepoPath } // sorted, unique
+
+func NewChangedFiles(paths ...RepoPath) ChangedFiles {
+	var c ChangedFiles
+	for _, p := range paths {
+		if !p.isZero() {
+			c.paths = append(c.paths, p)
+		}
+	}
+	slices.SortFunc(c.paths, func(a, b RepoPath) int { return strings.Compare(a.value, b.value) })
+	c.paths = slices.Compact(c.paths)
+	return c
+}
+
+func (c ChangedFiles) Paths() []RepoPath { return slices.Clone(c.paths) }
 
 func isTestFile(p RepoPath) bool {
 	segments := strings.Split(p.value, "/")

@@ -152,6 +152,12 @@ func ensureLines(path string, lines []string) error {
 	return nil
 }
 
+// CommittedFiles are the files gf writes that git tracks, relative to the
+// repository root, slash-separated.
+func CommittedFiles() []string {
+	return []string{dirName + "/" + eventsFile, dirName + "/.gitignore", dirName + "/.gitattributes"}
+}
+
 // Dir is gofast's directory under root.
 func Dir(root string) string { return filepath.Join(root, dirName) }
 

@@ -51,7 +51,7 @@ func Reject(log Log, actor eventlog.Actor, branch domain.Branch, owner domain.Ow
 	return waiting, events, nil
 }
 
-func NewCommand(openStore func() (*eventlog.Store, error), resolveCaller func() (caller.Caller, error), currentBranch func() (domain.Branch, error)) *cobra.Command {
+func NewCommand(openStore func() (*eventlog.Store, error), automate automations.Runner, resolveCaller func() (caller.Caller, error), currentBranch func() (domain.Branch, error)) *cobra.Command {
 	return &cobra.Command{
 		Use:   `reject "<feedback>"`,
 		Short: "Send the submission back with feedback; uses one attempt (owner only)",
@@ -80,7 +80,7 @@ func NewCommand(openStore func() (*eventlog.Store, error), resolveCaller func() 
 			var waiting domain.AwaitingApproval
 			var events []domain.AssignmentEvent
 			err = store.Exclusive(func(s *eventlog.Session) error {
-				return automations.AroundCommand(s, func() error {
+				return automate.AroundCommand(s, func() error {
 					waiting, events, err = Reject(s, c.Actor(), branch, owner, feedback)
 					return err
 				})

@@ -257,34 +257,6 @@ func (o Owner) String() string {
 	return o.name + " <" + o.email + ">"
 }
 
-// ExitCheckOutcome is the result of a stage's exit check: passed, or failed
-// with a reason. The domain never runs checks; it interprets outcomes.
-type ExitCheckOutcome struct {
-	kind   outcomeKind
-	reason Reason
-}
-
-type outcomeKind int
-
-const (
-	outcomeUnset outcomeKind = iota
-	outcomePassed
-	outcomeFailed
-)
-
-func ExitCheckPassed() ExitCheckOutcome { return ExitCheckOutcome{kind: outcomePassed} }
-
-func ExitCheckFailed(reason Reason) ExitCheckOutcome {
-	return ExitCheckOutcome{kind: outcomeFailed, reason: reason}
-}
-
-func (o ExitCheckOutcome) Passed() bool   { return o.kind == outcomePassed }
-func (o ExitCheckOutcome) Reason() Reason { return o.reason }
-
-func (o ExitCheckOutcome) isZero() bool {
-	return o.kind == outcomeUnset || (o.kind == outcomeFailed && o.reason.isZero())
-}
-
 func nonEmpty(s string) (string, bool) {
 	t := strings.TrimSpace(s)
 	return t, t != ""

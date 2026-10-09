@@ -15,7 +15,7 @@ You run the **specify** stage of the work gofast is driving.
 
 2. **Start.** Run `gf status --json`. Read the work description (`work.description`), the current stage (`current.stage`), and `current.lastProblem`: the previous failure reason or the owner's rejection feedback, which this attempt must address. Read the artifacts of earlier stages in `work.artifactDir`.
 
-3. **Work.** Do the stage. Stay inside its write scope: Only tests (`*_test.go`, files under `testdata/`) and the artifact. Writes outside it are denied.
+3. **Work.** Do the stage. Stay inside its write scope: Only tests (`*_test.go`, files under `testdata/`) and the artifact. Writes outside it are denied, and `gf submit` checks every file changed since the stage began, however it was written (Bash included): a change outside the scope fails the attempt until you undo it.
 
 4. **Artifact.** Write `current.artifact`: what you did, what you found, and what the next stage or the owner needs. On a later attempt, overwrite it and say what changed since the last attempt.
 

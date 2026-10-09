@@ -43,13 +43,17 @@ func TestRun_OpensOnceAndIsIdempotent(t *testing.T) {
 	require.NoError(t, store.Exclusive(func(s *eventlog.Session) error {
 		require.NoError(t, s.Append(eventlog.WorkStream(workID), 0, eventlog.AgentActor("agent"), started, entered))
 
-		first, err := Run(s)
+		var opened []domain.AssignmentID
+		record := func(id domain.AssignmentID) { opened = append(opened, id) }
+		first, err := Run(s, record)
 		require.NoError(t, err)
-		second, err := Run(s)
+		second, err := Run(s, record)
 		require.NoError(t, err)
 
 		assert.Equal(t, 1, first)
 		assert.Equal(t, 0, second)
+		assert.Equal(t, []domain.AssignmentID{domain.AssignmentIDFor(workID, domain.StageDiscovery, domain.FirstVisit())}, opened,
+			"told once, after appending")
 		records, _ := s.ReadAll()
 		require.Len(t, records, 3)
 		assert.Equal(t, domain.AssignmentOpened{
@@ -80,10 +84,10 @@ func TestRun_ReadsTheLogOnceAndAgainOnlyAfterAppending(t *testing.T) {
 		require.NoError(t, s.Append(eventlog.WorkStream(workID), 0, eventlog.AgentActor("agent"), started, entered))
 
 		first := &countingLog{Log: s}
-		_, err := Run(first)
+		_, err := Run(first, nil)
 		require.NoError(t, err)
 		again := &countingLog{Log: s}
-		_, err = Run(again)
+		_, err = Run(again, nil)
 		require.NoError(t, err)
 
 		assert.Equal(t, 2, first.reads, "one read, one after the append")

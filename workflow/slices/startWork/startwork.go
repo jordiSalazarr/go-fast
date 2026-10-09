@@ -40,7 +40,7 @@ func StartWork(log Log, actor eventlog.Actor, branch domain.Branch, id domain.Wo
 	return events, nil
 }
 
-func NewCommand(openStore func() (*eventlog.Store, error), resolveCaller func() (caller.Caller, error), currentBranch func() (domain.Branch, error)) *cobra.Command {
+func NewCommand(openStore func() (*eventlog.Store, error), automate automations.Runner, resolveCaller func() (caller.Caller, error), currentBranch func() (domain.Branch, error)) *cobra.Command {
 	var typeName string
 	cmd := &cobra.Command{
 		Use:   `start --type fix-bug "<description>"`,
@@ -73,7 +73,7 @@ func NewCommand(openStore func() (*eventlog.Store, error), resolveCaller func() 
 			}
 			var events []domain.WorkEvent
 			err = store.Exclusive(func(s *eventlog.Session) error {
-				return automations.AroundCommand(s, func() error {
+				return automate.AroundCommand(s, func() error {
 					events, err = StartWork(s, c.Actor(), branch, id, workType, description)
 					return err
 				})

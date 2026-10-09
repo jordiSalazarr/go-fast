@@ -23,19 +23,28 @@ type Log interface {
 	Append(stream eventlog.Stream, expectedVersion int, actor eventlog.Actor, events ...domain.Event) error
 }
 
+// Runner runs the automations with what they do outside the event log.
+type Runner struct {
+	// AssignmentOpened is told about every assignment the automations open,
+	// after it is appended: gf records the working-tree baseline there.
+	AssignmentOpened func(domain.AssignmentID)
+}
+
 type automation func(Log) (int, error)
 
-var all = []automation{
-	func(l Log) (int, error) { return openassignmentonstageentered.Run(l) },
-	func(l Log) (int, error) { return advanceworkonacceptance.Run(l) },
-	func(l Log) (int, error) { return cancelassignmentonabandon.Run(l) },
+func (r Runner) all() []automation {
+	return []automation{
+		func(l Log) (int, error) { return openassignmentonstageentered.Run(l, r.AssignmentOpened) },
+		func(l Log) (int, error) { return advanceworkonacceptance.Run(l) },
+		func(l Log) (int, error) { return cancelassignmentonabandon.Run(l) },
+	}
 }
 
 // Run runs every automation until a full pass appends nothing.
-func Run(log Log) error {
+func (r Runner) Run(log Log) error {
 	for pass := 1; pass <= MaxPasses; pass++ {
 		appended := 0
-		for _, run := range all {
+		for _, run := range r.all() {
 			n, err := run(log)
 			if err != nil {
 				return fmt.Errorf("automations pass %d: %w", pass, err)
@@ -51,14 +60,14 @@ func Run(log Log) error {
 
 // AroundCommand runs the automations before a command, to reconcile anything
 // a crash left half-done, and again after it, to carry out its consequences.
-func AroundCommand(log Log, command func() error) error {
-	if err := Run(log); err != nil {
+func (r Runner) AroundCommand(log Log, command func() error) error {
+	if err := r.Run(log); err != nil {
 		return fmt.Errorf("reconcile before command: %w", err)
 	}
 	if err := command(); err != nil {
 		return err
 	}
-	if err := Run(log); err != nil {
+	if err := r.Run(log); err != nil {
 		return fmt.Errorf("automations after command: %w", err)
 	}
 	return nil

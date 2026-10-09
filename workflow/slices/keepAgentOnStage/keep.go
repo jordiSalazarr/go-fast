@@ -54,6 +54,13 @@ func agentStart(in claudehooks.Input, facts assignmentFacts) (agentsessions.Agen
 	return agentsessions.AgentStart{Assignment: facts.assignment, Version: facts.version}, true
 }
 
+// lateBaseline tells the owner that a stage visit had no working-tree
+// baseline (it began before gf recorded them, or on another machine), so its
+// write-scope check starts when this agent starts.
+func lateBaseline(stage domain.Stage) claudehooks.Output {
+	return claudehooks.Tell(fmt.Sprintf("gofast had no record of the working tree when '%s' began, so its write-scope check starts now.", stage))
+}
+
 // subagentStop blocks a stage agent that is finishing without having
 // submitted: its assignment is still open and unchanged since it started.
 func subagentStop(in claudehooks.Input, facts assignmentFacts, start agentsessions.AgentStart, recorded bool) claudehooks.Output {
@@ -119,8 +126,12 @@ func isOpen(state domain.AssignmentState) bool {
 	return false
 }
 
+// EnsureBaseline records a stage visit's working-tree baseline unless it has
+// one, and reports whether it took one now.
+type EnsureBaseline func(root string, id domain.AssignmentID) (taken bool, err error)
+
 // NewCommands returns the `gf hook` subcommands of this slice.
-func NewCommands(dir func() string, getenv func(string) string, branchOf func(root string) (domain.Branch, error)) []*cobra.Command {
+func NewCommands(dir func() string, getenv func(string) string, branchOf func(root string) (domain.Branch, error), ensureBaseline EnsureBaseline) []*cobra.Command {
 	hook := func(use, short string, handle func(claudehooks.Repo, claudehooks.Input) claudehooks.Output) *cobra.Command {
 		return &cobra.Command{
 			Use:   use,
@@ -142,8 +153,19 @@ func NewCommands(dir func() string, getenv func(string) string, branchOf func(ro
 			}),
 		hook("subagent-start", "SubagentStart hook: record what a stage agent starts on",
 			func(repo claudehooks.Repo, in claudehooks.Input) claudehooks.Output {
-				if start, ok := agentStart(in, loadFacts(repo, branchOf)); ok {
-					logIfFailed(repo, "record agent start", agentsessions.Open(repo.Root).RecordAgentStart(in.AgentID, start))
+				facts := loadFacts(repo, branchOf)
+				start, ok := agentStart(in, facts)
+				if !ok {
+					return claudehooks.Nothing()
+				}
+				logIfFailed(repo, "record agent start", agentsessions.Open(repo.Root).RecordAgentStart(in.AgentID, start))
+				if facts.state == nil {
+					return claudehooks.Nothing() // not opened yet: opening it records the baseline
+				}
+				taken, err := ensureBaseline(repo.Root, facts.assignment)
+				logIfFailed(repo, "record a late baseline", err)
+				if taken {
+					return lateBaseline(facts.stage)
 				}
 				return claudehooks.Nothing()
 			}),

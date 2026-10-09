@@ -89,3 +89,36 @@ func TestWriteScopeAllows_ZeroValuesAllowNothing(t *testing.T) {
 	assert.False(t, domain.WriteScopeAnything.Allows(domain.RepoPath{}, workID))
 	assert.False(t, domain.WriteScopeAnything.Allows(repoPath(t, "a.go"), domain.WorkID{}))
 }
+
+func TestWriteScopeViolations_OfEachScope(t *testing.T) {
+	changed := domain.NewChangedFiles(
+		repoPath(t, "login/login.go"),
+		repoPath(t, "login/login_test.go"),
+		repoPath(t, "login/testdata/case.json"),
+		repoPath(t, ".gofast/works/w1/specify-v1.md"),
+		repoPath(t, ".gofast/works/w0/specify-v1.md"),
+		repoPath(t, ".gofast/events.jsonl"),
+	)
+	cases := map[domain.WriteScope][]string{
+		domain.WriteScopeArtifacts:         {".gofast/events.jsonl", ".gofast/works/w0/specify-v1.md", "login/login.go", "login/login_test.go", "login/testdata/case.json"},
+		domain.WriteScopeTestsAndArtifacts: {".gofast/events.jsonl", ".gofast/works/w0/specify-v1.md", "login/login.go"},
+		domain.WriteScopeAnything:          {".gofast/events.jsonl", ".gofast/works/w0/specify-v1.md"},
+	}
+	for scope, want := range cases {
+		var got []string
+		for _, p := range scope.Violations(changed, workID) {
+			got = append(got, p.String())
+		}
+		assert.Equal(t, want, got, scope.String())
+	}
+}
+
+func TestWriteScopeViolations_NothingChanged_NoViolations(t *testing.T) {
+	assert.Empty(t, domain.WriteScopeArtifacts.Violations(domain.ChangedFiles{}, workID))
+}
+
+func TestNewChangedFiles_IsASortedSet(t *testing.T) {
+	changed := domain.NewChangedFiles(repoPath(t, "b.go"), repoPath(t, "a.go"), repoPath(t, "b.go"), domain.RepoPath{})
+
+	assert.Equal(t, []domain.RepoPath{repoPath(t, "a.go"), repoPath(t, "b.go")}, changed.Paths())
+}

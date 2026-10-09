@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/jordiSalazarr/go-fast/workflow/automations"
 	"github.com/jordiSalazarr/go-fast/workflow/caller"
 	"github.com/jordiSalazarr/go-fast/workflow/domain"
 	. "github.com/jordiSalazarr/go-fast/workflow/domain/domaintest"
@@ -43,6 +44,7 @@ func TestGivenAnAgent_WhenRunningAbandon_ThenItIsRefusedBeforeTouchingTheLog(t *
 	opened := false
 	cmd := abandonwork.NewCommand(
 		func() (*eventlog.Store, error) { opened = true; return nil, errors.New("must not open") },
+		automations.Runner{},
 		func() (caller.Caller, error) { return agent, nil },
 		func() (domain.Branch, error) { return Branch, nil },
 	)

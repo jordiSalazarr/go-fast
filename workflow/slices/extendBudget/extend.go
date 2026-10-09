@@ -58,7 +58,7 @@ func ExtendBudget(log Log, actor eventlog.Actor, branch domain.Branch, owner dom
 	return escalated.Stage(), extended, nil
 }
 
-func NewCommand(openStore func() (*eventlog.Store, error), resolveCaller func() (caller.Caller, error), currentBranch func() (domain.Branch, error)) *cobra.Command {
+func NewCommand(openStore func() (*eventlog.Store, error), automate automations.Runner, resolveCaller func() (caller.Caller, error), currentBranch func() (domain.Branch, error)) *cobra.Command {
 	return &cobra.Command{
 		Use:   "extend <attempts>",
 		Short: "Give an escalated stage more attempts (owner only)",
@@ -91,7 +91,7 @@ func NewCommand(openStore func() (*eventlog.Store, error), resolveCaller func() 
 			var stage domain.Stage
 			var extended domain.BudgetExtended
 			err = store.Exclusive(func(s *eventlog.Session) error {
-				return automations.AroundCommand(s, func() error {
+				return automate.AroundCommand(s, func() error {
 					stage, extended, err = ExtendBudget(s, c.Actor(), branch, owner, additional)
 					return err
 				})

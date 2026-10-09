@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/jordiSalazarr/go-fast/workflow/automations"
 	"github.com/jordiSalazarr/go-fast/workflow/caller"
 	"github.com/jordiSalazarr/go-fast/workflow/domain"
 	"github.com/jordiSalazarr/go-fast/workflow/eventlog"
@@ -25,6 +26,7 @@ import (
 	startwork "github.com/jordiSalazarr/go-fast/workflow/slices/startWork"
 	"github.com/jordiSalazarr/go-fast/workflow/slices/status"
 	submitforacceptance "github.com/jordiSalazarr/go-fast/workflow/slices/submitForAcceptance"
+	"github.com/jordiSalazarr/go-fast/workflow/worktree"
 )
 
 func main() {
@@ -74,12 +76,12 @@ func (a *app) rootCommand() *cobra.Command {
 	}
 	root.PersistentFlags().StringVar(&a.dir, "dir", "", "repository root (default: the git repository containing the working directory)")
 	root.AddCommand(
-		startwork.NewCommand(a.openStore, a.resolveCaller, a.currentBranch),
-		submitforacceptance.NewCommand(a.openStore, a.resolveCaller, a.currentBranch),
-		approve.NewCommand(a.openStore, a.resolveCaller, a.currentBranch),
-		reject.NewCommand(a.openStore, a.resolveCaller, a.currentBranch),
-		extendbudget.NewCommand(a.openStore, a.resolveCaller, a.currentBranch),
-		abandonwork.NewCommand(a.openStore, a.resolveCaller, a.currentBranch),
+		startwork.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch),
+		submitforacceptance.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch, a.changedFiles),
+		approve.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch),
+		reject.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch),
+		extendbudget.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch),
+		abandonwork.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch),
 		status.NewCommand(a.openStore, a.currentBranch),
 		a.hookCommand(),
 	)
@@ -98,7 +100,10 @@ func (a *app) hookCommand() *cobra.Command {
 		guardagentactions.NewCommand(dir, a.getenv, gitbranch.Current),
 		briefagentonsessionstart.NewCommand(dir, a.getenv, gitbranch.Current),
 	)
-	hook.AddCommand(keepagentonstage.NewCommands(dir, a.getenv, gitbranch.Current)...)
+	ensureBaseline := func(root string, id domain.AssignmentID) (bool, error) {
+		return worktree.OpenBaselines(root).Ensure(id)
+	}
+	hook.AddCommand(keepagentonstage.NewCommands(dir, a.getenv, gitbranch.Current, ensureBaseline)...)
 	return hook
 }
 
@@ -173,6 +178,25 @@ func (a *app) openStore() (*eventlog.Store, error) {
 	}
 	a.store = store
 	return store, nil
+}
+
+// automations records each opened assignment's working-tree baseline. It
+// runs inside a command, after openStore, so root and logger are set. A
+// baseline that cannot be recorded is logged; submit then takes one late.
+func (a *app) automations() automations.Runner {
+	return automations.Runner{AssignmentOpened: func(id domain.AssignmentID) {
+		if _, err := worktree.OpenBaselines(a.root).Ensure(id); err != nil {
+			a.logger.Error("could not record the baseline of an assignment", "assignment", id.String(), "error", err.Error())
+		}
+	}}
+}
+
+func (a *app) changedFiles(id domain.AssignmentID) (domain.ChangedFiles, bool, error) {
+	root, err := a.repositoryRoot()
+	if err != nil {
+		return domain.ChangedFiles{}, false, err
+	}
+	return worktree.OpenBaselines(root).ChangedSince(id)
 }
 
 func (a *app) resolveCaller() (caller.Caller, error) {

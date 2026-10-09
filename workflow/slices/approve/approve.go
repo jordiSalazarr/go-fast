@@ -51,7 +51,7 @@ func Approve(log Log, actor eventlog.Actor, branch domain.Branch, owner domain.O
 	return waiting.Stage(), nil
 }
 
-func NewCommand(openStore func() (*eventlog.Store, error), resolveCaller func() (caller.Caller, error), currentBranch func() (domain.Branch, error)) *cobra.Command {
+func NewCommand(openStore func() (*eventlog.Store, error), automate automations.Runner, resolveCaller func() (caller.Caller, error), currentBranch func() (domain.Branch, error)) *cobra.Command {
 	return &cobra.Command{
 		Use:   "approve",
 		Short: "Approve the submission waiting for the owner (owner only)",
@@ -75,7 +75,7 @@ func NewCommand(openStore func() (*eventlog.Store, error), resolveCaller func() 
 			}
 			var stage domain.Stage
 			err = store.Exclusive(func(s *eventlog.Session) error {
-				return automations.AroundCommand(s, func() error {
+				return automate.AroundCommand(s, func() error {
 					stage, err = Approve(s, c.Actor(), branch, owner)
 					return err
 				})

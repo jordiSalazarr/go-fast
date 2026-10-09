@@ -54,6 +54,8 @@ func history(parts ...[]domain.AssignmentEvent) []domain.AssignmentEvent {
 
 func events(e ...domain.AssignmentEvent) []domain.AssignmentEvent { return e }
 
+var noChanges = domain.ChangedFiles{}
+
 func TestAssignmentIDFor_IsDeterministic(t *testing.T) {
 	a := domain.AssignmentIDFor(workID, domain.StageReview, visit1)
 	b := domain.AssignmentIDFor(workID, domain.StageReview, visit1)
@@ -83,7 +85,7 @@ func TestOpenAssignment_WithMissingValue_IsRejected(t *testing.T) {
 func TestSubmitForAcceptance_Failed_UsesAnAttempt(t *testing.T) {
 	open := stateIs[domain.Open](t, givenAssignment(t, openedOnAutoGate()...))
 
-	got, err := open.SubmitForAcceptance(domain.ExitCheckFailed(reason))
+	got, err := open.SubmitForAcceptance(domain.ClaimFailed(reason), noChanges)
 
 	thenEvents(t, got, err, failed(autoAssignmentID, 1))
 	after := stateIs[domain.Open](t, thenAssignmentState(t, openedOnAutoGate(), got))
@@ -94,16 +96,16 @@ func TestSubmitForAcceptance_FailedReachingTheBudget_Escalates(t *testing.T) {
 	given := history(openedOnAutoGate(), events(failed(autoAssignmentID, 1), failed(autoAssignmentID, 2)))
 	open := stateIs[domain.Open](t, givenAssignment(t, given...))
 
-	got, err := open.SubmitForAcceptance(domain.ExitCheckFailed(reason))
+	got, err := open.SubmitForAcceptance(domain.ClaimFailed(reason), noChanges)
 
 	thenEvents(t, got, err, failed(autoAssignmentID, 3), escalated(autoAssignmentID, 3, 3))
 	stateIs[domain.Escalated](t, thenAssignmentState(t, given, got))
 }
 
-func TestSubmitForAcceptance_WithoutOutcome_IsRejected(t *testing.T) {
+func TestSubmitForAcceptance_WithoutClaim_IsRejected(t *testing.T) {
 	open := stateIs[domain.Open](t, givenAssignment(t, openedOnAutoGate()...))
 
-	got, err := open.SubmitForAcceptance(domain.ExitCheckOutcome{})
+	got, err := open.SubmitForAcceptance(domain.AgentClaim{}, noChanges)
 
 	thenRejected(t, got, err, domain.ErrMissingValue)
 }
@@ -112,7 +114,7 @@ func TestSubmitForAcceptance_PassedOnAutoGate_IsAccepted(t *testing.T) {
 	given := history(openedOnAutoGate(), events(failed(autoAssignmentID, 1)))
 	open := stateIs[domain.Open](t, givenAssignment(t, given...))
 
-	got, err := open.SubmitForAcceptance(domain.ExitCheckPassed())
+	got, err := open.SubmitForAcceptance(domain.ClaimPassed(), noChanges)
 
 	thenEvents(t, got, err, domain.AssignmentEvent(domain.AssignmentAccepted{
 		AssignmentID: autoAssignmentID, WorkID: workID, Stage: domain.StageImplement, Visit: visit1,
@@ -124,11 +126,60 @@ func TestSubmitForAcceptance_PassedOnHumanGate_AwaitsApproval(t *testing.T) {
 	given := history(openedOnHumanGate(), events(failed(humanAssignmentID, 1)))
 	open := stateIs[domain.Open](t, givenAssignment(t, given...))
 
-	got, err := open.SubmitForAcceptance(domain.ExitCheckPassed())
+	got, err := open.SubmitForAcceptance(domain.ClaimPassed(), noChanges)
 
 	thenEvents(t, got, err, awaitingApproval(2))
 	waiting := stateIs[domain.AwaitingApproval](t, thenAssignmentState(t, given, got))
 	assert.Equal(t, attempt(2), waiting.Attempt())
+}
+
+func TestSubmitForAcceptance_PassedWithChangesOutsideTheWriteScope_FailsTheAttempt(t *testing.T) {
+	open := stateIs[domain.Open](t, givenAssignment(t, openedOnHumanGate()...))
+	changed := domain.NewChangedFiles(
+		repoPath(t, "main.go"), repoPath(t, ".gofast/works/w1/discovery-v1.md"), repoPath(t, "internal/x.go"))
+
+	got, err := open.SubmitForAcceptance(domain.ClaimPassed(), changed)
+
+	thenEvents(t, got, err, domain.AssignmentEvent(domain.AttemptFailed{
+		AssignmentID: humanAssignmentID, Attempt: attempt(1),
+		Reason: reasonOf("Changed files outside the 'discovery' write scope: internal/x.go, main.go."),
+	}))
+	after := stateIs[domain.Open](t, thenAssignmentState(t, openedOnHumanGate(), got))
+	assert.Equal(t, attempts(1), after.AttemptsUsed())
+}
+
+func TestSubmitForAcceptance_PassedWithChangesOutsideTheWriteScope_CanEscalate(t *testing.T) {
+	given := history(openedOnHumanGate(), events(failed(humanAssignmentID, 1), failed(humanAssignmentID, 2)))
+	open := stateIs[domain.Open](t, givenAssignment(t, given...))
+
+	got, err := open.SubmitForAcceptance(domain.ClaimPassed(), domain.NewChangedFiles(repoPath(t, "main.go")))
+
+	thenEvents(t, got, err,
+		domain.AssignmentEvent(domain.AttemptFailed{
+			AssignmentID: humanAssignmentID, Attempt: attempt(3),
+			Reason: reasonOf("Changed files outside the 'discovery' write scope: main.go."),
+		}),
+		escalated(humanAssignmentID, 3, 3))
+	stateIs[domain.Escalated](t, thenAssignmentState(t, given, got))
+}
+
+func TestSubmitForAcceptance_FailedWithChangesOutsideTheWriteScope_GivesBothReasons(t *testing.T) {
+	open := stateIs[domain.Open](t, givenAssignment(t, openedOnHumanGate()...))
+
+	got, err := open.SubmitForAcceptance(domain.ClaimFailed(reasonOf("cannot reproduce")), domain.NewChangedFiles(repoPath(t, "main.go")))
+
+	thenEvents(t, got, err, domain.AssignmentEvent(domain.AttemptFailed{
+		AssignmentID: humanAssignmentID, Attempt: attempt(1),
+		Reason: reasonOf("cannot reproduce. Changed files outside the 'discovery' write scope: main.go."),
+	}))
+}
+
+func TestSubmitForAcceptance_PassedWithChangesInsideTheWriteScope_Passes(t *testing.T) {
+	open := stateIs[domain.Open](t, givenAssignment(t, openedOnHumanGate()...))
+
+	got, err := open.SubmitForAcceptance(domain.ClaimPassed(), domain.NewChangedFiles(repoPath(t, ".gofast/works/w1/discovery-v1.md")))
+
+	thenEvents(t, got, err, awaitingApproval(1))
 }
 
 func TestApprove_AcceptsTheAssignment(t *testing.T) {
@@ -195,7 +246,7 @@ func TestExtendBudget_ReopensWithTheNewBudget(t *testing.T) {
 	// The extension gives exactly the additional attempts.
 	full := append(append(given, got...), failed(autoAssignmentID, 4))
 	open = stateIs[domain.Open](t, givenAssignment(t, full...))
-	got, err = open.SubmitForAcceptance(domain.ExitCheckFailed(reason))
+	got, err = open.SubmitForAcceptance(domain.ClaimFailed(reason), noChanges)
 	thenEvents(t, got, err, failed(autoAssignmentID, 5), escalated(autoAssignmentID, 5, 5))
 }
 

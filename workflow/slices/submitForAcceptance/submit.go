@@ -1,5 +1,6 @@
 // Package submitforacceptance submits the current stage visit with the
-// outcome of its exit check.
+// agent's claim about its exit check. The files the visit changed, however
+// they were written, are checked against the stage's write scope.
 package submitforacceptance
 
 import (
@@ -20,40 +21,57 @@ type Log interface {
 	Append(stream eventlog.Stream, expectedVersion int, actor eventlog.Actor, events ...domain.Event) error
 }
 
+// Changes returns the files a stage visit changed since its baseline. When
+// the visit has no baseline, it takes one now and reports started.
+type Changes func(domain.AssignmentID) (changed domain.ChangedFiles, started bool, err error)
+
+// Submission is what submitting did.
+type Submission struct {
+	Assignment domain.Open
+	Events     []domain.AssignmentEvent
+	// ScopeCheckStarted: the visit had no baseline, so its write-scope check
+	// starts now and this submission was not checked.
+	ScopeCheckStarted bool
+}
+
 // SubmitForAcceptance submits the active work's current assignment.
-func SubmitForAcceptance(log Log, actor eventlog.Actor, branch domain.Branch, outcome domain.ExitCheckOutcome) (domain.Open, []domain.AssignmentEvent, error) {
+func SubmitForAcceptance(log Log, actor eventlog.Actor, branch domain.Branch, claim domain.AgentClaim, changes Changes) (Submission, error) {
 	records, err := log.ReadAll()
 	if err != nil {
-		return domain.Open{}, nil, fmt.Errorf("submit for acceptance: %w", err)
+		return Submission{}, fmt.Errorf("submit for acceptance: %w", err)
 	}
 	history := eventlog.NewHistory(records)
 	fact, err := history.ActiveWorkOn(branch)
 	if err != nil {
-		return domain.Open{}, nil, fmt.Errorf("submit for acceptance: %w", err)
+		return Submission{}, fmt.Errorf("submit for acceptance: %w", err)
 	}
 	work, err := fact.Work()
 	if err != nil {
-		return domain.Open{}, nil, fmt.Errorf("submit for acceptance: %w", err)
+		return Submission{}, fmt.Errorf("submit for acceptance: %w", err)
 	}
 	state, version, err := history.Assignment(work.CurrentAssignment())
 	if err != nil {
-		return domain.Open{}, nil, fmt.Errorf("submit for acceptance: %w", err)
+		return Submission{}, fmt.Errorf("submit for acceptance: %w", err)
 	}
 	open, ok := state.(domain.Open)
 	if !ok {
-		return domain.Open{}, nil, fmt.Errorf("submit for acceptance on %s: assignment is %T: %w", work.CurrentStage(), state, domain.ErrNotAwaitingSubmission)
+		return Submission{}, fmt.Errorf("submit for acceptance on %s: assignment is %T: %w", work.CurrentStage(), state, domain.ErrNotAwaitingSubmission)
 	}
-	events, err := open.SubmitForAcceptance(outcome)
+	changed, started, err := changes(open.ID())
 	if err != nil {
-		return domain.Open{}, nil, err
+		return Submission{}, fmt.Errorf("submit for acceptance: %w", err)
+	}
+	events, err := open.SubmitForAcceptance(claim, changed)
+	if err != nil {
+		return Submission{}, err
 	}
 	if err := log.Append(eventlog.AssignmentStream(open.ID()), version, actor, eventlog.Events(events)...); err != nil {
-		return domain.Open{}, nil, fmt.Errorf("submit for acceptance: %w", err)
+		return Submission{}, fmt.Errorf("submit for acceptance: %w", err)
 	}
-	return open, events, nil
+	return Submission{Assignment: open, Events: events, ScopeCheckStarted: started}, nil
 }
 
-func NewCommand(openStore func() (*eventlog.Store, error), resolveCaller func() (caller.Caller, error), currentBranch func() (domain.Branch, error)) *cobra.Command {
+func NewCommand(openStore func() (*eventlog.Store, error), automate automations.Runner, resolveCaller func() (caller.Caller, error), currentBranch func() (domain.Branch, error), changes Changes) *cobra.Command {
 	var passed bool
 	var failed string
 	cmd := &cobra.Command{
@@ -69,13 +87,13 @@ func NewCommand(openStore func() (*eventlog.Store, error), resolveCaller func() 
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			outcome := domain.ExitCheckPassed()
+			claim := domain.ClaimPassed()
 			if !passed {
 				reason, err := domain.NewReason(failed)
 				if err != nil {
 					return err
 				}
-				outcome = domain.ExitCheckFailed(reason)
+				claim = domain.ClaimFailed(reason)
 			}
 			c, err := resolveCaller()
 			if err != nil {
@@ -89,18 +107,17 @@ func NewCommand(openStore func() (*eventlog.Store, error), resolveCaller func() 
 			if err != nil {
 				return err
 			}
-			var open domain.Open
-			var events []domain.AssignmentEvent
+			var submitted Submission
 			err = store.Exclusive(func(s *eventlog.Session) error {
-				return automations.AroundCommand(s, func() error {
-					open, events, err = SubmitForAcceptance(s, c.Actor(), branch, outcome)
+				return automate.AroundCommand(s, func() error {
+					submitted, err = SubmitForAcceptance(s, c.Actor(), branch, claim, changes)
 					return err
 				})
 			})
 			if err != nil {
 				return err
 			}
-			describe(cmd, open, events)
+			describe(cmd, submitted)
 			return nil
 		},
 	}
@@ -109,10 +126,14 @@ func NewCommand(openStore func() (*eventlog.Store, error), resolveCaller func() 
 	return cmd
 }
 
-func describe(cmd *cobra.Command, open domain.Open, events []domain.AssignmentEvent) {
+func describe(cmd *cobra.Command, submitted Submission) {
 	out := cmd.OutOrStdout()
+	open := submitted.Assignment
 	stage := open.Stage()
-	for _, e := range events {
+	if submitted.ScopeCheckStarted {
+		fmt.Fprintf(out, "Note: no baseline of the working tree was recorded when '%s' began, so its write-scope check starts now.\n", stage)
+	}
+	for _, e := range submitted.Events {
 		switch e := e.(type) {
 		case domain.AttemptFailed:
 			fmt.Fprintf(out, "Attempt %d on '%s' failed (%d of %d attempts used): %s\n",

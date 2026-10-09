@@ -66,9 +66,9 @@ func TestRun_ReconcilesAHalfFinishedCycle(t *testing.T) {
 		))
 		before, _ := s.ReadAll()
 
-		require.NoError(t, automations.Run(s))
+		require.NoError(t, automations.Runner{}.Run(s))
 		after, _ := s.ReadAll()
-		require.NoError(t, automations.Run(s))
+		require.NoError(t, automations.Runner{}.Run(s))
 		again, _ := s.ReadAll()
 
 		// Discovery..implement assignments were never opened in this crafted log,
@@ -105,7 +105,7 @@ func TestAroundCommand_RunsAutomationsBeforeAndAfter(t *testing.T) {
 		require.NoError(t, s.Append(eventlog.WorkStream(workID), 0, agent, eventlog.Events(events)...))
 
 		var seenBeforeCommand []eventlog.Recorded
-		err := automations.AroundCommand(s, func() error {
+		err := automations.Runner{}.AroundCommand(s, func() error {
 			seenBeforeCommand, _ = s.ReadAll()
 			return nil
 		})
@@ -120,7 +120,7 @@ func TestAroundCommand_ReturnsTheCommandError(t *testing.T) {
 	boom := errors.New("boom")
 
 	err := store.Exclusive(func(s *eventlog.Session) error {
-		return automations.AroundCommand(s, func() error { return boom })
+		return automations.Runner{}.AroundCommand(s, func() error { return boom })
 	})
 
 	require.ErrorIs(t, err, boom)

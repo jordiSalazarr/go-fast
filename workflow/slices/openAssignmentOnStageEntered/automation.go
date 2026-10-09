@@ -35,9 +35,14 @@ func assignmentToOpen(entered domain.StageEntered, alreadyOpened bool) (openAssi
 	return openAssignment{work: entered.WorkID, stage: entered.Stage, visit: entered.Visit, gate: entered.Gate, budget: entered.Budget}, true
 }
 
+// Opened is told about each assignment Run opens, after it is appended. It
+// is a side effect outside the log: gf records the stage visit's baseline of
+// the working tree there. It may be nil.
+type Opened func(domain.AssignmentID)
+
 // Run opens every missing assignment and returns how many events it appended.
 // It reads the log once, and again only after appending.
-func Run(log Log) (int, error) {
+func Run(log Log, opened Opened) (int, error) {
 	records, err := log.ReadAll()
 	if err != nil {
 		return 0, fmt.Errorf("%s: %w", Name, err)
@@ -62,6 +67,9 @@ func Run(log Log) (int, error) {
 			return appended, fmt.Errorf("%s: %w", Name, err)
 		}
 		appended += len(events)
+		if opened != nil {
+			opened(domain.AssignmentIDFor(cmd.work, cmd.stage, cmd.visit))
+		}
 		if history, err = reread(log); err != nil {
 			return appended, err
 		}
