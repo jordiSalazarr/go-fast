@@ -38,7 +38,7 @@ func TestAssignmentToOpen_AlreadyOpened_DoesNothing(t *testing.T) {
 
 func TestRun_OpensOnceAndIsIdempotent(t *testing.T) {
 	store := must(eventlog.Open(t.TempDir()))
-	started := domain.WorkStarted{WorkID: workID, WorkType: domain.WorkTypeFixBug, Description: must(domain.NewDescription("bug"))}
+	started := domain.WorkStarted{WorkID: workID, WorkType: domain.WorkTypeFixBug, Description: must(domain.NewDescription("bug")), Branch: must(domain.NewBranch("main"))}
 
 	require.NoError(t, store.Exclusive(func(s *eventlog.Session) error {
 		require.NoError(t, s.Append(eventlog.WorkStream(workID), 0, eventlog.AgentActor("agent"), started, entered))

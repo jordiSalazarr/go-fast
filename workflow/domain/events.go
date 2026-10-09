@@ -22,6 +22,7 @@ type WorkStarted struct {
 	WorkID      WorkID
 	WorkType    WorkType
 	Description Description
+	Branch      Branch
 }
 
 // StageEntered carries the gate and budget so an assignment never needs to

@@ -14,7 +14,7 @@ var agent = eventlog.AgentActor("agent")
 
 func submitting(outcome domain.ExitCheckOutcome) func(*eventlog.Session) error {
 	return func(log *eventlog.Session) error {
-		_, _, err := submitforacceptance.SubmitForAcceptance(log, agent, outcome)
+		_, _, err := submitforacceptance.SubmitForAcceptance(log, agent, Branch, outcome)
 		return err
 	}
 }

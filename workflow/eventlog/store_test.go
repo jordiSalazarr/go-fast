@@ -34,7 +34,7 @@ var (
 
 func allEvents() []domain.Event {
 	return []domain.Event{
-		domain.WorkStarted{WorkID: workID, WorkType: domain.WorkTypeFixBug, Description: must(domain.NewDescription("login broken"))},
+		domain.WorkStarted{WorkID: workID, WorkType: domain.WorkTypeFixBug, Description: must(domain.NewDescription("login broken")), Branch: must(domain.NewBranch("main"))},
 		domain.StageEntered{WorkID: workID, Stage: domain.StageDiscovery, Visit: domain.FirstVisit(), Gate: domain.GateHuman, Budget: budget3},
 		domain.WorkCompleted{WorkID: workID},
 		domain.WorkAbandoned{WorkID: workID, Owner: owner, Reason: reason},
@@ -155,7 +155,7 @@ func TestAppend_WritesEnvelopeAndReadsBack(t *testing.T) {
 	require.Len(t, lines, 2)
 	assert.JSONEq(t, `{"id":"e1","position":1,"stream":"work-w1","version":1,"type":"WorkStarted","schema":1,
 		"occurredAt":"2026-10-09T10:00:00Z","actor":{"kind":"owner","name":"Jordi <jordi@example.com>"},
-		"payload":{"workId":"w1","workType":"fix-bug","description":"login broken"}}`, string(lines[0]))
+		"payload":{"workId":"w1","workType":"fix-bug","description":"login broken","branch":"main"}}`, string(lines[0]))
 }
 
 func TestAppend_WithStaleVersion_Conflicts(t *testing.T) {
@@ -291,4 +291,17 @@ func TestExclusive_ContendingWritersDoNotInterleave(t *testing.T) {
 		assert.Equal(t, records[i].Stream, records[i+1].Stream, "pair at position %d interleaved", i+1)
 		assert.Equal(t, records[i].Version+1, records[i+1].Version)
 	}
+}
+
+func TestRead_WorkStartedWithoutBranch_IsAHardError(t *testing.T) {
+	s, root := openStore(t)
+	line := `{"id":"e1","position":1,"stream":"work-w1","version":1,"type":"WorkStarted","schema":1,` +
+		`"occurredAt":"2026-10-09T10:00:00Z","actor":{"kind":"owner","name":"Jordi"},` +
+		`"payload":{"workId":"w1","workType":"fix-bug","description":"login broken"}}` + "\n"
+	require.NoError(t, os.WriteFile(eventsPath(root), []byte(line), 0o644))
+
+	var malformed *MalformedLogError
+	require.ErrorAs(t, s.Shared(func(*Snapshot) error { return nil }), &malformed)
+	assert.Equal(t, 1, malformed.Line)
+	assert.ErrorIs(t, malformed, domain.ErrInvalidBranch)
 }

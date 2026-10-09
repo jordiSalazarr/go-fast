@@ -58,6 +58,8 @@ func TestValueConstructorsRejectInvalidInput(t *testing.T) {
 		"blank feedback":     {second(domain.NewFeedback("")), domain.ErrEmptyFeedback},
 		"blank reason":       {second(domain.NewReason("\n")), domain.ErrEmptyReason},
 		"owner without name": {second(domain.NewOwner("", "a@b.c")), domain.ErrInvalidOwner},
+		"empty branch":       {second(domain.NewBranch("")), domain.ErrInvalidBranch},
+		"branch with space":  {second(domain.NewBranch("fix bug")), domain.ErrInvalidBranch},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {

@@ -20,7 +20,7 @@ var owner = eventlog.OwnerActor(Owner)
 
 func extendingBy(n int) func(*eventlog.Session) error {
 	return func(log *eventlog.Session) error {
-		_, _, err := extendbudget.ExtendBudget(log, owner, Owner, Budget(n))
+		_, _, err := extendbudget.ExtendBudget(log, owner, Branch, Owner, Budget(n))
 		return err
 	}
 }
@@ -52,6 +52,7 @@ func TestGivenAnAgent_WhenRunningExtend_ThenItIsRefusedBeforeTouchingTheLog(t *t
 	cmd := extendbudget.NewCommand(
 		func() (*eventlog.Store, error) { opened = true; return nil, errors.New("must not open") },
 		func() (caller.Caller, error) { return agent, nil },
+		func() (domain.Branch, error) { return Branch, nil },
 	)
 	cmd.SetArgs([]string{"2"})
 	cmd.SetOut(io.Discard)

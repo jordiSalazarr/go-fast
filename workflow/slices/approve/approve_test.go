@@ -19,7 +19,7 @@ import (
 var owner = eventlog.OwnerActor(Owner)
 
 func approving(log *eventlog.Session) error {
-	_, err := approve.Approve(log, owner, Owner)
+	_, err := approve.Approve(log, owner, Branch, Owner)
 	return err
 }
 
@@ -48,6 +48,7 @@ func TestGivenAnAgent_WhenRunningApprove_ThenItIsRefusedBeforeTouchingTheLog(t *
 	cmd := approve.NewCommand(
 		func() (*eventlog.Store, error) { opened = true; return nil, errors.New("must not open") },
 		func() (caller.Caller, error) { return agent, nil },
+		func() (domain.Branch, error) { return Branch, nil },
 	)
 	cmd.SetArgs(nil)
 	cmd.SetOut(io.Discard)

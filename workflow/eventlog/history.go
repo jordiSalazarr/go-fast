@@ -87,16 +87,15 @@ func streamEvents[E domain.Event](h History, s Stream) ([]E, error) {
 	return events, nil
 }
 
-// ActiveWork rebuilds the repository's active work and returns it with its
-// stream version.
-func (h History) ActiveWork() (domain.InProgressWork, int, error) {
+// ActiveWorkOn rebuilds every work and returns the active work fact of a branch.
+func (h History) ActiveWorkOn(branch domain.Branch) (domain.ActiveWorkFact, error) {
 	works, err := h.Works()
 	if err != nil {
-		return domain.InProgressWork{}, 0, err
+		return domain.ActiveWorkFact{}, err
 	}
-	w, err := domain.ActiveWorkIn(works)
+	fact, err := domain.ActiveWorkOn(branch, works)
 	if err != nil {
-		return domain.InProgressWork{}, 0, fmt.Errorf("load active work: %w", err)
+		return domain.ActiveWorkFact{}, fmt.Errorf("load active work on %s: %w", branch, err)
 	}
-	return w, h.Version(WorkStream(w.ID())), nil
+	return fact, nil
 }

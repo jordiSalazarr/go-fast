@@ -78,6 +78,8 @@ var (
 	feedback    = must(domain.NewFeedback("missing edge case"))
 	budget3     = must(domain.NewAttemptBudget(3))
 	visit1      = domain.FirstVisit()
+	mainBranch  = must(domain.NewBranch("main"))
+	otherBranch = must(domain.NewBranch("fix/double-charge"))
 )
 
 func attempt(n int) domain.Attempt       { return must(domain.NewAttempt(n)) }

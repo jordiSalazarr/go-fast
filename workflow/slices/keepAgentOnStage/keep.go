@@ -116,7 +116,7 @@ func isOpen(state domain.AssignmentState) bool {
 }
 
 // NewCommands returns the `gf hook` subcommands of this slice.
-func NewCommands(dir func() string, getenv func(string) string) []*cobra.Command {
+func NewCommands(dir func() string, getenv func(string) string, branchOf func(root string) (domain.Branch, error)) []*cobra.Command {
 	hook := func(use, short string, handle func(claudehooks.Repo, claudehooks.Input) claudehooks.Output) *cobra.Command {
 		return &cobra.Command{
 			Use:   use,
@@ -138,7 +138,7 @@ func NewCommands(dir func() string, getenv func(string) string) []*cobra.Command
 			}),
 		hook("subagent-start", "SubagentStart hook: record what a stage agent starts on",
 			func(repo claudehooks.Repo, in claudehooks.Input) claudehooks.Output {
-				if start, ok := agentStart(in, loadFacts(repo)); ok {
+				if start, ok := agentStart(in, loadFacts(repo, branchOf)); ok {
 					logIfFailed(repo, "record agent start", agentsessions.Open(repo.Root).RecordAgentStart(in.AgentID, start))
 				}
 				return claudehooks.Nothing()
@@ -151,7 +151,7 @@ func NewCommands(dir func() string, getenv func(string) string) []*cobra.Command
 				markers := agentsessions.Open(repo.Root)
 				start, recorded, err := markers.AgentStart(in.AgentID)
 				logIfFailed(repo, "read agent start", err)
-				out := subagentStop(in, loadFacts(repo), start, recorded)
+				out := subagentStop(in, loadFacts(repo, branchOf), start, recorded)
 				if out.Decision != "block" {
 					logIfFailed(repo, "forget agent", markers.ForgetAgent(in.AgentID))
 				}
@@ -162,7 +162,7 @@ func NewCommands(dir func() string, getenv func(string) string) []*cobra.Command
 				markers := agentsessions.Open(repo.Root)
 				driving, err := markers.IsDriving(in.SessionID)
 				logIfFailed(repo, "read driving marker", err)
-				out, clear := sessionStop(in, loadFacts(repo), driving)
+				out, clear := sessionStop(in, loadFacts(repo, branchOf), driving)
 				if clear {
 					logIfFailed(repo, "clear driving marker", markers.ClearDriving(in.SessionID))
 				}
@@ -177,15 +177,24 @@ func logIfFailed(repo claudehooks.Repo, what string, err error) {
 	}
 }
 
-func loadFacts(repo claudehooks.Repo) assignmentFacts {
+func loadFacts(repo claudehooks.Repo, branchOf func(root string) (domain.Branch, error)) assignmentFacts {
+	branch, err := branchOf(repo.Root)
+	if err != nil {
+		repo.Logger.Error("could not tell the current branch", "error", err.Error())
+		return assignmentFacts{}
+	}
 	var facts assignmentFacts
-	err := repo.Store.Shared(func(s *eventlog.Snapshot) error {
+	err = repo.Store.Shared(func(s *eventlog.Snapshot) error {
 		records, err := s.ReadAll()
 		if err != nil {
 			return err
 		}
 		history := eventlog.NewHistory(records)
-		work, _, err := history.ActiveWork()
+		fact, err := history.ActiveWorkOn(branch)
+		if err != nil {
+			return err
+		}
+		work, err := fact.Work()
 		if errors.Is(err, domain.ErrNoActiveWork) {
 			facts = assignmentFacts{readable: true}
 			return nil

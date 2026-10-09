@@ -21,13 +21,17 @@ type Log interface {
 }
 
 // SubmitForAcceptance submits the active work's current assignment.
-func SubmitForAcceptance(log Log, actor eventlog.Actor, outcome domain.ExitCheckOutcome) (domain.Open, []domain.AssignmentEvent, error) {
+func SubmitForAcceptance(log Log, actor eventlog.Actor, branch domain.Branch, outcome domain.ExitCheckOutcome) (domain.Open, []domain.AssignmentEvent, error) {
 	records, err := log.ReadAll()
 	if err != nil {
 		return domain.Open{}, nil, fmt.Errorf("submit for acceptance: %w", err)
 	}
 	history := eventlog.NewHistory(records)
-	work, _, err := history.ActiveWork()
+	fact, err := history.ActiveWorkOn(branch)
+	if err != nil {
+		return domain.Open{}, nil, fmt.Errorf("submit for acceptance: %w", err)
+	}
+	work, err := fact.Work()
 	if err != nil {
 		return domain.Open{}, nil, fmt.Errorf("submit for acceptance: %w", err)
 	}
@@ -49,7 +53,7 @@ func SubmitForAcceptance(log Log, actor eventlog.Actor, outcome domain.ExitCheck
 	return open, events, nil
 }
 
-func NewCommand(openStore func() (*eventlog.Store, error), resolveCaller func() (caller.Caller, error)) *cobra.Command {
+func NewCommand(openStore func() (*eventlog.Store, error), resolveCaller func() (caller.Caller, error), currentBranch func() (domain.Branch, error)) *cobra.Command {
 	var passed bool
 	var failed string
 	cmd := &cobra.Command{
@@ -77,6 +81,10 @@ func NewCommand(openStore func() (*eventlog.Store, error), resolveCaller func() 
 			if err != nil {
 				return err
 			}
+			branch, err := currentBranch()
+			if err != nil {
+				return err
+			}
 			store, err := openStore()
 			if err != nil {
 				return err
@@ -85,7 +93,7 @@ func NewCommand(openStore func() (*eventlog.Store, error), resolveCaller func() 
 			var events []domain.AssignmentEvent
 			err = store.Exclusive(func(s *eventlog.Session) error {
 				return automations.AroundCommand(s, func() error {
-					open, events, err = SubmitForAcceptance(s, c.Actor(), outcome)
+					open, events, err = SubmitForAcceptance(s, c.Actor(), branch, outcome)
 					return err
 				})
 			})

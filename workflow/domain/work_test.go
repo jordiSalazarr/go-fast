@@ -11,7 +11,7 @@ import (
 
 func started() []domain.WorkEvent {
 	return []domain.WorkEvent{
-		domain.WorkStarted{WorkID: workID, WorkType: domain.WorkTypeFixBug, Description: description},
+		domain.WorkStarted{WorkID: workID, WorkType: domain.WorkTypeFixBug, Description: description, Branch: mainBranch},
 		domain.StageEntered{WorkID: workID, Stage: domain.StageDiscovery, Visit: visit1, Gate: domain.GateHuman, Budget: budget3},
 	}
 }
@@ -38,32 +38,68 @@ func asInProgress(t *testing.T, state domain.WorkState) domain.InProgressWork {
 	return stateIs[domain.InProgressWork](t, state)
 }
 
+// activeOn is the active work fact of a branch, given these works' histories.
+func activeOn(t *testing.T, branch domain.Branch, histories ...[]domain.WorkEvent) domain.ActiveWorkFact {
+	t.Helper()
+	var works []domain.WorkState
+	for _, h := range histories {
+		works = append(works, givenWork(t, h...))
+	}
+	fact, err := domain.ActiveWorkOn(branch, works)
+	require.NoError(t, err)
+	return fact
+}
+
+// startedOn is the history of another work started on a branch.
+func startedOn(id domain.WorkID, branch domain.Branch, desc domain.Description) []domain.WorkEvent {
+	return []domain.WorkEvent{
+		domain.WorkStarted{WorkID: id, WorkType: domain.WorkTypeFixBug, Description: desc, Branch: branch},
+		domain.StageEntered{WorkID: id, Stage: domain.StageDiscovery, Visit: visit1, Gate: domain.GateHuman, Budget: budget3},
+	}
+}
+
 func TestStartWork_WithNoActiveWork_StartsOnFirstStage(t *testing.T) {
-	events, err := domain.StartWork(workID, domain.WorkTypeFixBug, description, domain.NoActiveWork())
+	events, err := domain.StartWork(workID, domain.WorkTypeFixBug, description, mainBranch, activeOn(t, mainBranch))
 
 	thenEvents(t, events, err, started()...)
 	w := asInProgress(t, thenWorkState(t, nil, events))
 	assert.Equal(t, domain.StageDiscovery, w.CurrentStage())
 	assert.Equal(t, visit1, w.CurrentVisit())
+	assert.Equal(t, mainBranch, w.Branch())
 }
 
-func TestStartWork_WhenWorkIsActive_IsRejectedNamingTheActiveWork(t *testing.T) {
+func TestStartWork_WhenWorkIsActiveOnTheSameBranch_IsRejectedNamingTheActiveWork(t *testing.T) {
 	activeDescription := must(domain.NewDescription("crash on save"))
-	active := domain.ActiveWork(otherWorkID, domain.WorkTypeFixBug, activeDescription)
+	active := activeOn(t, mainBranch, startedOn(otherWorkID, mainBranch, activeDescription))
 
-	events, err := domain.StartWork(workID, domain.WorkTypeFixBug, description, active)
+	events, err := domain.StartWork(workID, domain.WorkTypeFixBug, description, mainBranch, active)
 
 	thenRejected(t, events, err, domain.ErrWorkAlreadyActive)
 	var activeErr *domain.WorkAlreadyActiveError
 	require.ErrorAs(t, err, &activeErr)
 	assert.Equal(t, otherWorkID, activeErr.ID)
 	assert.Equal(t, activeDescription, activeErr.Description)
+	assert.Equal(t, mainBranch, activeErr.Branch)
 	assert.Contains(t, err.Error(), "crash on save")
 	assert.Contains(t, err.Error(), "w0")
 }
 
+func TestStartWork_WhenWorkIsActiveOnAnotherBranch_IsAllowed(t *testing.T) {
+	active := activeOn(t, mainBranch, startedOn(otherWorkID, otherBranch, must(domain.NewDescription("crash on save"))))
+
+	events, err := domain.StartWork(workID, domain.WorkTypeFixBug, description, mainBranch, active)
+
+	thenEvents(t, events, err, started()...)
+}
+
+func TestStartWork_WithTheFactOfAnotherBranch_IsRejected(t *testing.T) {
+	events, err := domain.StartWork(workID, domain.WorkTypeFixBug, description, mainBranch, activeOn(t, otherBranch))
+
+	thenRejected(t, events, err, domain.ErrMissingValue)
+}
+
 func TestStartWork_WithoutAnActiveWorkFact_IsRejected(t *testing.T) {
-	events, err := domain.StartWork(workID, domain.WorkTypeFixBug, description, domain.ActiveWorkFact{})
+	events, err := domain.StartWork(workID, domain.WorkTypeFixBug, description, mainBranch, domain.ActiveWorkFact{})
 
 	thenRejected(t, events, err, domain.ErrMissingValue)
 }
@@ -152,9 +188,10 @@ func TestCompletedAndAbandonedWork_AcceptNoFurtherCommands(t *testing.T) {
 
 func TestRebuildWork_RejectsInconsistentHistory(t *testing.T) {
 	cases := map[string][]domain.WorkEvent{
-		"empty":                 nil,
-		"no WorkStarted first":  {domain.WorkCompleted{WorkID: workID}},
-		"started without stage": started()[:1],
+		"empty":                  nil,
+		"no WorkStarted first":   {domain.WorkCompleted{WorkID: workID}},
+		"started without branch": append([]domain.WorkEvent{domain.WorkStarted{WorkID: workID, WorkType: domain.WorkTypeFixBug, Description: description}}, started()[1]),
+		"started without stage":  started()[:1],
 		"stage skipped": append(started()[:1], domain.StageEntered{
 			WorkID: workID, Stage: domain.StageImplement, Visit: visit1, Gate: domain.GateAuto, Budget: budget3,
 		}),
@@ -170,23 +207,43 @@ func TestRebuildWork_RejectsInconsistentHistory(t *testing.T) {
 	}
 }
 
-func TestActiveWorkAmong(t *testing.T) {
-	inProgress := givenWork(t, started()...)
-	done := givenWork(t, completed()...)
+func TestActiveWorkOn(t *testing.T) {
+	done := completed()
+	inProgress := started()
+	elsewhere := startedOn(otherWorkID, otherBranch, must(domain.NewDescription("crash on save")))
 
-	assert.Equal(t, domain.NoActiveWork(), domain.ActiveWorkAmong(nil))
-	assert.Equal(t, domain.NoActiveWork(), domain.ActiveWorkAmong([]domain.WorkState{done}))
-	assert.Equal(t,
-		domain.ActiveWork(workID, domain.WorkTypeFixBug, description),
-		domain.ActiveWorkAmong([]domain.WorkState{done, inProgress}))
-}
-
-func TestActiveWorkIn(t *testing.T) {
-	_, err := domain.ActiveWorkIn([]domain.WorkState{givenWork(t, completed()...)})
+	_, err := activeOn(t, mainBranch).Work()
 	require.ErrorIs(t, err, domain.ErrNoActiveWork)
+	_, err = activeOn(t, mainBranch, done, elsewhere).Work()
+	require.ErrorIs(t, err, domain.ErrNoActiveWork, "completed work and work on other branches are not active here")
 
-	w, err := domain.ActiveWorkIn([]domain.WorkState{givenWork(t, started()...)})
+	w, err := activeOn(t, mainBranch, done, elsewhere, inProgress).Work()
 	require.NoError(t, err)
 	assert.Equal(t, workID, w.ID())
 	assert.Equal(t, domain.AssignmentIDFor(workID, domain.StageDiscovery, visit1), w.CurrentAssignment())
+
+	w, err = activeOn(t, otherBranch, inProgress, elsewhere).Work()
+	require.NoError(t, err)
+	assert.Equal(t, otherWorkID, w.ID())
+}
+
+func TestActiveWorkOn_TwoWorksInProgressOnOneBranch_IsInconsistent(t *testing.T) {
+	works := []domain.WorkState{
+		givenWork(t, started()...),
+		givenWork(t, startedOn(otherWorkID, mainBranch, must(domain.NewDescription("crash on save")))...),
+	}
+
+	_, err := domain.ActiveWorkOn(mainBranch, works)
+
+	require.ErrorIs(t, err, domain.ErrInconsistentHistory)
+	var conflict *domain.ConflictingActiveWorkError
+	require.ErrorAs(t, err, &conflict)
+	assert.Equal(t, []domain.WorkID{workID, otherWorkID}, conflict.Works)
+	assert.Contains(t, err.Error(), "w1, w0")
+}
+
+func TestActiveWorkOn_WithoutABranch_IsRejected(t *testing.T) {
+	_, err := domain.ActiveWorkOn(domain.Branch{}, nil)
+
+	require.ErrorIs(t, err, domain.ErrMissingValue)
 }

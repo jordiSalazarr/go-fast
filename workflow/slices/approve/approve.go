@@ -19,13 +19,17 @@ type Log interface {
 }
 
 // Approve accepts the active work's current assignment.
-func Approve(log Log, actor eventlog.Actor, owner domain.Owner) (domain.Stage, error) {
+func Approve(log Log, actor eventlog.Actor, branch domain.Branch, owner domain.Owner) (domain.Stage, error) {
 	records, err := log.ReadAll()
 	if err != nil {
 		return domain.Stage{}, fmt.Errorf("approve: %w", err)
 	}
 	history := eventlog.NewHistory(records)
-	work, _, err := history.ActiveWork()
+	fact, err := history.ActiveWorkOn(branch)
+	if err != nil {
+		return domain.Stage{}, fmt.Errorf("approve: %w", err)
+	}
+	work, err := fact.Work()
 	if err != nil {
 		return domain.Stage{}, fmt.Errorf("approve: %w", err)
 	}
@@ -47,7 +51,7 @@ func Approve(log Log, actor eventlog.Actor, owner domain.Owner) (domain.Stage, e
 	return waiting.Stage(), nil
 }
 
-func NewCommand(openStore func() (*eventlog.Store, error), resolveCaller func() (caller.Caller, error)) *cobra.Command {
+func NewCommand(openStore func() (*eventlog.Store, error), resolveCaller func() (caller.Caller, error), currentBranch func() (domain.Branch, error)) *cobra.Command {
 	return &cobra.Command{
 		Use:   "approve",
 		Short: "Approve the submission waiting for the owner (owner only)",
@@ -61,6 +65,10 @@ func NewCommand(openStore func() (*eventlog.Store, error), resolveCaller func() 
 			if err != nil {
 				return err
 			}
+			branch, err := currentBranch()
+			if err != nil {
+				return err
+			}
 			store, err := openStore()
 			if err != nil {
 				return err
@@ -68,7 +76,7 @@ func NewCommand(openStore func() (*eventlog.Store, error), resolveCaller func() 
 			var stage domain.Stage
 			err = store.Exclusive(func(s *eventlog.Session) error {
 				return automations.AroundCommand(s, func() error {
-					stage, err = Approve(s, c.Actor(), owner)
+					stage, err = Approve(s, c.Actor(), branch, owner)
 					return err
 				})
 			})

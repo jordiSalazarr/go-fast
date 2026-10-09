@@ -12,7 +12,9 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/jordiSalazarr/go-fast/workflow/caller"
+	"github.com/jordiSalazarr/go-fast/workflow/domain"
 	"github.com/jordiSalazarr/go-fast/workflow/eventlog"
+	"github.com/jordiSalazarr/go-fast/workflow/gitbranch"
 	abandonwork "github.com/jordiSalazarr/go-fast/workflow/slices/abandonWork"
 	"github.com/jordiSalazarr/go-fast/workflow/slices/approve"
 	briefagentonsessionstart "github.com/jordiSalazarr/go-fast/workflow/slices/briefAgentOnSessionStart"
@@ -71,13 +73,13 @@ func (a *app) rootCommand() *cobra.Command {
 	}
 	root.PersistentFlags().StringVar(&a.dir, "dir", "", "repository root (default: the git repository containing the working directory)")
 	root.AddCommand(
-		startwork.NewCommand(a.openStore, a.resolveCaller),
-		submitforacceptance.NewCommand(a.openStore, a.resolveCaller),
-		approve.NewCommand(a.openStore, a.resolveCaller),
-		reject.NewCommand(a.openStore, a.resolveCaller),
-		extendbudget.NewCommand(a.openStore, a.resolveCaller),
-		abandonwork.NewCommand(a.openStore, a.resolveCaller),
-		status.NewCommand(a.openStore),
+		startwork.NewCommand(a.openStore, a.resolveCaller, a.currentBranch),
+		submitforacceptance.NewCommand(a.openStore, a.resolveCaller, a.currentBranch),
+		approve.NewCommand(a.openStore, a.resolveCaller, a.currentBranch),
+		reject.NewCommand(a.openStore, a.resolveCaller, a.currentBranch),
+		extendbudget.NewCommand(a.openStore, a.resolveCaller, a.currentBranch),
+		abandonwork.NewCommand(a.openStore, a.resolveCaller, a.currentBranch),
+		status.NewCommand(a.openStore, a.currentBranch),
 		a.hookCommand(),
 	)
 	a.markRun(root)
@@ -92,10 +94,10 @@ func (a *app) hookCommand() *cobra.Command {
 	}
 	dir := func() string { return a.dir }
 	hook.AddCommand(
-		guardagentactions.NewCommand(dir, a.getenv),
-		briefagentonsessionstart.NewCommand(dir, a.getenv),
+		guardagentactions.NewCommand(dir, a.getenv, gitbranch.Current),
+		briefagentonsessionstart.NewCommand(dir, a.getenv, gitbranch.Current),
 	)
-	hook.AddCommand(keepagentonstage.NewCommands(dir, a.getenv)...)
+	hook.AddCommand(keepagentonstage.NewCommands(dir, a.getenv, gitbranch.Current)...)
 	return hook
 }
 
@@ -178,6 +180,14 @@ func (a *app) resolveCaller() (caller.Caller, error) {
 		return caller.Caller{}, err
 	}
 	return caller.Resolve(a.getenv, caller.GitConfig(root))
+}
+
+func (a *app) currentBranch() (domain.Branch, error) {
+	root, err := a.repositoryRoot()
+	if err != nil {
+		return domain.Branch{}, err
+	}
+	return gitbranch.Current(root)
 }
 
 func (a *app) close() {

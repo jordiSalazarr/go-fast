@@ -19,7 +19,7 @@ import (
 var owner = eventlog.OwnerActor(Owner)
 
 func rejecting(log *eventlog.Session) error {
-	_, _, err := reject.Reject(log, owner, Owner, Feedback("needs logs"))
+	_, _, err := reject.Reject(log, owner, Branch, Owner, Feedback("needs logs"))
 	return err
 }
 
@@ -51,6 +51,7 @@ func TestGivenAnAgent_WhenRunningReject_ThenItIsRefusedBeforeTouchingTheLog(t *t
 	cmd := reject.NewCommand(
 		func() (*eventlog.Store, error) { opened = true; return nil, errors.New("must not open") },
 		func() (caller.Caller, error) { return agent, nil },
+		func() (domain.Branch, error) { return Branch, nil },
 	)
 	cmd.SetArgs([]string{"looks wrong"})
 	cmd.SetOut(io.Discard)

@@ -10,6 +10,7 @@ import (
 	"github.com/jordiSalazarr/go-fast/workflow/caller"
 	"github.com/jordiSalazarr/go-fast/workflow/domain"
 	"github.com/jordiSalazarr/go-fast/workflow/eventlog"
+	"github.com/jordiSalazarr/go-fast/workflow/gitbranch"
 )
 
 const seeLog = "Details are in .gofast/gf.log."
@@ -20,16 +21,26 @@ func friendly(err error, cmd *cobra.Command, ran bool) string {
 	var (
 		ownerOnly *caller.OwnerOnlyError
 		active    *domain.WorkAlreadyActiveError
+		conflict  *domain.ConflictingActiveWorkError
 		malformed *eventlog.MalformedLogError
 	)
 	switch {
+	case errors.Is(err, gitbranch.ErrDetachedHead):
+		return "You are not on a branch. Check out a branch before running gf."
 	case errors.As(err, &ownerOnly):
 		return fmt.Sprintf("Only the owner can %s. Ask the owner to run `%s`.", ownerOnly.Action, ownerOnly.Command)
 	case errors.As(err, &active):
-		return fmt.Sprintf("There is already active work: %s %q (%s). Finish it, or have the owner run `gf abandon \"<reason>\"`, before starting another.",
-			active.Type, active.Description, active.ID)
+		return fmt.Sprintf("There is already active work on branch %s: %s %q (%s). Finish it, or have the owner run `gf abandon \"<reason>\"`, before starting another.",
+			active.Branch, active.Type, active.Description, active.ID)
+	case errors.As(err, &conflict):
+		ids := make([]string, len(conflict.Works))
+		for i, id := range conflict.Works {
+			ids[i] = id.String()
+		}
+		return fmt.Sprintf("Branch %s has more than one work in progress (%s), usually after a bad merge. Resolve .gofast/events.jsonl by hand. %s",
+			conflict.Branch, strings.Join(ids, ", "), seeLog)
 	case errors.Is(err, domain.ErrNoActiveWork):
-		return "There is no active work. Start one with `gf start --type fix-bug \"<description>\"`."
+		return "There is no active work on this branch. Start one with `gf start --type fix-bug \"<description>\"`."
 	case errors.Is(err, domain.ErrNotAwaitingSubmission):
 		return "There is nothing to submit right now. Run `gf status` to see what happens next."
 	case errors.Is(err, domain.ErrNotAwaitingApproval):

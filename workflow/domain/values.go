@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // Every value type has a validating constructor. The zero value of each type
@@ -215,6 +216,19 @@ func NewReason(s string) (Reason, error) {
 
 func (r Reason) String() string { return r.text }
 func (r Reason) isZero() bool   { return r.text == "" }
+
+// Branch is the git branch a work belongs to.
+type Branch struct{ name string }
+
+func NewBranch(s string) (Branch, error) {
+	if s == "" || strings.ContainsFunc(s, unicode.IsSpace) {
+		return Branch{}, fmt.Errorf("branch %q: %w", s, ErrInvalidBranch)
+	}
+	return Branch{name: s}, nil
+}
+
+func (b Branch) String() string { return b.name }
+func (b Branch) isZero() bool   { return b.name == "" }
 
 // Owner is the human who owns the workflow. Only an Owner can approve,
 // reject, extend a budget or abandon work.

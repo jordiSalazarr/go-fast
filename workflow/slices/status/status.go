@@ -24,15 +24,27 @@ type Reader interface {
 // schema number.
 type View struct {
 	Schema  int          `json:"schema"`
-	Work    *WorkView    `json:"work"`    // null when there is no active work
-	Current *CurrentView `json:"current"` // null when there is no active work
+	Work    *WorkView    `json:"work"`    // null when the current branch has no active work
+	Current *CurrentView `json:"current"` // null when the current branch has no active work
 	Next    NextView     `json:"next"`
+	// OtherBranches lists work in progress on other branches; never null.
+	OtherBranches []OtherBranchView `json:"otherBranches"`
+}
+
+// OtherBranchView is work in progress on another branch.
+type OtherBranchView struct {
+	Branch      string `json:"branch"`
+	WorkID      string `json:"workId"`
+	Type        string `json:"type"`
+	Description string `json:"description"`
+	Stage       string `json:"stage"`
 }
 
 type WorkView struct {
 	ID          string      `json:"id"`
 	Type        string      `json:"type"`
 	Description string      `json:"description"`
+	Branch      string      `json:"branch"`
 	ArtifactDir string      `json:"artifactDir"` // relative to the repository root, ends in "/"
 	Stages      []StageView `json:"stages"`
 }
@@ -96,18 +108,27 @@ type NextView struct {
 	Commands []string `json:"commands"`
 }
 
-// Status projects the event log into a View.
-func Status(log Reader) (View, error) {
+// Status projects the event log into a View of the branch's active work.
+func Status(log Reader, branch domain.Branch) (View, error) {
 	records, err := log.ReadAll()
 	if err != nil {
 		return View{}, fmt.Errorf("status: %w", err)
 	}
 	history := eventlog.NewHistory(records)
-	work, _, err := history.ActiveWork()
+	works, err := history.Works()
+	if err != nil {
+		return View{}, fmt.Errorf("status: %w", err)
+	}
+	others := otherBranches(works, branch)
+	fact, err := domain.ActiveWorkOn(branch, works)
+	if err != nil {
+		return View{}, fmt.Errorf("status: %w", err)
+	}
+	work, err := fact.Work()
 	if errors.Is(err, domain.ErrNoActiveWork) {
-		return View{Schema: 1, Next: NextView{
+		return View{Schema: 1, OtherBranches: others, Next: NextView{
 			Actor:    NextAnyone,
-			Message:  "No active work. Start one with `gf start --type fix-bug \"<description>\"`.",
+			Message:  fmt.Sprintf("No active work on branch %s. Start one with `gf start --type fix-bug \"<description>\"`.", branch),
 			Commands: []string{`gf start --type fix-bug "<description>"`},
 		}}, nil
 	}
@@ -115,8 +136,9 @@ func Status(log Reader) (View, error) {
 		return View{}, fmt.Errorf("status: %w", err)
 	}
 
-	view := View{Schema: 1, Work: &WorkView{
+	view := View{Schema: 1, OtherBranches: others, Work: &WorkView{
 		ID: work.ID().String(), Type: work.Type().String(), Description: work.Description().String(),
+		Branch:      work.Branch().String(),
 		ArtifactDir: domain.ArtifactDir(work.ID()).String() + "/",
 	}}
 	lastVisit := map[domain.Stage]domain.Visit{}
@@ -181,6 +203,19 @@ func Status(log Reader) (View, error) {
 	return view, nil
 }
 
+func otherBranches(works []domain.WorkState, branch domain.Branch) []OtherBranchView {
+	others := []OtherBranchView{}
+	for _, w := range works {
+		if p, ok := w.(domain.InProgressWork); ok && p.Branch() != branch {
+			others = append(others, OtherBranchView{
+				Branch: p.Branch().String(), WorkID: p.ID().String(), Type: p.Type().String(),
+				Description: p.Description().String(), Stage: p.CurrentStage().String(),
+			})
+		}
+	}
+	return others
+}
+
 func describeAssignment(state domain.AssignmentState) (string, int, int) {
 	switch s := state.(type) {
 	case domain.Open:
@@ -210,20 +245,24 @@ func lastProblem(records []eventlog.Recorded) *ProblemView {
 	return last
 }
 
-func NewCommand(openStore func() (*eventlog.Store, error)) *cobra.Command {
+func NewCommand(openStore func() (*eventlog.Store, error), currentBranch func() (domain.Branch, error)) *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
 		Use:   "status [--json]",
 		Short: "Show the active work, its path and what happens next",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			branch, err := currentBranch()
+			if err != nil {
+				return err
+			}
 			store, err := openStore()
 			if err != nil {
 				return err
 			}
 			var view View
 			err = store.Shared(func(s *eventlog.Snapshot) error {
-				view, err = Status(s)
+				view, err = Status(s, branch)
 				return err
 			})
 			if err != nil {
@@ -246,9 +285,15 @@ func NewCommand(openStore func() (*eventlog.Store, error)) *cobra.Command {
 func Render(w io.Writer, v View) {
 	if v.Work == nil {
 		fmt.Fprintln(w, v.Next.Message)
+		if len(v.OtherBranches) > 0 {
+			fmt.Fprintln(w)
+		}
+		for _, o := range v.OtherBranches {
+			fmt.Fprintf(w, "%s '%s' is in progress on branch %s.\n", o.Type, o.Description, o.Branch)
+		}
 		return
 	}
-	fmt.Fprintf(w, "%s: %s (%s)\n\n", v.Work.Type, v.Work.Description, v.Work.ID)
+	fmt.Fprintf(w, "%s: %s (%s) on branch %s\n\n", v.Work.Type, v.Work.Description, v.Work.ID, v.Work.Branch)
 	for _, s := range v.Work.Stages {
 		fmt.Fprintf(w, "  %-9s %-20s %s gate\n", "["+s.Status+"]", s.Stage, s.Gate)
 	}

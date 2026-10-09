@@ -19,13 +19,17 @@ type Log interface {
 }
 
 // Reject sends the active work's current assignment back with feedback.
-func Reject(log Log, actor eventlog.Actor, owner domain.Owner, feedback domain.Feedback) (domain.AwaitingApproval, []domain.AssignmentEvent, error) {
+func Reject(log Log, actor eventlog.Actor, branch domain.Branch, owner domain.Owner, feedback domain.Feedback) (domain.AwaitingApproval, []domain.AssignmentEvent, error) {
 	records, err := log.ReadAll()
 	if err != nil {
 		return domain.AwaitingApproval{}, nil, fmt.Errorf("reject: %w", err)
 	}
 	history := eventlog.NewHistory(records)
-	work, _, err := history.ActiveWork()
+	fact, err := history.ActiveWorkOn(branch)
+	if err != nil {
+		return domain.AwaitingApproval{}, nil, fmt.Errorf("reject: %w", err)
+	}
+	work, err := fact.Work()
 	if err != nil {
 		return domain.AwaitingApproval{}, nil, fmt.Errorf("reject: %w", err)
 	}
@@ -47,7 +51,7 @@ func Reject(log Log, actor eventlog.Actor, owner domain.Owner, feedback domain.F
 	return waiting, events, nil
 }
 
-func NewCommand(openStore func() (*eventlog.Store, error), resolveCaller func() (caller.Caller, error)) *cobra.Command {
+func NewCommand(openStore func() (*eventlog.Store, error), resolveCaller func() (caller.Caller, error), currentBranch func() (domain.Branch, error)) *cobra.Command {
 	return &cobra.Command{
 		Use:   `reject "<feedback>"`,
 		Short: "Send the submission back with feedback; uses one attempt (owner only)",
@@ -65,6 +69,10 @@ func NewCommand(openStore func() (*eventlog.Store, error), resolveCaller func() 
 			if err != nil {
 				return err
 			}
+			branch, err := currentBranch()
+			if err != nil {
+				return err
+			}
 			store, err := openStore()
 			if err != nil {
 				return err
@@ -73,7 +81,7 @@ func NewCommand(openStore func() (*eventlog.Store, error), resolveCaller func() 
 			var events []domain.AssignmentEvent
 			err = store.Exclusive(func(s *eventlog.Session) error {
 				return automations.AroundCommand(s, func() error {
-					waiting, events, err = Reject(s, c.Actor(), owner, feedback)
+					waiting, events, err = Reject(s, c.Actor(), branch, owner, feedback)
 					return err
 				})
 			})

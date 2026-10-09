@@ -55,7 +55,7 @@ func TestRun_CancelsOnceAndIsIdempotent(t *testing.T) {
 	store := must(eventlog.Open(t.TempDir()))
 	agent := eventlog.AgentActor("agent")
 	work := []domain.Event{
-		domain.WorkStarted{WorkID: workID, WorkType: domain.WorkTypeFixBug, Description: must(domain.NewDescription("bug"))},
+		domain.WorkStarted{WorkID: workID, WorkType: domain.WorkTypeFixBug, Description: must(domain.NewDescription("bug")), Branch: must(domain.NewBranch("main"))},
 		domain.StageEntered{WorkID: workID, Stage: domain.StageDiscovery, Visit: visit1, Gate: domain.GateHuman, Budget: budget3},
 		abandoned,
 	}

@@ -19,7 +19,7 @@ import (
 var owner = eventlog.OwnerActor(Owner)
 
 func abandoning(log *eventlog.Session) error {
-	_, err := abandonwork.AbandonWork(log, owner, Owner, Reason("not reproducible"))
+	_, err := abandonwork.AbandonWork(log, owner, Branch, Owner, Reason("not reproducible"))
 	return err
 }
 
@@ -44,6 +44,7 @@ func TestGivenAnAgent_WhenRunningAbandon_ThenItIsRefusedBeforeTouchingTheLog(t *
 	cmd := abandonwork.NewCommand(
 		func() (*eventlog.Store, error) { opened = true; return nil, errors.New("must not open") },
 		func() (caller.Caller, error) { return agent, nil },
+		func() (domain.Branch, error) { return Branch, nil },
 	)
 	cmd.SetArgs([]string{"give up"})
 	cmd.SetOut(io.Discard)

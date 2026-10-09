@@ -16,6 +16,7 @@ var (
 	Description = Must(domain.NewDescription("login button does nothing"))
 	Owner       = Must(domain.NewOwner("Jordi", "jordi@example.com"))
 	Visit1      = domain.FirstVisit()
+	Branch      = Must(domain.NewBranch("main"))
 )
 
 func Reason(s string) domain.Reason      { return Must(domain.NewReason(s)) }
@@ -37,7 +38,7 @@ func step(stage domain.Stage) domain.PathStep {
 }
 
 func WorkStarted() domain.WorkStarted {
-	return domain.WorkStarted{WorkID: WorkID, WorkType: domain.WorkTypeFixBug, Description: Description}
+	return domain.WorkStarted{WorkID: WorkID, WorkType: domain.WorkTypeFixBug, Description: Description, Branch: Branch}
 }
 
 func StageEntered(stage domain.Stage) domain.StageEntered {

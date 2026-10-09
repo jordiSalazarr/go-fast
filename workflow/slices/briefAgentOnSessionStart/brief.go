@@ -11,6 +11,7 @@ import (
 
 	"github.com/jordiSalazarr/go-fast/workflow/caller"
 	"github.com/jordiSalazarr/go-fast/workflow/claudehooks"
+	"github.com/jordiSalazarr/go-fast/workflow/domain"
 	"github.com/jordiSalazarr/go-fast/workflow/eventlog"
 	"github.com/jordiSalazarr/go-fast/workflow/slices/status"
 )
@@ -34,7 +35,7 @@ func brief(statusText string, readable bool) claudehooks.Output {
 	return claudehooks.Context(claudehooks.EventSessionStart, strings.TrimRight(statusText, "\n")+"\n\n"+driveHint)
 }
 
-func NewCommand(dir func() string, getenv func(string) string) *cobra.Command {
+func NewCommand(dir func() string, getenv func(string) string, branchOf func(root string) (domain.Branch, error)) *cobra.Command {
 	return &cobra.Command{
 		Use:   "session-start",
 		Short: "SessionStart hook: brief the agent on the workflow",
@@ -47,7 +48,7 @@ func NewCommand(dir func() string, getenv func(string) string) *cobra.Command {
 							repo.Logger.Error("could not write CLAUDE_ENV_FILE", "path", path, "error", err.Error())
 						}
 					}
-					text, err := statusText(repo.Store)
+					text, err := statusText(repo, branchOf)
 					if err != nil {
 						repo.Logger.Error("could not read the workflow state", "error", err.Error())
 					}
@@ -58,10 +59,14 @@ func NewCommand(dir func() string, getenv func(string) string) *cobra.Command {
 	}
 }
 
-func statusText(store *eventlog.Store) (string, error) {
+func statusText(repo claudehooks.Repo, branchOf func(root string) (domain.Branch, error)) (string, error) {
+	branch, err := branchOf(repo.Root)
+	if err != nil {
+		return "", err
+	}
 	var text strings.Builder
-	err := store.Shared(func(s *eventlog.Snapshot) error {
-		view, err := status.Status(s)
+	err = repo.Store.Shared(func(s *eventlog.Snapshot) error {
+		view, err := status.Status(s, branch)
 		if err != nil {
 			return err
 		}

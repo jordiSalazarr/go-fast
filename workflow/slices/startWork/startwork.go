@@ -20,17 +20,17 @@ type Log interface {
 	Append(stream eventlog.Stream, expectedVersion int, actor eventlog.Actor, events ...domain.Event) error
 }
 
-// StartWork starts a work unless another one is active.
-func StartWork(log Log, actor eventlog.Actor, id domain.WorkID, workType domain.WorkType, description domain.Description) ([]domain.WorkEvent, error) {
+// StartWork starts a work on a branch unless the branch has active work.
+func StartWork(log Log, actor eventlog.Actor, branch domain.Branch, id domain.WorkID, workType domain.WorkType, description domain.Description) ([]domain.WorkEvent, error) {
 	records, err := log.ReadAll()
 	if err != nil {
 		return nil, fmt.Errorf("start work: %w", err)
 	}
-	works, err := eventlog.NewHistory(records).Works()
+	active, err := eventlog.NewHistory(records).ActiveWorkOn(branch)
 	if err != nil {
 		return nil, fmt.Errorf("start work: %w", err)
 	}
-	events, err := domain.StartWork(id, workType, description, domain.ActiveWorkAmong(works))
+	events, err := domain.StartWork(id, workType, description, branch, active)
 	if err != nil {
 		return nil, err
 	}
@@ -40,7 +40,7 @@ func StartWork(log Log, actor eventlog.Actor, id domain.WorkID, workType domain.
 	return events, nil
 }
 
-func NewCommand(openStore func() (*eventlog.Store, error), resolveCaller func() (caller.Caller, error)) *cobra.Command {
+func NewCommand(openStore func() (*eventlog.Store, error), resolveCaller func() (caller.Caller, error), currentBranch func() (domain.Branch, error)) *cobra.Command {
 	var typeName string
 	cmd := &cobra.Command{
 		Use:   `start --type fix-bug "<description>"`,
@@ -63,6 +63,10 @@ func NewCommand(openStore func() (*eventlog.Store, error), resolveCaller func() 
 			if err != nil {
 				return err
 			}
+			branch, err := currentBranch()
+			if err != nil {
+				return err
+			}
 			store, err := openStore()
 			if err != nil {
 				return err
@@ -70,7 +74,7 @@ func NewCommand(openStore func() (*eventlog.Store, error), resolveCaller func() 
 			var events []domain.WorkEvent
 			err = store.Exclusive(func(s *eventlog.Session) error {
 				return automations.AroundCommand(s, func() error {
-					events, err = StartWork(s, c.Actor(), id, workType, description)
+					events, err = StartWork(s, c.Actor(), branch, id, workType, description)
 					return err
 				})
 			})
@@ -78,7 +82,7 @@ func NewCommand(openStore func() (*eventlog.Store, error), resolveCaller func() 
 				return err
 			}
 			out := cmd.OutOrStdout()
-			fmt.Fprintf(out, "Started %s work %q (%s).\n", workType, description, id)
+			fmt.Fprintf(out, "Started %s work %q (%s) on branch %s.\n", workType, description, id, branch)
 			for _, e := range events {
 				if entered, ok := e.(domain.StageEntered); ok {
 					fmt.Fprintf(out, "Current stage: %s. Run `gf status` to see what happens next.\n", entered.Stage)

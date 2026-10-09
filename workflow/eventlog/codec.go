@@ -58,6 +58,7 @@ type workStartedV1 struct {
 	WorkID      string `json:"workId"`
 	WorkType    string `json:"workType"`
 	Description string `json:"description"`
+	Branch      string `json:"branch"` // required; logs from before work belonged to a branch are not supported
 }
 
 type stageEnteredV1 struct {
@@ -179,7 +180,7 @@ func encodeEvent(e domain.Event) (eventType string, stream Stream, payload any, 
 	switch e := e.(type) {
 	case domain.WorkStarted:
 		return typeWorkStarted, WorkStream(e.WorkID), workStartedV1{
-			WorkID: e.WorkID.String(), WorkType: e.WorkType.String(), Description: e.Description.String(),
+			WorkID: e.WorkID.String(), WorkType: e.WorkType.String(), Description: e.Description.String(), Branch: e.Branch.String(),
 		}, nil
 	case domain.StageEntered:
 		return typeStageEntered, WorkStream(e.WorkID), stageEnteredV1{
@@ -241,6 +242,7 @@ func decodeEvent(eventType string, payload json.RawMessage) (domain.Event, Strea
 		d.unmarshal(payload, &p)
 		event = domain.WorkStarted{
 			WorkID: d.workID(p.WorkID), WorkType: d.workType(p.WorkType), Description: d.description(p.Description),
+			Branch: d.branch(p.Branch),
 		}
 	case typeStageEntered:
 		var p stageEnteredV1
@@ -402,6 +404,12 @@ func (d *decoder) feedback(s string) domain.Feedback {
 
 func (d *decoder) reason(s string) domain.Reason {
 	v, err := domain.NewReason(s)
+	d.keep(err)
+	return v
+}
+
+func (d *decoder) branch(s string) domain.Branch {
+	v, err := domain.NewBranch(s)
 	d.keep(err)
 	return v
 }

@@ -129,7 +129,7 @@ func scopeReason(facts stageFacts, p domain.RepoPath) string {
 	}
 }
 
-func NewCommand(dir func() string, getenv func(string) string) *cobra.Command {
+func NewCommand(dir func() string, getenv func(string) string, branchOf func(root string) (domain.Branch, error)) *cobra.Command {
 	return &cobra.Command{
 		Use:   "pre-tool-use",
 		Short: "PreToolUse hook: guard agent actions",
@@ -141,7 +141,7 @@ func NewCommand(dir func() string, getenv func(string) string) *cobra.Command {
 					if err != nil {
 						repo.Logger.Error("guard could not read the driving marker", "error", err.Error())
 					}
-					out := decide(in, loadFacts(repo), driving, repo.Root)
+					out := decide(in, loadFacts(repo, branchOf), driving, repo.Root)
 					if out.HookSpecificOutput != nil {
 						repo.Logger.Info("guard denied a tool call", "tool", in.ToolName, "agent", in.AgentType,
 							"reason", out.HookSpecificOutput.PermissionDecisionReason)
@@ -153,14 +153,23 @@ func NewCommand(dir func() string, getenv func(string) string) *cobra.Command {
 	}
 }
 
-func loadFacts(repo claudehooks.Repo) stageFacts {
+func loadFacts(repo claudehooks.Repo, branchOf func(root string) (domain.Branch, error)) stageFacts {
+	branch, err := branchOf(repo.Root)
+	if err != nil {
+		repo.Logger.Error("guard could not tell the current branch", "error", err.Error())
+		return unreadable()
+	}
 	var facts stageFacts
-	err := repo.Store.Shared(func(s *eventlog.Snapshot) error {
+	err = repo.Store.Shared(func(s *eventlog.Snapshot) error {
 		records, err := s.ReadAll()
 		if err != nil {
 			return err
 		}
-		work, _, err := eventlog.NewHistory(records).ActiveWork()
+		fact, err := eventlog.NewHistory(records).ActiveWorkOn(branch)
+		if err != nil {
+			return err
+		}
+		work, err := fact.Work()
 		if errors.Is(err, domain.ErrNoActiveWork) {
 			facts = noActiveWork()
 			return nil

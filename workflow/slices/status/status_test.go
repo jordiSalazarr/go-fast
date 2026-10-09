@@ -20,7 +20,7 @@ func whenQueried(t *testing.T, s *eventlogtest.Scenario) status.View {
 	var view status.View
 	s.WhenQueried(func(log *eventlog.Snapshot) error {
 		var err error
-		view, err = status.Status(log)
+		view, err = status.Status(log, Branch)
 		return err
 	})
 	return view
@@ -39,9 +39,9 @@ func TestGivenNoWork_WhenQueryingStatus_ThenItSaysHowToStart(t *testing.T) {
 
 	assert.Equal(t, status.View{Schema: 1, Next: status.NextView{
 		Actor:    status.NextAnyone,
-		Message:  "No active work. Start one with `gf start --type fix-bug \"<description>\"`.",
+		Message:  "No active work on branch main. Start one with `gf start --type fix-bug \"<description>\"`.",
 		Commands: []string{`gf start --type fix-bug "<description>"`},
-	}}, v)
+	}, OtherBranches: []status.OtherBranchView{}}, v)
 }
 
 func TestGivenCompletedWork_WhenQueryingStatus_ThenThereIsNoActiveWork(t *testing.T) {
@@ -155,4 +155,28 @@ func TestGivenWorkOnReview_WhenRenderingStatusText_ThenItShowsTheCurrentArtifact
 	status.Render(&text, v)
 
 	assert.Contains(t, text.String(), "Artifact: .gofast/works/w1/review-v1.md")
+}
+
+func TestGivenWork_WhenQueryingStatus_ThenItShowsItsBranch(t *testing.T) {
+	v := whenQueried(t, eventlogtest.Given(t, OpenOn(domain.StageDiscovery)...))
+
+	assert.Equal(t, "main", v.Work.Branch)
+	assert.Empty(t, v.OtherBranches)
+}
+
+func TestGivenWorkOnlyOnAnotherBranch_WhenQueryingStatus_ThenItListsIt(t *testing.T) {
+	otherBranch := Must(domain.NewBranch("fix/double-charge"))
+	orders := domain.WorkStarted{WorkID: WorkID, WorkType: domain.WorkTypeFixBug, Description: Must(domain.NewDescription("orders double-charge")), Branch: otherBranch}
+	s := eventlogtest.Given(t, orders, StageEntered(domain.StageDiscovery), StageEntered(domain.StageSpecify))
+
+	v := whenQueried(t, s)
+
+	assert.Nil(t, v.Work)
+	assert.Equal(t, []status.OtherBranchView{{
+		Branch: "fix/double-charge", WorkID: "w1", Type: "fix-bug", Description: "orders double-charge", Stage: "specify",
+	}}, v.OtherBranches)
+	var text strings.Builder
+	status.Render(&text, v)
+	assert.Contains(t, text.String(), "No active work on branch main.")
+	assert.Contains(t, text.String(), "fix-bug 'orders double-charge' is in progress on branch fix/double-charge.")
 }

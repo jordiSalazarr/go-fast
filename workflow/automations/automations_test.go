@@ -52,7 +52,7 @@ func TestRun_ReconcilesAHalfFinishedCycle(t *testing.T) {
 	reviewID := domain.AssignmentIDFor(workID, domain.StageReview, visit)
 
 	require.NoError(t, store.Exclusive(func(s *eventlog.Session) error {
-		work := []domain.Event{domain.WorkStarted{WorkID: workID, WorkType: domain.WorkTypeFixBug, Description: must(domain.NewDescription("bug"))}}
+		work := []domain.Event{domain.WorkStarted{WorkID: workID, WorkType: domain.WorkTypeFixBug, Description: must(domain.NewDescription("bug")), Branch: must(domain.NewBranch("main"))}}
 		for _, st := range []struct {
 			stage domain.Stage
 			gate  domain.Gate
@@ -100,7 +100,8 @@ func TestAroundCommand_RunsAutomationsBeforeAndAfter(t *testing.T) {
 	agent := eventlog.AgentActor("agent")
 
 	require.NoError(t, store.Exclusive(func(s *eventlog.Session) error {
-		events := must(domain.StartWork(workID, domain.WorkTypeFixBug, must(domain.NewDescription("bug")), domain.NoActiveWork()))
+		branch := must(domain.NewBranch("main"))
+		events := must(domain.StartWork(workID, domain.WorkTypeFixBug, must(domain.NewDescription("bug")), branch, must(domain.ActiveWorkOn(branch, nil))))
 		require.NoError(t, s.Append(eventlog.WorkStream(workID), 0, agent, eventlog.Events(events)...))
 
 		var seenBeforeCommand []eventlog.Recorded

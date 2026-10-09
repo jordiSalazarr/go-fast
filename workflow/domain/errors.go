@@ -3,6 +3,7 @@ package domain
 import (
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // Invalid values.
@@ -20,15 +21,16 @@ var (
 	ErrEmptyReason           = errors.New("reason must not be empty")
 	ErrInvalidOwner          = errors.New("owner must have a name")
 	ErrMissingValue          = errors.New("required value is missing")
+	ErrInvalidBranch         = errors.New("branch name must not be empty or contain whitespace")
 	ErrInvalidRepoPath       = errors.New("invalid repository path")
 	ErrPathOutsideRepository = errors.New("path is outside the repository")
 )
 
 // Rejected commands.
 var (
-	ErrWorkAlreadyActive = errors.New("work is already active in this repository")
+	ErrWorkAlreadyActive = errors.New("work is already active on this branch")
 	ErrNotCurrentStage   = errors.New("stage is not the current stage of the work")
-	ErrNoActiveWork      = errors.New("no active work in this repository")
+	ErrNoActiveWork      = errors.New("no active work")
 )
 
 // The current assignment is not in a state that accepts the command.
@@ -47,13 +49,31 @@ type WorkAlreadyActiveError struct {
 	ID          WorkID
 	Type        WorkType
 	Description Description
+	Branch      Branch
 }
 
 func (e *WorkAlreadyActiveError) Error() string {
-	return fmt.Sprintf("%s: %s %q (%s)", ErrWorkAlreadyActive, e.Type, e.Description, e.ID)
+	return fmt.Sprintf("%s: %s %q (%s) on branch %s", ErrWorkAlreadyActive, e.Type, e.Description, e.ID, e.Branch)
 }
 
 func (e *WorkAlreadyActiveError) Unwrap() error { return ErrWorkAlreadyActive }
+
+// ConflictingActiveWorkError names the works in progress on one branch, which
+// only a bad merge or a hand edit of the log can produce.
+type ConflictingActiveWorkError struct {
+	Branch Branch
+	Works  []WorkID
+}
+
+func (e *ConflictingActiveWorkError) Error() string {
+	ids := make([]string, len(e.Works))
+	for i, id := range e.Works {
+		ids[i] = id.value
+	}
+	return fmt.Sprintf("%s: branch %s has %d works in progress: %s", ErrInconsistentHistory, e.Branch, len(ids), strings.Join(ids, ", "))
+}
+
+func (e *ConflictingActiveWorkError) Unwrap() error { return ErrInconsistentHistory }
 
 // NotCurrentStageError says which stage visit was asked for and which is current.
 type NotCurrentStageError struct {

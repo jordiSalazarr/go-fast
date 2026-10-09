@@ -20,13 +20,17 @@ type Log interface {
 }
 
 // ExtendBudget extends the budget of the active work's escalated assignment.
-func ExtendBudget(log Log, actor eventlog.Actor, owner domain.Owner, additional domain.AttemptBudget) (domain.Stage, domain.BudgetExtended, error) {
+func ExtendBudget(log Log, actor eventlog.Actor, branch domain.Branch, owner domain.Owner, additional domain.AttemptBudget) (domain.Stage, domain.BudgetExtended, error) {
 	records, err := log.ReadAll()
 	if err != nil {
 		return domain.Stage{}, domain.BudgetExtended{}, fmt.Errorf("extend budget: %w", err)
 	}
 	history := eventlog.NewHistory(records)
-	work, _, err := history.ActiveWork()
+	fact, err := history.ActiveWorkOn(branch)
+	if err != nil {
+		return domain.Stage{}, domain.BudgetExtended{}, fmt.Errorf("extend budget: %w", err)
+	}
+	work, err := fact.Work()
 	if err != nil {
 		return domain.Stage{}, domain.BudgetExtended{}, fmt.Errorf("extend budget: %w", err)
 	}
@@ -54,7 +58,7 @@ func ExtendBudget(log Log, actor eventlog.Actor, owner domain.Owner, additional 
 	return escalated.Stage(), extended, nil
 }
 
-func NewCommand(openStore func() (*eventlog.Store, error), resolveCaller func() (caller.Caller, error)) *cobra.Command {
+func NewCommand(openStore func() (*eventlog.Store, error), resolveCaller func() (caller.Caller, error), currentBranch func() (domain.Branch, error)) *cobra.Command {
 	return &cobra.Command{
 		Use:   "extend <attempts>",
 		Short: "Give an escalated stage more attempts (owner only)",
@@ -76,6 +80,10 @@ func NewCommand(openStore func() (*eventlog.Store, error), resolveCaller func() 
 			if err != nil {
 				return err
 			}
+			branch, err := currentBranch()
+			if err != nil {
+				return err
+			}
 			store, err := openStore()
 			if err != nil {
 				return err
@@ -84,7 +92,7 @@ func NewCommand(openStore func() (*eventlog.Store, error), resolveCaller func() 
 			var extended domain.BudgetExtended
 			err = store.Exclusive(func(s *eventlog.Session) error {
 				return automations.AroundCommand(s, func() error {
-					stage, extended, err = ExtendBudget(s, c.Actor(), owner, additional)
+					stage, extended, err = ExtendBudget(s, c.Actor(), branch, owner, additional)
 					return err
 				})
 			})

@@ -31,7 +31,7 @@ func newRepo(t *testing.T) *repo {
 	t.Helper()
 	dir := t.TempDir()
 	for _, args := range [][]string{
-		{"init", "-q"},
+		{"init", "-q", "-b", "main"},
 		{"config", "user.name", "Jordi"},
 		{"config", "user.email", "jordi@example.com"},
 	} {
@@ -212,7 +212,7 @@ func TestErrors_AreFriendlyOnTheTerminalAndDetailedInTheLog(t *testing.T) {
 	r := newRepo(t)
 
 	res := r.gfFails(nil, "approve")
-	assert.Equal(t, "There is no active work. Start one with `gf start --type fix-bug \"<description>\"`.\n", res.stderr)
+	assert.Equal(t, "There is no active work on this branch. Start one with `gf start --type fix-bug \"<description>\"`.\n", res.stderr)
 
 	res = r.gfFails(nil, "start", "--type", "feature", "x")
 	assert.Equal(t, "Unknown work type. Available: fix-bug.\n", res.stderr)
@@ -226,7 +226,7 @@ func TestErrors_AreFriendlyOnTheTerminalAndDetailedInTheLog(t *testing.T) {
 
 	log, err := os.ReadFile(filepath.Join(r.dir, ".gofast", "gf.log"))
 	require.NoError(t, err)
-	assert.Contains(t, string(log), "load active work: no active work in this repository")
+	assert.Contains(t, string(log), "approve: branch main: no active work")
 	assert.Contains(t, string(log), `work type \"feature\" (available: fix-bug): unknown work type`)
 	assert.NotContains(t, res.stderr, "attempt budget must be", "no raw error chain on the terminal")
 }
