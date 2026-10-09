@@ -44,7 +44,7 @@ func newRepo(t *testing.T) *repo {
 func (r *repo) run(env map[string]string, args ...string) result {
 	r.t.Helper()
 	var stdout, stderr bytes.Buffer
-	code := execute(append([]string{"--dir", r.dir}, args...), func(k string) string { return env[k] }, &stdout, &stderr)
+	code := execute(append([]string{"--dir", r.dir}, args...), func(k string) string { return env[k] }, strings.NewReader(""), &stdout, &stderr)
 	return result{code: code, stdout: stdout.String(), stderr: stderr.String()}
 }
 

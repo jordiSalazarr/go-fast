@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -23,6 +24,9 @@ const (
 	eventsFile = "events.jsonl"
 	lockFile   = "events.lock"
 	logFile    = "gf.log"
+
+	// RuntimeDir holds local session bookkeeping under .gofast/; never committed.
+	RuntimeDir = "runtime"
 )
 
 var (
@@ -74,22 +78,50 @@ func FindRoot(start string) (string, error) {
 	}
 }
 
-// Init creates .gofast/ under root, with a .gitignore for the lock and log
-// files, if it does not exist yet.
+// Init creates .gofast/ under root if needed, and makes sure its .gitignore
+// lists the files that stay local: the lock, the log and runtime markers.
 func Init(root string) error {
 	dir := filepath.Join(root, dirName)
-	if _, err := os.Stat(dir); err == nil {
-		return nil
-	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create %s: %w", dir, err)
 	}
-	ignore := lockFile + "\n" + logFile + "\n"
-	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(ignore), 0o644); err != nil {
-		return fmt.Errorf("create %s/.gitignore: %w", dir, err)
+	path := filepath.Join(dir, ".gitignore")
+	current, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("read %s: %w", path, err)
+	}
+	listed := map[string]bool{}
+	for _, line := range strings.Split(string(current), "\n") {
+		listed[strings.TrimSpace(line)] = true
+	}
+	var missing strings.Builder
+	if len(current) > 0 && !bytes.HasSuffix(current, []byte("\n")) {
+		missing.WriteString("\n")
+	}
+	for _, entry := range ignored {
+		if !listed[entry] {
+			missing.WriteString(entry + "\n")
+		}
+	}
+	if missing.Len() == 0 || missing.String() == "\n" {
+		return nil
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return fmt.Errorf("update %s: %w", path, err)
+	}
+	defer f.Close()
+	if _, err := f.WriteString(missing.String()); err != nil {
+		return fmt.Errorf("update %s: %w", path, err)
 	}
 	return nil
 }
+
+// ignored lists what .gofast/.gitignore keeps out of git.
+var ignored = []string{lockFile, logFile, RuntimeDir + "/"}
+
+// Dir is gofast's directory under root.
+func Dir(root string) string { return filepath.Join(root, dirName) }
 
 // LogFile is where gf writes its diagnostic log.
 func LogFile(root string) string { return filepath.Join(root, dirName, logFile) }

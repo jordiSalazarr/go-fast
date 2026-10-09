@@ -33,6 +33,7 @@ type WorkView struct {
 	ID          string      `json:"id"`
 	Type        string      `json:"type"`
 	Description string      `json:"description"`
+	ArtifactDir string      `json:"artifactDir"` // relative to the repository root, ends in "/"
 	Stages      []StageView `json:"stages"`
 }
 
@@ -48,6 +49,8 @@ type StageView struct {
 	Gate   string `json:"gate"`
 	Budget int    `json:"budget"`
 	Status string `json:"status"`
+	// Artifact is set for done stages: the artifact of their last visit.
+	Artifact string `json:"artifact,omitempty"`
 }
 
 // Assignment state values.
@@ -64,6 +67,7 @@ type CurrentView struct {
 	Assignment   string       `json:"assignment"`
 	AttemptsUsed int          `json:"attemptsUsed"`
 	Budget       int          `json:"budget"`
+	Artifact     string       `json:"artifact"`    // the artifact this stage visit writes
 	LastProblem  *ProblemView `json:"lastProblem"` // null when there is none
 }
 
@@ -113,22 +117,31 @@ func Status(log Reader) (View, error) {
 
 	view := View{Schema: 1, Work: &WorkView{
 		ID: work.ID().String(), Type: work.Type().String(), Description: work.Description().String(),
+		ArtifactDir: domain.ArtifactDir(work.ID()).String() + "/",
 	}}
+	lastVisit := map[domain.Stage]domain.Visit{}
+	for _, r := range history.Records(eventlog.WorkStream(work.ID())) {
+		if entered, ok := r.Event.(domain.StageEntered); ok {
+			lastVisit[entered.Stage] = entered.Visit
+		}
+	}
 	stageStatus := StageDone
 	var currentStep domain.PathStep
 	for _, step := range work.Path().Steps() {
-		s := stageStatus
+		sv := StageView{Stage: step.Stage().String(), Gate: step.Gate().String(), Budget: step.Budget().Int(), Status: stageStatus}
 		if step.Stage() == work.CurrentStage() {
-			s, stageStatus, currentStep = StageCurrent, StagePending, step
+			sv.Status, stageStatus, currentStep = StageCurrent, StagePending, step
 		}
-		view.Work.Stages = append(view.Work.Stages, StageView{
-			Stage: step.Stage().String(), Gate: step.Gate().String(), Budget: step.Budget().Int(), Status: s,
-		})
+		if sv.Status == StageDone {
+			sv.Artifact = domain.ArtifactFor(work.ID(), step.Stage(), lastVisit[step.Stage()]).String()
+		}
+		view.Work.Stages = append(view.Work.Stages, sv)
 	}
 
 	current := &CurrentView{
 		Stage: work.CurrentStage().String(), Visit: work.CurrentVisit().Int(),
 		Gate: currentStep.Gate().String(), Assignment: AssignmentOpen, Budget: currentStep.Budget().Int(),
+		Artifact: domain.ArtifactFor(work.ID(), work.CurrentStage(), work.CurrentVisit()).String(),
 	}
 	view.Current = current
 	stage := work.CurrentStage()
@@ -221,7 +234,7 @@ func NewCommand(openStore func() (*eventlog.Store, error)) *cobra.Command {
 				enc.SetIndent("", "  ")
 				return enc.Encode(view)
 			}
-			render(cmd.OutOrStdout(), view)
+			Render(cmd.OutOrStdout(), view)
 			return nil
 		},
 	}
@@ -229,7 +242,8 @@ func NewCommand(openStore func() (*eventlog.Store, error)) *cobra.Command {
 	return cmd
 }
 
-func render(w io.Writer, v View) {
+// Render writes the view as the text `gf status` prints.
+func Render(w io.Writer, v View) {
 	if v.Work == nil {
 		fmt.Fprintln(w, v.Next.Message)
 		return
@@ -240,6 +254,7 @@ func render(w io.Writer, v View) {
 	}
 	c := v.Current
 	fmt.Fprintf(w, "\nCurrent: %s (%s gate), %s, attempts used %d of %d\n", c.Stage, c.Gate, strings.ReplaceAll(c.Assignment, "-", " "), c.AttemptsUsed, c.Budget)
+	fmt.Fprintf(w, "Artifact: %s\n", c.Artifact)
 	if p := c.LastProblem; p != nil {
 		label := "Last failure"
 		if p.Kind == ProblemRejection {

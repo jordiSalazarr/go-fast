@@ -15,7 +15,10 @@ import (
 	"github.com/jordiSalazarr/go-fast/workflow/eventlog"
 	abandonwork "github.com/jordiSalazarr/go-fast/workflow/slices/abandonWork"
 	"github.com/jordiSalazarr/go-fast/workflow/slices/approve"
+	briefagentonsessionstart "github.com/jordiSalazarr/go-fast/workflow/slices/briefAgentOnSessionStart"
 	extendbudget "github.com/jordiSalazarr/go-fast/workflow/slices/extendBudget"
+	guardagentactions "github.com/jordiSalazarr/go-fast/workflow/slices/guardAgentActions"
+	keepagentonstage "github.com/jordiSalazarr/go-fast/workflow/slices/keepAgentOnStage"
 	"github.com/jordiSalazarr/go-fast/workflow/slices/reject"
 	startwork "github.com/jordiSalazarr/go-fast/workflow/slices/startWork"
 	"github.com/jordiSalazarr/go-fast/workflow/slices/status"
@@ -23,7 +26,7 @@ import (
 )
 
 func main() {
-	os.Exit(execute(os.Args[1:], os.Getenv, os.Stdout, os.Stderr))
+	os.Exit(execute(os.Args[1:], os.Getenv, os.Stdin, os.Stdout, os.Stderr))
 }
 
 // app holds what the commands share, resolved lazily once flags are parsed.
@@ -38,12 +41,13 @@ type app struct {
 }
 
 // execute runs gf and returns its exit code.
-func execute(args []string, getenv func(string) string, stdout, stderr io.Writer) int {
+func execute(args []string, getenv func(string) string, stdin io.Reader, stdout, stderr io.Writer) int {
 	a := &app{getenv: getenv}
 	defer a.close()
 
 	root := a.rootCommand()
 	root.SetArgs(args)
+	root.SetIn(stdin)
 	root.SetOut(stdout)
 	root.SetErr(stderr)
 	cmd, err := root.ExecuteC()
@@ -74,15 +78,39 @@ func (a *app) rootCommand() *cobra.Command {
 		extendbudget.NewCommand(a.openStore, a.resolveCaller),
 		abandonwork.NewCommand(a.openStore, a.resolveCaller),
 		status.NewCommand(a.openStore),
+		a.hookCommand(),
 	)
-	for _, c := range root.Commands() {
-		run := c.RunE
+	a.markRun(root)
+	return root
+}
+
+// hookCommand groups the Claude Code hook handlers the gofast plugin runs.
+func (a *app) hookCommand() *cobra.Command {
+	hook := &cobra.Command{
+		Use:   "hook <event>",
+		Short: "Claude Code hook handlers, run by the gofast plugin",
+	}
+	dir := func() string { return a.dir }
+	hook.AddCommand(
+		guardagentactions.NewCommand(dir, a.getenv),
+		briefagentonsessionstart.NewCommand(dir, a.getenv),
+	)
+	hook.AddCommand(keepagentonstage.NewCommands(dir, a.getenv)...)
+	return hook
+}
+
+// markRun wraps every runnable command so execute knows whether cobra
+// accepted the flags and arguments before an error happened.
+func (a *app) markRun(c *cobra.Command) {
+	if run := c.RunE; run != nil {
 		c.RunE = func(cmd *cobra.Command, args []string) error {
 			a.ran = true
 			return run(cmd, args)
 		}
 	}
-	return root
+	for _, sub := range c.Commands() {
+		a.markRun(sub)
+	}
 }
 
 func (a *app) repositoryRoot() (string, error) {

@@ -1,6 +1,7 @@
 package status_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -63,6 +64,7 @@ func TestGivenAFailedAttemptOnImplement_WhenQueryingStatus_ThenTheAgentIsToldToW
 	}, stageStatuses(v))
 	assert.Equal(t, &status.CurrentView{
 		Stage: "implement", Visit: 1, Gate: "auto", Assignment: status.AssignmentOpen, AttemptsUsed: 1, Budget: 3,
+		Artifact:    ".gofast/works/w1/implement-v1.md",
 		LastProblem: &status.ProblemView{Kind: status.ProblemFailedCheck, Attempt: 1, Text: "unit tests fail"},
 	}, v.Current)
 	assert.Equal(t, status.NextView{
@@ -123,6 +125,34 @@ func TestGivenAStageWhoseAssignmentIsNotOpenedYet_WhenQueryingStatus_ThenItIsSho
 
 	assert.Equal(t, &status.CurrentView{
 		Stage: "specify", Visit: 1, Gate: "human", Assignment: status.AssignmentOpen, AttemptsUsed: 0, Budget: 3,
+		Artifact: ".gofast/works/w1/specify-v1.md",
 	}, v.Current)
 	assert.Equal(t, status.NextAgent, v.Next.Actor)
+}
+
+func TestGivenWorkOnReview_WhenQueryingStatus_ThenItShowsTheArtifactPaths(t *testing.T) {
+	v := whenQueried(t, eventlogtest.Given(t, OpenOn(domain.StageReview)...))
+
+	assert.Equal(t, ".gofast/works/w1/", v.Work.ArtifactDir)
+	artifacts := map[string]string{}
+	for _, s := range v.Work.Stages {
+		artifacts[s.Stage] = s.Artifact
+	}
+	assert.Equal(t, map[string]string{
+		"discovery":           ".gofast/works/w1/discovery-v1.md",
+		"specify":             ".gofast/works/w1/specify-v1.md",
+		"implement":           ".gofast/works/w1/implement-v1.md",
+		"review":              "", // current: see current.artifact
+		"integration-testing": "",
+	}, artifacts)
+	assert.Equal(t, ".gofast/works/w1/review-v1.md", v.Current.Artifact)
+}
+
+func TestGivenWorkOnReview_WhenRenderingStatusText_ThenItShowsTheCurrentArtifact(t *testing.T) {
+	v := whenQueried(t, eventlogtest.Given(t, OpenOn(domain.StageReview)...))
+	var text strings.Builder
+
+	status.Render(&text, v)
+
+	assert.Contains(t, text.String(), "Artifact: .gofast/works/w1/review-v1.md")
 }

@@ -99,7 +99,21 @@ func TestOpen_CreatesDirectoryWithGitignore(t *testing.T) {
 
 	ignore, err := os.ReadFile(filepath.Join(root, dirName, ".gitignore"))
 	require.NoError(t, err)
-	assert.Equal(t, "events.lock\ngf.log\n", string(ignore))
+	assert.Equal(t, "events.lock\ngf.log\nruntime/\n", string(ignore))
+}
+
+func TestInit_AddsMissingEntriesToAnExistingGitignore(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, dirName), 0o755))
+	path := filepath.Join(root, dirName, ".gitignore")
+	require.NoError(t, os.WriteFile(path, []byte("events.lock\ngf.log"), 0o644))
+
+	require.NoError(t, Init(root))
+	require.NoError(t, Init(root))
+
+	ignore, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, "events.lock\ngf.log\nruntime/\n", string(ignore))
 }
 
 func TestFindRoot(t *testing.T) {
