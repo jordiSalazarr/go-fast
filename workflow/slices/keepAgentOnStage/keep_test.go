@@ -56,7 +56,6 @@ func mainStops(stopHookActive bool) claudehooks.Input {
 
 func TestDrivingStarts_OnTheDriveCommandOnly(t *testing.T) {
 	assert.True(t, drivingStarts(claudehooks.Input{CommandName: "gofast:drive", CommandSource: "plugin"}))
-	assert.True(t, drivingStarts(claudehooks.Input{CommandName: "drive", CommandSource: "plugin"}))
 	assert.False(t, drivingStarts(claudehooks.Input{CommandName: "drive", CommandSource: "project"}))
 	assert.False(t, drivingStarts(claudehooks.Input{CommandName: "gofast:other"}))
 	assert.False(t, drivingStarts(claudehooks.Input{CommandName: "review"}))

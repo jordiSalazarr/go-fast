@@ -22,11 +22,10 @@ import (
 
 // The drive skill's command, as UserPromptExpansion reports it in
 // command_name (https://code.claude.com/docs/en/hooks "UserPromptExpansion
-// input"). Plugin skills are namespaced as plugin:skill
-// (https://code.claude.com/docs/en/skills).
+// input"). Observed with Claude Code 2.1.286: command_name "gofast:drive",
+// command_source "plugin".
 const (
 	driveCommand = "gofast:drive"
-	driveSkill   = "drive"
 	agentPrefix  = "gofast:"
 )
 
@@ -44,7 +43,7 @@ type assignmentFacts struct {
 
 // drivingStarts: the owner ran /gofast:drive.
 func drivingStarts(in claudehooks.Input) bool {
-	return in.CommandName == driveCommand || (in.CommandName == driveSkill && in.CommandSource == "plugin")
+	return in.CommandName == driveCommand
 }
 
 // agentStart is what a starting stage agent is recorded as working on.

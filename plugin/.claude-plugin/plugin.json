@@ -1,0 +1,7 @@
+{
+  "name": "gofast",
+  "version": "0.1.0",
+  "description": "Drives an agent along gofast's path of stages, with owner approval gates and attempt budgets enforced by the gf CLI.",
+  "author": { "name": "Jordi Salazar Badia" },
+  "repository": "https://github.com/jordiSalazarr/go-fast"
+}

@@ -1,0 +1,39 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [{ "type": "command", "command": "gf", "args": ["hook", "session-start"] }]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Write|Edit|NotebookEdit",
+        "hooks": [{ "type": "command", "command": "gf", "args": ["hook", "pre-tool-use"] }]
+      }
+    ],
+    "UserPromptExpansion": [
+      {
+        "matcher": "^gofast:drive$",
+        "hooks": [{ "type": "command", "command": "gf", "args": ["hook", "user-prompt-expansion"] }]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "matcher": "^gofast:",
+        "hooks": [{ "type": "command", "command": "gf", "args": ["hook", "subagent-start"] }]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "^gofast:",
+        "hooks": [{ "type": "command", "command": "gf", "args": ["hook", "subagent-stop"] }]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [{ "type": "command", "command": "gf", "args": ["hook", "stop"] }]
+      }
+    ]
+  }
+}
