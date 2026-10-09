@@ -23,6 +23,7 @@ import (
 	"os"
 
 	"github.com/jordiSalazarr/go-fast/workflow/eventlog"
+	"github.com/jordiSalazarr/go-fast/workflow/gitbranch"
 )
 
 // Input is the JSON Claude Code sends a hook on stdin. Only the fields gofast
@@ -133,7 +134,7 @@ func Run(env Env, handle func(Repo, Input) Output) {
 		defer f.Close()
 		logger = slog.New(slog.NewTextHandler(f, nil)).With("hook", in.HookEventName, "session", in.SessionID)
 	}
-	store, err := eventlog.Open(root, eventlog.WithLogger(logger))
+	store, err := eventlog.Open(root, eventlog.WithLogger(logger), eventlog.WithSeal(gitbranch.NewCommits(root)))
 	if err != nil {
 		logger.Error("hook could not open the event log", "error", err.Error())
 		return

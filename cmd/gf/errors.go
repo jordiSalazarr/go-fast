@@ -67,6 +67,8 @@ func friendly(err error, cmd *cobra.Command, ran bool) string {
 		return "gf could not tell who you are. Set `git config user.name \"Your Name\"` (and user.email) in this repository."
 	case errors.Is(err, eventlog.ErrNoRepository):
 		return "Not inside a git repository. Run gf from your repository, or pass --dir."
+	case errors.Is(err, eventlog.ErrLogChangedOutsideGf):
+		return "The event log was changed outside gf since its last write. Inspect .gofast/events.jsonl (git diff) and run `gf log accept` from your own terminal if the change is legitimate."
 	case errors.Is(err, eventlog.ErrDivergedStream):
 		return "The event log .gofast/events.jsonl has the same work advanced on two branches, which usually comes from a merge. Resolve it by hand, keeping one branch's events for that work. " + seeLog
 	case errors.As(err, &malformed):

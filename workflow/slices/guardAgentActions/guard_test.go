@@ -91,6 +91,7 @@ func TestRule1_EachOwnerOnlyCommandHasItsOwnReason(t *testing.T) {
 		"gf reject 'no'":       "Only the owner can reject a submission. Ask the owner to run `gf reject \"<feedback>\"` in their own terminal.",
 		"gf extend 2":          "Only the owner can extend a budget. Ask the owner to run `gf extend <attempts>` in their own terminal.",
 		"gf abandon 'give up'": "Only the owner can abandon work. Ask the owner to run `gf abandon \"<reason>\"` in their own terminal.",
+		"gf log accept":        "Only the owner can accept a changed event log. Ask the owner to run `gf log accept` in their own terminal.",
 	}
 	for command, reason := range cases {
 		assert.Equal(t, denied(reason), decide(bash(command), on(domain.StageSpecify), true, root), command)
@@ -106,6 +107,7 @@ func TestRule1_AgentCommandsAndMentionsAreAllowed(t *testing.T) {
 		"git commit -m 'gf approve wording'",
 		"grep -r approve .",
 		"echo gfapprove",
+		"git log --oneline",
 	} {
 		t.Run(command, func(t *testing.T) {
 			assert.Equal(t, allowed, decide(bash(command), on(domain.StageImplement), true, root))

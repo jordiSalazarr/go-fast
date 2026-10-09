@@ -30,6 +30,20 @@ type View struct {
 	Next    NextView     `json:"next"`
 	// OtherBranches lists work in progress on other branches; never null.
 	OtherBranches []OtherBranchView `json:"otherBranches"`
+	// LogWarning is set when the event log was changed outside gf.
+	LogWarning string `json:"logWarning,omitempty"`
+}
+
+// LogChangedWarning is the view's LogWarning for an event log changed
+// outside gf since gf last wrote it.
+const LogChangedWarning = "The event log was changed outside gf since its last write. Inspect .gofast/events.jsonl (git diff) and run `gf log accept` from your own terminal if the change is legitimate. Until then, gf refuses to change the workflow."
+
+// WarnIfChanged sets the view's LogWarning when the snapshot it was read
+// from is of a log changed outside gf.
+func WarnIfChanged(v *View, s *eventlog.Snapshot) {
+	if s.ChangedOutsideGf() {
+		v.LogWarning = LogChangedWarning
+	}
 }
 
 // OtherBranchView is work in progress on another branch.
@@ -255,6 +269,9 @@ func RenderJSON(w io.Writer, v View) error {
 
 // RenderText writes the view as the text `gf status` prints.
 func RenderText(w io.Writer, v View) {
+	if v.LogWarning != "" {
+		fmt.Fprintf(w, "Warning: %s\n\n", v.LogWarning)
+	}
 	if v.Work == nil {
 		fmt.Fprintln(w, v.Next.Message)
 		if len(v.OtherBranches) > 0 {

@@ -29,6 +29,7 @@ func NewCommand(openStore func() (*eventlog.Store, error), currentBranch func() 
 			var view progress.View
 			err = store.Shared(func(s *eventlog.Snapshot) error {
 				view, err = progress.Read(s, branch)
+				progress.WarnIfChanged(&view, s)
 				return err
 			})
 			if err != nil {

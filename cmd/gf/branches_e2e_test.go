@@ -73,7 +73,8 @@ func TestBranches_DetachedHead_GetsAFriendlyMessage(t *testing.T) {
 }
 
 // The event lines written on two branches, concatenated into one file, as a
-// union merge leaves them: positions repeat.
+// union merge leaves them: positions repeat. The file is edited by hand here,
+// so the owner accepts each edit.
 func TestBranches_ConcatenatedLogsOfTwoBranches_StillWorkOnEach(t *testing.T) {
 	r := newRepo(t)
 	r.git("commit", "-q", "--allow-empty", "-m", "initial")
@@ -86,6 +87,7 @@ func TestBranches_ConcatenatedLogsOfTwoBranches_StillWorkOnEach(t *testing.T) {
 	linesA, err := os.ReadFile(r.eventsFile())
 	require.NoError(t, err)
 	require.NoError(t, os.Remove(r.eventsFile()))
+	r.gf("log", "accept")
 
 	r.git("checkout", "-q", "b")
 	r.gf("start", "--type", "fix-bug", "work on b")
@@ -93,6 +95,7 @@ func TestBranches_ConcatenatedLogsOfTwoBranches_StillWorkOnEach(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, os.WriteFile(r.eventsFile(), append(linesA, linesB...), 0o644))
+	r.gf("log", "accept")
 
 	v := r.status()
 	assert.Equal(t, "work on b", v.Work.Description)

@@ -17,6 +17,7 @@ import (
 	"github.com/jordiSalazarr/go-fast/workflow/eventlog"
 	"github.com/jordiSalazarr/go-fast/workflow/gitbranch"
 	abandonwork "github.com/jordiSalazarr/go-fast/workflow/slices/abandonWork"
+	accepteventlog "github.com/jordiSalazarr/go-fast/workflow/slices/acceptEventLog"
 	"github.com/jordiSalazarr/go-fast/workflow/slices/approve"
 	briefagentonsessionstart "github.com/jordiSalazarr/go-fast/workflow/slices/briefAgentOnSessionStart"
 	extendbudget "github.com/jordiSalazarr/go-fast/workflow/slices/extendBudget"
@@ -83,6 +84,7 @@ func (a *app) rootCommand() *cobra.Command {
 		extendbudget.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch),
 		abandonwork.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch),
 		status.NewCommand(a.openStore, a.currentBranch),
+		accepteventlog.NewCommand(a.openStore, a.resolveCaller),
 		a.hookCommand(),
 	)
 	a.markRun(root)
@@ -172,7 +174,7 @@ func (a *app) openStore() (*eventlog.Store, error) {
 	if err := a.openLogger(true); err != nil {
 		return nil, err
 	}
-	store, err := eventlog.Open(a.root, eventlog.WithLogger(a.logger))
+	store, err := eventlog.Open(a.root, eventlog.WithLogger(a.logger), eventlog.WithSeal(gitbranch.NewCommits(a.root)))
 	if err != nil {
 		return nil, err
 	}

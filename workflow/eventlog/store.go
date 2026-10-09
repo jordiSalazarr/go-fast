@@ -5,9 +5,11 @@ package eventlog
 import (
 	"bytes"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"log/slog"
 	"os"
@@ -152,10 +154,13 @@ func ensureLines(path string, lines []string) error {
 	return nil
 }
 
+// LogPath is the event log's path relative to the repository root.
+func LogPath() string { return dirName + "/" + eventsFile }
+
 // CommittedFiles are the files gf writes that git tracks, relative to the
 // repository root, slash-separated.
 func CommittedFiles() []string {
-	return []string{dirName + "/" + eventsFile, dirName + "/.gitignore", dirName + "/.gitattributes"}
+	return []string{LogPath(), dirName + "/.gitignore", dirName + "/.gitattributes"}
 }
 
 // Dir is gofast's directory under root.
@@ -166,10 +171,11 @@ func LogFile(root string) string { return filepath.Join(root, dirName, logFile) 
 
 // Store is the event log of one repository.
 type Store struct {
-	dir    string
-	now    func() time.Time
-	newID  func() string
-	logger *slog.Logger
+	dir     string
+	now     func() time.Time
+	newID   func() string
+	logger  *slog.Logger
+	commits Commits // nil: the log is not sealed
 }
 
 type Option func(*Store)
@@ -195,10 +201,16 @@ func Open(root string, opts ...Option) (*Store, error) {
 	return s, nil
 }
 
+const (
+	lockExclusive = syscall.LOCK_EX
+	lockShared    = syscall.LOCK_SH
+)
+
 // Exclusive runs fn holding the exclusive lock, for a whole
-// read → decide → append cycle. An interrupted final line is truncated.
+// read → decide → append cycle. An interrupted final line is truncated. A
+// sealed log changed outside gf is refused with a LogChangedError.
 func (s *Store) Exclusive(fn func(*Session) error) error {
-	unlock, err := s.lock(syscall.LOCK_EX)
+	unlock, err := s.lock(lockExclusive)
 	if err != nil {
 		return err
 	}
@@ -211,37 +223,52 @@ func (s *Store) Exclusive(fn func(*Session) error) error {
 	}
 	defer f.Close()
 
-	records, err := s.load(f, true)
+	data, err := s.readComplete(f, true)
 	if err != nil {
 		return err
 	}
-	return fn(newSession(s, f, records))
+	if err := s.checkSeal(data); err != nil {
+		return err
+	}
+	records, err := parse(data)
+	if err != nil {
+		return err
+	}
+	return fn(newSession(s, f, records, data))
 }
 
 // Shared runs fn holding the shared lock, for reading only. An interrupted
-// final line is ignored; the next writer truncates it.
+// final line is ignored; the next writer truncates it. A sealed log changed
+// outside gf is still read; the snapshot says so.
 func (s *Store) Shared(fn func(*Snapshot) error) error {
-	unlock, err := s.lock(syscall.LOCK_SH)
+	unlock, err := s.lock(lockShared)
 	if err != nil {
 		return err
 	}
 	defer unlock()
 
 	path := filepath.Join(s.dir, eventsFile)
+	var data []byte
 	f, err := os.Open(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return fn(&Snapshot{})
-	}
-	if err != nil {
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+	case err != nil:
 		return fmt.Errorf("open %s: %w", path, err)
+	default:
+		defer f.Close()
+		if data, err = s.readComplete(f, false); err != nil {
+			return err
+		}
 	}
-	defer f.Close()
-
-	records, err := s.load(f, false)
+	var changed *LogChangedError
+	if err := s.checkSeal(data); err != nil && !errors.As(err, &changed) {
+		s.logger.Error("could not check the event log seal while reading", "error", err.Error())
+	}
+	records, err := parse(data)
 	if err != nil {
 		return err
 	}
-	return fn(&Snapshot{records: records})
+	return fn(&Snapshot{records: records, changedOutsideGf: changed != nil})
 }
 
 func (s *Store) lock(how int) (unlock func(), err error) {
@@ -260,9 +287,9 @@ func (s *Store) lock(how int) (unlock func(), err error) {
 	}, nil
 }
 
-// load reads every complete line. A final line without a newline is an
-// interrupted write: it is ignored, and truncated when truncate is set.
-func (s *Store) load(f *os.File, truncate bool) ([]Recorded, error) {
+// readComplete reads every complete line. A final line without a newline is
+// an interrupted write: it is ignored, and truncated when truncate is set.
+func (s *Store) readComplete(f *os.File, truncate bool) ([]byte, error) {
 	data, err := io.ReadAll(f)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", f.Name(), err)
@@ -282,7 +309,7 @@ func (s *Store) load(f *os.File, truncate bool) ([]Recorded, error) {
 			}
 		}
 	}
-	return parse(complete)
+	return complete, nil
 }
 
 // parse reads lines in file order. After a union merge, lines of two
@@ -313,10 +340,14 @@ type Session struct {
 	maxPosition int
 	records     []Recorded
 	versions    map[Stream]int
+	sum         hash.Hash // SHA-256 of the file's content, for the seal
+	size        int64
+	head        *string // git HEAD, read once per session when sealing
 }
 
-func newSession(s *Store, f *os.File, records []Recorded) *Session {
-	session := &Session{store: s, file: f, records: records, versions: map[Stream]int{}}
+func newSession(s *Store, f *os.File, records []Recorded, data []byte) *Session {
+	session := &Session{store: s, file: f, records: records, versions: map[Stream]int{}, sum: sha256.New(), size: int64(len(data))}
+	session.sum.Write(data)
 	for _, r := range records {
 		session.versions[r.Stream] = r.Version
 		session.maxPosition = max(session.maxPosition, r.Position)
@@ -372,11 +403,37 @@ func (s *Session) Append(stream Stream, expectedVersion int, actor Actor, events
 	s.records = append(s.records, added...)
 	s.maxPosition += len(events)
 	s.versions[stream] = expectedVersion + len(events)
+	s.reseal(buf.Bytes())
 	return nil
 }
 
+// reseal records the seal of the log after an append. A seal that cannot be
+// written is logged, not returned: the events are on disk, and the next
+// command reports the log as changed, which the owner can accept.
+func (s *Session) reseal(appended []byte) {
+	s.sum.Write(appended)
+	s.size += int64(len(appended))
+	if s.store.commits == nil {
+		return
+	}
+	if s.head == nil {
+		head := s.store.head()
+		s.head = &head
+	}
+	if err := s.store.writeSeal(sealOf(s.sum, s.size, *s.head)); err != nil {
+		s.store.logger.Error("could not seal the event log after an append", "error", err.Error())
+	}
+}
+
 // Snapshot is what a reader sees while holding the shared lock.
-type Snapshot struct{ records []Recorded }
+type Snapshot struct {
+	records          []Recorded
+	changedOutsideGf bool
+}
+
+// ChangedOutsideGf reports that the sealed log was changed outside gf since
+// gf last wrote it.
+func (s *Snapshot) ChangedOutsideGf() bool { return s.changedOutsideGf }
 
 func (s *Snapshot) ReadAll() ([]Recorded, error) {
 	return append([]Recorded(nil), s.records...), nil

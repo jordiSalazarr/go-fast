@@ -70,6 +70,7 @@ func statusText(repo claudehooks.Repo, branchOf func(root string) (domain.Branch
 		if err != nil {
 			return err
 		}
+		progress.WarnIfChanged(&view, s)
 		progress.RenderText(&text, view)
 		return nil
 	})

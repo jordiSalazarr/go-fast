@@ -242,7 +242,7 @@ func TestHookMarkers_StayOutOfTheEventLog(t *testing.T) {
 	for _, e := range entries {
 		names = append(names, e.Name())
 	}
-	assert.Equal(t, []string{"agents", "baselines", "driving"}, names, "markers and the stage visit's baseline")
+	assert.Equal(t, []string{"agents", "baselines", "driving", "log.sum"}, names, "markers, the stage visit's baseline and the log's seal")
 	ignore, _ := os.ReadFile(filepath.Join(r.dir, ".gofast", ".gitignore"))
 	assert.Contains(t, string(ignore), "runtime/")
 }
