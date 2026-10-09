@@ -69,6 +69,16 @@ func TestRule1_OwnerOnlyCommandsAreDeniedInAnySegment(t *testing.T) {
 		"eval gf approve",
 		"if true; then gf approve; fi",
 		"gf status\ngf approve",
+		// The program word is only known at run time.
+		"env -i PATH=/usr/bin:/bin \"$(command -v gf)\" approve",
+		"\"$(command -v gf)\" approve",
+		"$(command -v gf) approve",
+		"`which gf` approve",
+		"$G approve",
+		"${G} --dir . approve",
+		"G=gf; $G approve",
+		"\"\" approve",
+		"bash -c '$G approve'",
 	} {
 		t.Run(command, func(t *testing.T) {
 			assert.Equal(t, denied(approveReason), decide(bash(command), on(domain.StageSpecify), true, root))
@@ -103,6 +113,22 @@ func TestRule1_AgentCommandsAndMentionsAreAllowed(t *testing.T) {
 	}
 }
 
+// Probes the guard does not catch: gf refuses them, since they run without a
+// terminal (see cmd/gf's end-to-end tests).
+func TestRule1_ProbesLeftToGf(t *testing.T) {
+	for _, command := range []string{
+		"cp \"$(command -v gf)\" /tmp/x && /tmp/x approve",
+		"/tmp/x approve",
+		"python3 -c \"import os; os.system('gf approve')\"",
+		"echo approve | xargs gf",
+		"$EDITOR approve.md",
+	} {
+		t.Run(command, func(t *testing.T) {
+			assert.Equal(t, allowed, decide(bash(command), on(domain.StageImplement), true, root))
+		})
+	}
+}
+
 func TestRule2_GofastFilesAndGF_ACTORAreOffLimits(t *testing.T) {
 	for _, command := range []string{
 		"cat .gofast/events.jsonl",
@@ -111,6 +137,10 @@ func TestRule2_GofastFilesAndGF_ACTORAreOffLimits(t *testing.T) {
 		"tail .gofast/gf.log",
 		"GF_ACTOR=owner gf status",
 		"unset GF_ACTOR",
+		"echo '{}' >> .gofast/event?.jsonl",
+		"rm -rf .gofast/runtime",
+		"cat .gofast/runtime/log.sum",
+		"ls .gofast/gf*",
 	} {
 		t.Run(command, func(t *testing.T) {
 			out := decide(bash(command), on(domain.StageImplement), true, root)
@@ -120,7 +150,50 @@ func TestRule2_GofastFilesAndGF_ACTORAreOffLimits(t *testing.T) {
 	}
 }
 
-func TestRules1And2_ApplyEverywhere_EvenOutsideADriveAndForOtherAgents(t *testing.T) {
+func TestRule3_ClearingTheEnvironmentIsDenied(t *testing.T) {
+	for _, command := range []string{
+		"env -i PATH=/usr/bin:/bin gf status",
+		"env -i go test ./...",
+		"env --ignore-environment make",
+		"env -u HOME go test ./...",
+		"env -uHOME go test ./...",
+		"env --unset=HOME go test ./...",
+		"env -iv true",
+		"env - true",
+		"/usr/bin/env -i true",
+		"env FOO=1 -i true",
+		"go vet ./... && env -i true",
+		"sudo env -i true",
+		"unset HOME",
+		"unset -v PATH; go test ./...",
+		"bash -c 'unset X'",
+		"if true; then unset X; fi",
+	} {
+		t.Run(command, func(t *testing.T) {
+			assert.Equal(t, denied(clearEnvironmentReason), decide(bash(command), on(domain.StageImplement), true, root))
+		})
+	}
+}
+
+func TestRule3_OtherUsesOfEnvAreAllowed(t *testing.T) {
+	for _, command := range []string{
+		"env",
+		"env GOFLAGS=-race go test ./...",
+		"env -C /tmp ls",
+		"/usr/bin/env python3 script.py",
+		"go env GOPATH",
+		"printenv HOME",
+		"grep -r unset .",
+		"echo 'env -i' > notes.txt",
+		"git commit -m 'unset the flag'",
+	} {
+		t.Run(command, func(t *testing.T) {
+			assert.Equal(t, allowed, decide(bash(command), on(domain.StageImplement), true, root))
+		})
+	}
+}
+
+func TestRules1To3_ApplyEverywhere_EvenOutsideADriveAndForOtherAgents(t *testing.T) {
 	mainNotDriving := toolCall("", "Bash", map[string]string{"command": "gf approve"})
 	explore := toolCall("Explore", "Bash", map[string]string{"command": "cat .gofast/events.jsonl"})
 
@@ -128,7 +201,7 @@ func TestRules1And2_ApplyEverywhere_EvenOutsideADriveAndForOtherAgents(t *testin
 	assert.Equal(t, "deny", decide(explore, noActiveWork(), false, root).HookSpecificOutput.PermissionDecision)
 }
 
-func TestRules1And2_FailClosed_WhenTheStateOrInputCannotBeRead(t *testing.T) {
+func TestRules1To3_FailClosed_WhenTheStateOrInputCannotBeRead(t *testing.T) {
 	assert.Equal(t, "deny", decide(bash("gf approve"), unreadable(), true, root).HookSpecificOutput.PermissionDecision)
 
 	broken := claudehooks.Input{SessionID: "s1", ToolName: "Bash", ToolInput: json.RawMessage(`"not an object"`)}
@@ -136,7 +209,7 @@ func TestRules1And2_FailClosed_WhenTheStateOrInputCannotBeRead(t *testing.T) {
 	assert.Equal(t, "deny", out.HookSpecificOutput.PermissionDecision)
 }
 
-func TestRule3_WriteScopeOfEachStage(t *testing.T) {
+func TestRule4_WriteScopeOfEachStage(t *testing.T) {
 	cases := []struct {
 		stage domain.Stage
 		path  string
@@ -170,7 +243,7 @@ func TestRule3_WriteScopeOfEachStage(t *testing.T) {
 	}
 }
 
-func TestRule3_RelativePathsResolveAgainstCwd(t *testing.T) {
+func TestRule4_RelativePathsResolveAgainstCwd(t *testing.T) {
 	in := write("gofast:specify", "login/login.go")
 	in.CWD = "/repo"
 
@@ -179,7 +252,7 @@ func TestRule3_RelativePathsResolveAgainstCwd(t *testing.T) {
 	assert.Equal(t, "deny", out.HookSpecificOutput.PermissionDecision)
 }
 
-func TestRule3_EditAndNotebookEditAreGuardedToo(t *testing.T) {
+func TestRule4_EditAndNotebookEditAreGuardedToo(t *testing.T) {
 	edit := toolCall("gofast:review", "Edit", map[string]string{"file_path": "/repo/a.go", "old_string": "a", "new_string": "b"})
 	notebook := toolCall("gofast:review", "NotebookEdit", map[string]string{"notebook_path": "/repo/a.ipynb", "new_source": "x"})
 
@@ -187,26 +260,26 @@ func TestRule3_EditAndNotebookEditAreGuardedToo(t *testing.T) {
 	assert.Equal(t, "deny", decide(notebook, on(domain.StageReview), false, root).HookSpecificOutput.PermissionDecision)
 }
 
-func TestRule3_AppliesToTheMainSessionOnlyWhileDriving(t *testing.T) {
+func TestRule4_AppliesToTheMainSessionOnlyWhileDriving(t *testing.T) {
 	main := write("", "/repo/login/login.go")
 
 	assert.Equal(t, "deny", decide(main, on(domain.StageReview), true, root).HookSpecificOutput.PermissionDecision)
 	assert.Equal(t, allowed, decide(main, on(domain.StageReview), false, root))
 }
 
-func TestRule3_DoesNotApplyToNonGofastAgents(t *testing.T) {
+func TestRule4_DoesNotApplyToNonGofastAgents(t *testing.T) {
 	explore := write("Explore", "/repo/login/login.go")
 
 	assert.Equal(t, allowed, decide(explore, on(domain.StageReview), true, root))
 }
 
-func TestRule3_FailsOpenWithAMessage_WhenTheStateCannotBeRead(t *testing.T) {
+func TestRule4_FailsOpenWithAMessage_WhenTheStateCannotBeRead(t *testing.T) {
 	out := decide(write("gofast:review", "/repo/login/login.go"), unreadable(), false, root)
 
 	assert.Equal(t, claudehooks.Tell("gofast could not read the workflow state, so this write was not checked against the stage's write scope. Details are in .gofast/gf.log."), out)
 }
 
-func TestRule3_WithoutActiveWork_StageAgentsMayNotWrite(t *testing.T) {
+func TestRule4_WithoutActiveWork_StageAgentsMayNotWrite(t *testing.T) {
 	out := decide(write("gofast:implement", "/repo/a.go"), noActiveWork(), false, root)
 
 	assert.Equal(t, denied("There is no active gofast work, so there is no stage to write for. Run /gofast:drive to start one."), out)

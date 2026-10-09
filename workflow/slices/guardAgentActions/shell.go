@@ -7,14 +7,16 @@ import (
 
 // Best-effort reading of a Bash command: enough to find a gf owner-only
 // command in any segment (after &&, ;, |, inside $() or backticks, behind env,
-// sudo and similar wrappers, inside sh -c / eval, or via go run ./cmd/gf).
-// The permission deny rules in the README are the hard layer.
+// sudo and similar wrappers, inside sh -c / eval, or via go run ./cmd/gf), a
+// gf found only at run time (`"$(command -v gf)" approve`, `$G approve`), and
+// a command that clears the environment. It is a cheap first layer: gf itself
+// refuses owner-only commands without a terminal.
 
 var ownerOnlySubcommands = map[string]bool{"approve": true, "reject": true, "extend": true, "abandon": true}
 
 // ownerOnlyCommand returns the first owner-only gf subcommand the command runs.
 func ownerOnlyCommand(command string) (string, bool) {
-	for _, words := range segments(command) {
+	for _, words := range commands(command) {
 		if sub, ok := ownerOnlyIn(words); ok {
 			return sub, true
 		}
@@ -22,8 +24,83 @@ func ownerOnlyCommand(command string) (string, bool) {
 	return "", false
 }
 
+// clearsEnvironment reports whether the command runs `env -i`, `env -u`
+// (or their long forms) or `unset`, which would drop GF_ACTOR=agent.
+func clearsEnvironment(command string) bool {
+	for _, words := range commands(command) {
+		if program := unwrap(words); len(program) > 0 && program[0] == "unset" {
+			return true
+		}
+		for i, w := range words {
+			if path.Base(w) == "env" && envClears(words[i+1:]) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// envClears reads env's options, up to the command it runs.
+func envClears(args []string) bool {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "-" || a == "--ignore-environment" || strings.HasPrefix(a, "--unset"):
+			return true
+		case a == "--":
+			return false
+		case strings.HasPrefix(a, "--"):
+		case strings.HasPrefix(a, "-"):
+			if strings.ContainsAny(a[1:], "iu") {
+				return true
+			}
+			if a == "-C" || a == "-S" || a == "-P" {
+				i++ // the option's argument
+			}
+		case isAssignment(a):
+		default:
+			return false
+		}
+	}
+	return false
+}
+
+// commands returns the simple commands of a command line, including those
+// run through sh -c and eval.
+func commands(command string) [][]string {
+	var all [][]string
+	for _, words := range segments(command) {
+		all = append(all, words)
+		if nested, ok := nestedCommand(unwrap(words)); ok {
+			all = append(all, commands(nested)...)
+		}
+	}
+	return all
+}
+
+// nestedCommand returns the command line a shell's -c or eval runs.
+func nestedCommand(words []string) (string, bool) {
+	if len(words) == 0 {
+		return "", false
+	}
+	prog, args := path.Base(words[0]), words[1:]
+	switch {
+	case shells[prog]:
+		for i, a := range args {
+			if strings.HasPrefix(a, "-") && !strings.HasPrefix(a, "--") && strings.Contains(a, "c") && i+1 < len(args) {
+				return args[i+1], true
+			}
+		}
+	case prog == "eval":
+		return strings.Join(args, " "), true
+	}
+	return "", false
+}
+
 // segments splits a command line into simple commands, each a list of words
-// with quotes removed. Command substitutions become segments of their own.
+// with quotes removed. Command substitutions become segments of their own,
+// and stay in their word as written ($(...), `...`), so a program word that
+// comes from one is recognizable. ${...} also stays as written.
 func segments(s string) [][]string {
 	var (
 		segs   [][]string
@@ -70,25 +147,38 @@ func segments(s string) [][]string {
 				case s[i] == '$' && i+1 < len(s) && s[i+1] == '(':
 					end := closingParen(s, i+1)
 					segs = append(segs, segments(s[i+2:end])...)
+					word.WriteString(s[i:min(end+1, len(s))])
 					i = end
 				case s[i] == '`':
-					end := strings.IndexByte(s[i+1:], '`')
-					if end < 0 {
-						end = len(s) - i - 1
-					}
-					segs = append(segs, segments(s[i+1:i+1+end])...)
-					i += end + 1
+					end := closing(s, i, '`')
+					segs = append(segs, segments(s[i+1:end])...)
+					word.WriteString(s[i:min(end+1, len(s))])
+					i = end
 				default:
 					word.WriteByte(s[i])
 				}
 			}
 		case c == ' ' || c == '\t':
 			flushWord()
-		case strings.IndexByte(";&|\n()`{}", c) >= 0:
-			flushSegment()
 		case c == '$' && i+1 < len(s) && s[i+1] == '(':
+			end := closingParen(s, i+1)
+			segs = append(segs, segments(s[i+2:end])...)
+			word.WriteString(s[i:min(end+1, len(s))])
+			inWord = true
+			i = end
+		case c == '`':
+			end := closing(s, i, '`')
+			segs = append(segs, segments(s[i+1:end])...)
+			word.WriteString(s[i:min(end+1, len(s))])
+			inWord = true
+			i = end
+		case c == '$' && i+1 < len(s) && s[i+1] == '{':
+			end := closing(s, i+1, '}')
+			word.WriteString(s[i:min(end+1, len(s))])
+			inWord = true
+			i = end
+		case strings.IndexByte(";&|\n(){}", c) >= 0:
 			flushSegment()
-			i++
 		default:
 			word.WriteByte(c)
 			inWord = true
@@ -96,6 +186,15 @@ func segments(s string) [][]string {
 	}
 	flushSegment()
 	return segs
+}
+
+// closing returns the index of the first c after open, or len(s).
+func closing(s string, open int, c byte) int {
+	end := strings.IndexByte(s[open+1:], c)
+	if end < 0 {
+		return len(s)
+	}
+	return open + 1 + end
 }
 
 // closingParen returns the index of the parenthesis closing the one at open,
@@ -137,7 +236,7 @@ func ownerOnlyIn(words []string) (string, bool) {
 	prog := path.Base(words[0])
 	args := words[1:]
 	switch {
-	case prog == "gf":
+	case prog == "gf", isDynamic(words[0]):
 		return gfSubcommand(args)
 	case prog == "go" && len(args) > 0 && args[0] == "run":
 		for i, a := range args[1:] {
@@ -149,16 +248,13 @@ func ownerOnlyIn(words []string) (string, bool) {
 			}
 			return "", false
 		}
-	case shells[prog]:
-		for i, a := range args {
-			if strings.HasPrefix(a, "-") && !strings.HasPrefix(a, "--") && strings.Contains(a, "c") && i+1 < len(args) {
-				return ownerOnlyCommand(args[i+1])
-			}
-		}
-	case prog == "eval":
-		return ownerOnlyCommand(strings.Join(args, " "))
 	}
 	return "", false
+}
+
+// isDynamic: the program is only known at run time, so it may be gf.
+func isDynamic(program string) bool {
+	return program == "" || strings.HasPrefix(program, "$") || strings.Contains(program, "$(") || strings.Contains(program, "`")
 }
 
 // unwrap drops leading variable assignments and wrapper commands with their

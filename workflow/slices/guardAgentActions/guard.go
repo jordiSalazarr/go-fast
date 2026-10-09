@@ -43,7 +43,20 @@ type toolInput struct {
 	NotebookPath string `json:"notebook_path"`
 }
 
-var protectedNames = []string{"GF_ACTOR", "events.jsonl", "events.lock", "gf.log"}
+// protectedNames are what a Bash command may not mention: text, then how the
+// denial names it. The .gofast/ prefixes also catch globs such as
+// `.gofast/event?.jsonl`.
+var protectedNames = []struct{ text, name string }{
+	{"GF_ACTOR", "GF_ACTOR"},
+	{"events.jsonl", "events.jsonl"},
+	{"events.lock", "events.lock"},
+	{"gf.log", "gf.log"},
+	{".gofast/event", ".gofast/events.*"},
+	{".gofast/gf", ".gofast/gf.*"},
+	{".gofast/runtime", ".gofast/runtime/"},
+}
+
+const clearEnvironmentReason = "Agents may not clear the environment while gofast is active."
 
 var ownerOnlyReasons = map[string]string{
 	"approve": "Only the owner can approve. Ask the owner to run `gf approve` in their own terminal.",
@@ -53,14 +66,17 @@ var ownerOnlyReasons = map[string]string{
 }
 
 // decide is the guard's rule set:
-//  1. Bash running an owner-only gf command: deny, everywhere.
-//  2. Bash mentioning GF_ACTOR or gofast's log files: deny, everywhere.
-//  3. Write, Edit or NotebookEdit outside the stage's write scope: deny, for
-//     gofast stage agents and for the main session while it drives.
+//  1. Bash running an owner-only gf command, or an owner-only subcommand of a
+//     program only known at run time: deny, everywhere.
+//  2. Bash mentioning GF_ACTOR or gofast's own files: deny, everywhere.
+//  3. Bash clearing the environment (env -i, env -u, unset): deny, everywhere.
+//  4. Write, Edit or NotebookEdit outside the stage's write scope: deny, for
+//     gofast stage agents and for the main session while it drives. gf submit
+//     checks the scope again with git, however the files were written.
 //
-// Rules 1 and 2 need no workflow state, so they hold even when it cannot be
+// Rules 1 to 3 need no workflow state, so they hold even when it cannot be
 // read (fail closed); a Bash call whose input cannot be read is denied too.
-// Rule 3 fails open when the state cannot be read, telling the owner.
+// Rule 4 fails open when the state cannot be read, telling the owner.
 func decide(in claudehooks.Input, facts stageFacts, driving bool, root string) claudehooks.Output {
 	var tool toolInput
 	inputErr := json.Unmarshal(in.ToolInput, &tool)
@@ -73,10 +89,13 @@ func decide(in claudehooks.Input, facts stageFacts, driving bool, root string) c
 		if sub, ok := ownerOnlyCommand(tool.Command); ok {
 			return claudehooks.Deny(ownerOnlyReasons[sub])
 		}
-		for _, name := range protectedNames {
-			if strings.Contains(tool.Command, name) {
-				return claudehooks.Deny(fmt.Sprintf("Agents may not touch %s: it belongs to gofast. Use `gf status` to read the workflow.", name))
+		for _, p := range protectedNames {
+			if strings.Contains(tool.Command, p.text) {
+				return claudehooks.Deny(fmt.Sprintf("Agents may not touch %s: it belongs to gofast. Use `gf status` to read the workflow.", p.name))
 			}
+		}
+		if clearsEnvironment(tool.Command) {
+			return claudehooks.Deny(clearEnvironmentReason)
 		}
 		return claudehooks.Nothing()
 
@@ -109,7 +128,7 @@ func decide(in claudehooks.Input, facts stageFacts, driving bool, root string) c
 	return claudehooks.Nothing()
 }
 
-// scopeApplies: rule 3 covers gofast stage agents, and the main session while
+// scopeApplies: rule 4 covers gofast stage agents, and the main session while
 // it drives work.
 func scopeApplies(in claudehooks.Input, driving bool) bool {
 	if strings.HasPrefix(in.AgentType, "gofast:") {
