@@ -48,6 +48,26 @@ func (e *VersionConflictError) Error() string {
 
 func (e *VersionConflictError) Unwrap() error { return ErrVersionConflict }
 
+// ErrDivergedStream: a stream's versions repeat or skip, which usually means
+// the same work was advanced on two branches that were then merged.
+var ErrDivergedStream = errors.New("stream versions diverge")
+
+// DivergedStreamError reports the line where a stream's version is not the
+// next one.
+type DivergedStreamError struct {
+	Line    int
+	Stream  Stream
+	Version int
+	Want    int
+}
+
+func (e *DivergedStreamError) Error() string {
+	return fmt.Sprintf("%s at line %d: %s: stream %s has version %d, want %d",
+		ErrMalformedLog, e.Line, ErrDivergedStream, e.Stream, e.Version, e.Want)
+}
+
+func (e *DivergedStreamError) Unwrap() []error { return []error{ErrMalformedLog, ErrDivergedStream} }
+
 // MalformedLogError reports a line of events.jsonl that cannot be read.
 type MalformedLogError struct {
 	Line int
@@ -78,47 +98,59 @@ func FindRoot(start string) (string, error) {
 	}
 }
 
-// Init creates .gofast/ under root if needed, and makes sure its .gitignore
-// lists the files that stay local: the lock, the log and runtime markers.
+// Init creates .gofast/ under root if needed, and makes sure of two files in
+// it: .gitignore lists what stays local (the lock, the log, runtime markers),
+// and .gitattributes merges the event log with git's union driver, so work
+// appended on two branches merges without conflicts.
 func Init(root string) error {
 	dir := filepath.Join(root, dirName)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create %s: %w", dir, err)
 	}
-	path := filepath.Join(dir, ".gitignore")
+	if err := ensureLines(filepath.Join(dir, ".gitignore"), ignored); err != nil {
+		return err
+	}
+	return ensureLines(filepath.Join(dir, ".gitattributes"), attributes)
+}
+
+// ignored lists what .gofast/.gitignore keeps out of git.
+var ignored = []string{lockFile, logFile, RuntimeDir + "/"}
+
+// attributes are .gofast/.gitattributes: union merges keep both branches' lines.
+var attributes = []string{eventsFile + " merge=union"}
+
+// ensureLines appends to the file whichever lines it doesn't contain yet.
+func ensureLines(path string, lines []string) error {
 	current, err := os.ReadFile(path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("read %s: %w", path, err)
 	}
-	listed := map[string]bool{}
+	present := map[string]bool{}
 	for _, line := range strings.Split(string(current), "\n") {
-		listed[strings.TrimSpace(line)] = true
+		present[strings.TrimSpace(line)] = true
 	}
-	var missing strings.Builder
-	if len(current) > 0 && !bytes.HasSuffix(current, []byte("\n")) {
-		missing.WriteString("\n")
-	}
-	for _, entry := range ignored {
-		if !listed[entry] {
-			missing.WriteString(entry + "\n")
+	var missing string
+	for _, line := range lines {
+		if !present[line] {
+			missing += line + "\n"
 		}
 	}
-	if missing.Len() == 0 || missing.String() == "\n" {
+	if missing == "" {
 		return nil
+	}
+	if len(current) > 0 && !bytes.HasSuffix(current, []byte("\n")) {
+		missing = "\n" + missing
 	}
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return fmt.Errorf("update %s: %w", path, err)
 	}
 	defer f.Close()
-	if _, err := f.WriteString(missing.String()); err != nil {
+	if _, err := f.WriteString(missing); err != nil {
 		return fmt.Errorf("update %s: %w", path, err)
 	}
 	return nil
 }
-
-// ignored lists what .gofast/.gitignore keeps out of git.
-var ignored = []string{lockFile, logFile, RuntimeDir + "/"}
 
 // Dir is gofast's directory under root.
 func Dir(root string) string { return filepath.Join(root, dirName) }
@@ -247,6 +279,9 @@ func (s *Store) load(f *os.File, truncate bool) ([]Recorded, error) {
 	return parse(complete)
 }
 
+// parse reads lines in file order. After a union merge, lines of two
+// branches interleave and positions repeat or go backwards, so positions are
+// not checked; each stream's versions must still run 1, 2, 3, ...
 func parse(data []byte) ([]Recorded, error) {
 	var records []Recorded
 	versions := map[Stream]int{}
@@ -256,11 +291,8 @@ func parse(data []byte) ([]Recorded, error) {
 		if err != nil {
 			return nil, &MalformedLogError{Line: i + 1, Err: err}
 		}
-		if r.Position != i+1 {
-			return nil, &MalformedLogError{Line: i + 1, Err: fmt.Errorf("position %d, want %d", r.Position, i+1)}
-		}
 		if want := versions[r.Stream] + 1; r.Version != want {
-			return nil, &MalformedLogError{Line: i + 1, Err: fmt.Errorf("stream %s version %d, want %d", r.Stream, r.Version, want)}
+			return nil, &DivergedStreamError{Line: i + 1, Stream: r.Stream, Version: r.Version, Want: want}
 		}
 		versions[r.Stream] = r.Version
 		records = append(records, r)
@@ -270,18 +302,20 @@ func parse(data []byte) ([]Recorded, error) {
 
 // Session reads and appends while holding the exclusive lock.
 type Session struct {
-	store    *Store
-	file     *os.File
-	records  []Recorded
-	versions map[Stream]int
+	store       *Store
+	file        *os.File
+	maxPosition int
+	records     []Recorded
+	versions    map[Stream]int
 }
 
 func newSession(s *Store, f *os.File, records []Recorded) *Session {
-	versions := map[Stream]int{}
+	session := &Session{store: s, file: f, records: records, versions: map[Stream]int{}}
 	for _, r := range records {
-		versions[r.Stream] = r.Version
+		session.versions[r.Stream] = r.Version
+		session.maxPosition = max(session.maxPosition, r.Position)
 	}
-	return &Session{store: s, file: f, records: records, versions: versions}
+	return session
 }
 
 // ReadAll returns every event in log order.
@@ -289,8 +323,9 @@ func (s *Session) ReadAll() ([]Recorded, error) {
 	return append([]Recorded(nil), s.records...), nil
 }
 
-// Append writes events to stream if the stream is at expectedVersion. All
-// lines are written in one write and synced to disk before returning.
+// Append writes events to stream if the stream is at expectedVersion. New
+// positions continue from the highest position in the file. All lines are
+// written in one write and synced to disk before returning.
 func (s *Session) Append(stream Stream, expectedVersion int, actor Actor, events ...domain.Event) error {
 	if len(events) == 0 {
 		return nil
@@ -306,7 +341,7 @@ func (s *Session) Append(stream Stream, expectedVersion int, actor Actor, events
 	for i, e := range events {
 		r := Recorded{
 			ID:         s.store.newID(),
-			Position:   len(s.records) + i + 1,
+			Position:   s.maxPosition + i + 1,
 			Stream:     stream,
 			Version:    expectedVersion + i + 1,
 			Schema:     schemaV1,
@@ -329,6 +364,7 @@ func (s *Session) Append(stream Stream, expectedVersion int, actor Actor, events
 		return fmt.Errorf("append to %s: sync %s: %w", stream, s.file.Name(), err)
 	}
 	s.records = append(s.records, added...)
+	s.maxPosition += len(events)
 	s.versions[stream] = expectedVersion + len(events)
 	return nil
 }

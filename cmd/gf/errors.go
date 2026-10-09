@@ -65,6 +65,8 @@ func friendly(err error, cmd *cobra.Command, ran bool) string {
 		return "gf could not tell who you are. Set `git config user.name \"Your Name\"` (and user.email) in this repository."
 	case errors.Is(err, eventlog.ErrNoRepository):
 		return "Not inside a git repository. Run gf from your repository, or pass --dir."
+	case errors.Is(err, eventlog.ErrDivergedStream):
+		return "The event log .gofast/events.jsonl has the same work advanced on two branches, which usually comes from a merge. Resolve it by hand, keeping one branch's events for that work. " + seeLog
 	case errors.As(err, &malformed):
 		return fmt.Sprintf("The event log .gofast/events.jsonl is damaged at line %d. Restore it from git. %s", malformed.Line, seeLog)
 	case errors.Is(err, eventlog.ErrVersionConflict):

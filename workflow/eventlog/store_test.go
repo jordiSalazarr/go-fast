@@ -102,6 +102,26 @@ func TestOpen_CreatesDirectoryWithGitignore(t *testing.T) {
 	assert.Equal(t, "events.lock\ngf.log\nruntime/\n", string(ignore))
 }
 
+func TestOpen_CreatesGitattributesForUnionMerges(t *testing.T) {
+	_, root := openStore(t)
+
+	attrs, err := os.ReadFile(filepath.Join(root, dirName, ".gitattributes"))
+	require.NoError(t, err)
+	assert.Equal(t, "events.jsonl merge=union\n", string(attrs))
+}
+
+func TestInit_CreatesGitattributesInAnExistingDirectory(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, dirName), 0o755))
+
+	require.NoError(t, Init(root))
+	require.NoError(t, Init(root))
+
+	attrs, err := os.ReadFile(filepath.Join(root, dirName, ".gitattributes"))
+	require.NoError(t, err)
+	assert.Equal(t, "events.jsonl merge=union\n", string(attrs))
+}
+
 func TestInit_AddsMissingEntriesToAnExistingGitignore(t *testing.T) {
 	root := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(root, dirName), 0o755))
@@ -228,21 +248,6 @@ func TestRead_MalformedMiddleLine_IsAHardError(t *testing.T) {
 	require.ErrorIs(t, err, ErrMalformedLog)
 }
 
-func TestRead_OutOfSequencePosition_IsAHardError(t *testing.T) {
-	s, root := openStore(t)
-	require.NoError(t, s.Exclusive(func(sess *Session) error {
-		return sess.Append(WorkStream(workID), 0, agent, allEvents()[:2]...)
-	}))
-	raw, err := os.ReadFile(eventsPath(root))
-	require.NoError(t, err)
-	lines := bytes.SplitAfter(raw, []byte("\n"))
-	require.NoError(t, os.WriteFile(eventsPath(root), append(lines[1], lines[0]...), 0o644))
-
-	var malformed *MalformedLogError
-	require.ErrorAs(t, s.Shared(func(*Snapshot) error { return nil }), &malformed)
-	assert.Equal(t, 1, malformed.Line)
-}
-
 // Each writer appends a pair of events to its own stream inside one lock.
 // With the lock, every pair is contiguous and positions have no gaps.
 func TestExclusive_ContendingWritersDoNotInterleave(t *testing.T) {
@@ -304,4 +309,131 @@ func TestRead_WorkStartedWithoutBranch_IsAHardError(t *testing.T) {
 	require.ErrorAs(t, s.Shared(func(*Snapshot) error { return nil }), &malformed)
 	assert.Equal(t, 1, malformed.Line)
 	assert.ErrorIs(t, malformed, domain.ErrInvalidBranch)
+}
+
+// startedWork is a work's first events, on its own branch.
+func startedWork(id, branch string) []domain.Event {
+	w := must(domain.NewWorkID(id))
+	return []domain.Event{
+		domain.WorkStarted{WorkID: w, WorkType: domain.WorkTypeFixBug, Description: must(domain.NewDescription("bug " + id)), Branch: must(domain.NewBranch(branch))},
+		domain.StageEntered{WorkID: w, Stage: domain.StageDiscovery, Visit: domain.FirstVisit(), Gate: domain.GateHuman, Budget: budget3},
+	}
+}
+
+func appendTo(t *testing.T, root string, stream Stream, version int, events ...domain.Event) {
+	t.Helper()
+	s, err := Open(root)
+	require.NoError(t, err)
+	require.NoError(t, s.Exclusive(func(sess *Session) error { return sess.Append(stream, version, agent, events...) }))
+}
+
+// unionMerge simulates `git merge` with merge=union: the common base, then
+// the lines each branch added.
+func unionMerge(t *testing.T, base, ours, theirs []byte) []byte {
+	t.Helper()
+	require.True(t, bytes.HasPrefix(ours, base))
+	require.True(t, bytes.HasPrefix(theirs, base))
+	merged := append([]byte{}, base...)
+	merged = append(merged, ours[len(base):]...)
+	return append(merged, theirs[len(base):]...)
+}
+
+// mergedLog writes a log where w1 was started on main, then w2 on branch a
+// and w3 on branch b, and a and b were union-merged: positions 3 and 4
+// appear twice.
+func mergedLog(t *testing.T) (root string) {
+	t.Helper()
+	base := t.TempDir()
+	appendTo(t, base, "work-w1", 0, startedWork("w1", "main")...)
+	baseLog, err := os.ReadFile(eventsPath(base))
+	require.NoError(t, err)
+
+	branch := func(id, name string) []byte {
+		dir := t.TempDir()
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, dirName), 0o755))
+		require.NoError(t, os.WriteFile(eventsPath(dir), baseLog, 0o644))
+		appendTo(t, dir, Stream("work-"+id), 0, startedWork(id, name)...)
+		out, err := os.ReadFile(eventsPath(dir))
+		require.NoError(t, err)
+		return out
+	}
+	merged := unionMerge(t, baseLog, branch("w2", "a"), branch("w3", "b"))
+
+	root = t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, dirName), 0o755))
+	require.NoError(t, os.WriteFile(eventsPath(root), merged, 0o644))
+	return root
+}
+
+func TestRead_UnionMergedLog_ReadsInFileOrderDespiteRepeatedPositions(t *testing.T) {
+	root := mergedLog(t)
+	s, err := Open(root)
+	require.NoError(t, err)
+
+	records := readAll(t, s)
+
+	var positions []int
+	var streams []Stream
+	for _, r := range records {
+		positions = append(positions, r.Position)
+		streams = append(streams, r.Stream)
+	}
+	assert.Equal(t, []int{1, 2, 3, 4, 3, 4}, positions)
+	assert.Equal(t, []Stream{"work-w1", "work-w1", "work-w2", "work-w2", "work-w3", "work-w3"}, streams)
+	works, err := NewHistory(records).Works()
+	require.NoError(t, err)
+	assert.Len(t, works, 3)
+}
+
+func TestAppend_AfterAMergedLog_UsesTheHighestPositionPlusOne(t *testing.T) {
+	root := mergedLog(t)
+
+	appendTo(t, root, "work-w1", 2, domain.WorkCompleted{WorkID: workID})
+
+	s, err := Open(root)
+	require.NoError(t, err)
+	records := readAll(t, s)
+	assert.Equal(t, 5, records[len(records)-1].Position)
+	assert.Equal(t, 3, records[len(records)-1].Version)
+}
+
+func TestRead_DuplicatedStreamVersion_IsAHardError(t *testing.T) {
+	// The same work advanced on two branches: both appended version 3 of work-w1.
+	base := t.TempDir()
+	appendTo(t, base, "work-w1", 0, startedWork("w1", "main")...)
+	baseLog, err := os.ReadFile(eventsPath(base))
+	require.NoError(t, err)
+	ours := append(append([]byte{}, baseLog...), mustLine(t, Recorded{ID: "a", Position: 3, Stream: "work-w1", Version: 3, Schema: 1, Actor: agent, Event: domain.WorkCompleted{WorkID: workID}})...)
+	theirs := append(append([]byte{}, baseLog...), mustLine(t, Recorded{ID: "b", Position: 3, Stream: "work-w1", Version: 3, Schema: 1, Actor: agent, Event: domain.WorkAbandoned{WorkID: workID, Owner: owner, Reason: reason}})...)
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, dirName), 0o755))
+	require.NoError(t, os.WriteFile(eventsPath(root), unionMerge(t, baseLog, ours, theirs), 0o644))
+	s, err := Open(root)
+	require.NoError(t, err)
+
+	err = s.Shared(func(*Snapshot) error { return nil })
+
+	require.ErrorIs(t, err, ErrDivergedStream)
+	require.ErrorIs(t, err, ErrMalformedLog)
+	var diverged *DivergedStreamError
+	require.ErrorAs(t, err, &diverged)
+	assert.Equal(t, DivergedStreamError{Line: 4, Stream: "work-w1", Version: 3, Want: 4}, *diverged)
+}
+
+func TestRead_MissingStreamVersion_IsAHardError(t *testing.T) {
+	root := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(root, dirName), 0o755))
+	line := mustLine(t, Recorded{ID: "a", Position: 1, Stream: "work-w1", Version: 2, Schema: 1, Actor: agent, Event: domain.WorkCompleted{WorkID: workID}})
+	require.NoError(t, os.WriteFile(eventsPath(root), line, 0o644))
+	s, err := Open(root)
+	require.NoError(t, err)
+
+	require.ErrorIs(t, s.Shared(func(*Snapshot) error { return nil }), ErrDivergedStream)
+}
+
+func mustLine(t *testing.T, r Recorded) []byte {
+	t.Helper()
+	line, err := encodeLine(r)
+	require.NoError(t, err)
+	return append(line, '\n')
 }
