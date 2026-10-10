@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -38,7 +39,42 @@ func newRepo(t *testing.T) *repo {
 		out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
 		require.NoError(t, err, string(out))
 	}
-	return &repo{t: t, dir: dir}
+	r := &repo{t: t, dir: dir}
+	r.write("go.mod", "module example.com/server\n\ngo 1.24\n")
+	r.write("server/server.go", buggyServer)
+	return r
+}
+
+// configureChecks gives the repository an integration command. Like the
+// owner, it does so before work starts: during a stage, the file would be a
+// change outside the write scope.
+func (r *repo) configureChecks() {
+	r.t.Helper()
+	r.write(".gofast/checks.json", `{"integration": {"command": ["go", "test", "./..."]}, "timeout": "2m"}`)
+}
+
+// The repository's Go module has a bug: Port returns 8081, not 8080.
+const (
+	buggyServer = "package server\n\n// Port is the port the server listens on.\nfunc Port() int { return 8081 }\n"
+	fixedServer = "package server\n\n// Port is the port the server listens on.\nfunc Port() int { return 8080 }\n"
+	// portSpec fails against buggyServer and passes against fixedServer.
+	portSpec = "package server\n\nimport \"testing\"\n\nfunc TestPort_Is8080(t *testing.T) {\n\tif got := Port(); got != 8080 {\n\t\tt.Fatalf(\"Port() = %d, want 8080\", got)\n\t}\n}\n"
+)
+
+// workOnStage does what the current stage needs to pass its exit checks:
+// specify writes a failing spec, implement fixes the bug, and every stage
+// writes its artifact.
+func (r *repo) workOnStage() {
+	r.t.Helper()
+	c := r.status().Current
+	require.NotNil(r.t, c, "expected active work")
+	switch c.Stage {
+	case "specify":
+		r.write("server/port_test.go", portSpec)
+	case "implement":
+		r.write("server/server.go", fixedServer)
+	}
+	r.write(c.Artifact, fmt.Sprintf("# %s\n\nAttempt %d.\n", c.Stage, c.AttemptsUsed+1))
 }
 
 // run runs gf as if typed in a terminal, like the owner does.
@@ -116,6 +152,7 @@ var asAgent = map[string]string{"GF_ACTOR": "agent"}
 
 func TestFixBugPath_EndToEnd(t *testing.T) {
 	r := newRepo(t)
+	r.configureChecks()
 
 	v := r.status()
 	assert.Nil(t, v.Work)
@@ -139,6 +176,7 @@ func TestFixBugPath_EndToEnd(t *testing.T) {
 	v = r.expect("discovery", progress.AssignmentOpen, 1, 3)
 	assert.Equal(t, &progress.ProblemView{Kind: progress.ProblemFailedCheck, Attempt: 1, Text: "cannot reproduce yet"}, v.Current.LastProblem)
 
+	r.workOnStage()
 	r.run(asAgent, "submit", "--passed")
 	v = r.expect("discovery", progress.AssignmentAwaitingApproval, 1, 3)
 	assert.Equal(t, progress.NextOwner, v.Next.Actor)
@@ -157,12 +195,14 @@ func TestFixBugPath_EndToEnd(t *testing.T) {
 	v = r.expect("discovery", progress.AssignmentOpen, 2, 3)
 	assert.Equal(t, &progress.ProblemView{Kind: progress.ProblemRejection, Attempt: 2, Text: "add the browser console output"}, v.Current.LastProblem)
 
+	r.workOnStage()
 	r.gf("submit", "--passed")
 	r.gf("approve")
 
 	// Specify: straight approval on the second human gate.
 	v = r.expect("specify", progress.AssignmentOpen, 0, 3)
 	assert.Equal(t, []string{"done", "current", "pending", "pending", "pending"}, stageStatuses(v))
+	r.workOnStage()
 	r.gf("submit", "--passed")
 	r.expect("specify", progress.AssignmentAwaitingApproval, 0, 3)
 	r.gf("approve")
@@ -182,12 +222,15 @@ func TestFixBugPath_EndToEnd(t *testing.T) {
 
 	r.gf("extend", "2")
 	r.expect("implement", progress.AssignmentOpen, 3, 5)
+	r.workOnStage()
 	r.gf("submit", "--passed") // auto gate: accepted, work advances
 
 	// Review and integration testing pass on auto gates.
 	r.expect("review", progress.AssignmentOpen, 0, 3)
+	r.workOnStage()
 	r.gf("submit", "--passed")
 	r.expect("integration-testing", progress.AssignmentOpen, 0, 3)
+	r.workOnStage()
 	r.gf("submit", "--passed")
 
 	v = r.status()
@@ -209,6 +252,7 @@ func TestFixBugPath_EndToEnd(t *testing.T) {
 func TestOwnerCommands_NeedATerminal_EvenWithoutGF_ACTOR(t *testing.T) {
 	r := newRepo(t)
 	r.gf("start", "--type", "fix-bug", "crash on save")
+	r.workOnStage()
 	submitted := r.runWithoutTerminal(nil, "submit", "--passed")
 	require.Equal(t, 0, submitted.code, "agent commands need no terminal: %s", submitted.stderr)
 	r.expect("discovery", progress.AssignmentAwaitingApproval, 0, 3)
@@ -233,6 +277,7 @@ func TestOwnerCommands_NeedATerminal_EvenWithoutGF_ACTOR(t *testing.T) {
 func TestAbandon_CancelsTheOpenAssignment(t *testing.T) {
 	r := newRepo(t)
 	r.gf("start", "--type", "fix-bug", "crash on save")
+	r.workOnStage()
 	r.gf("submit", "--passed")
 	r.expect("discovery", progress.AssignmentAwaitingApproval, 0, 3)
 

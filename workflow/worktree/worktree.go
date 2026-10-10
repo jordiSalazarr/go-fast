@@ -123,13 +123,13 @@ func (b Baselines) ChangedSince(id domain.AssignmentID) (changed domain.ChangedF
 	if err != nil {
 		return domain.ChangedFiles{}, false, fmt.Errorf("changes since baseline of %s: %w", id, err)
 	}
-	out, err := git(b.root, nil, "diff", "--name-only", "-z", "--no-renames", base, current)
+	names, err := Diff(b.root, base, current)
 	if err != nil {
 		return domain.ChangedFiles{}, false, fmt.Errorf("changes since baseline of %s: %w", id, err)
 	}
 	var paths []domain.RepoPath
-	for _, name := range strings.Split(out, "\x00") {
-		if name == "" || gfWrites[name] {
+	for _, name := range names {
+		if gfWrites[name] {
 			continue
 		}
 		p, err := domain.NewRepoPath(b.root, filepath.FromSlash(name))
@@ -139,6 +139,39 @@ func (b Baselines) ChangedSince(id domain.AssignmentID) (changed domain.ChangedF
 		paths = append(paths, p)
 	}
 	return domain.NewChangedFiles(paths...), false, nil
+}
+
+// Tree returns the baseline tree of a stage visit, if it was recorded on
+// this machine and git still has it.
+func (b Baselines) Tree(id domain.AssignmentID) (tree string, ok bool, err error) { return b.read(id) }
+
+// Diff returns the slash-separated paths that differ between two trees.
+func Diff(root, from, to string) ([]string, error) {
+	out, err := git(root, nil, "diff", "--name-only", "-z", "--no-renames", from, to)
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, name := range strings.Split(out, "\x00") {
+		if name != "" {
+			names = append(names, name)
+		}
+	}
+	return names, nil
+}
+
+// FileAt returns a file's content in a tree; ok is false when the tree has
+// no such file.
+func FileAt(root, tree string, path domain.RepoPath) (content []byte, ok bool, err error) {
+	object := tree + ":" + path.String()
+	if _, err := git(root, nil, "cat-file", "-e", object); err != nil {
+		return nil, false, nil
+	}
+	out, err := git(root, nil, "cat-file", "blob", object)
+	if err != nil {
+		return nil, false, err
+	}
+	return []byte(out), true, nil
 }
 
 // gfWrites are the committed files gf itself changes during a stage visit.

@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -32,35 +33,40 @@ func (r *repo) submitAsAgent(args ...string) string {
 
 func (r *repo) onSpecify() {
 	r.t.Helper()
-	r.write("main.go", "package main\n")
 	r.git("add", "-A")
 	r.git("commit", "-q", "-m", "initial")
 	r.gf("start", "--type", "fix-bug", "login button does nothing")
+	r.workOnStage()
 	r.submitAsAgent("--passed")
 	r.gf("approve")
 	r.expect("specify", progress.AssignmentOpen, 0, 3)
 }
 
+const specifyOutOfScope = "Changed files outside the 'specify' write scope: server/server.go."
+
 func TestScope_SpecifyChangingCode_FailsTheAttempt(t *testing.T) {
 	r := newRepo(t)
 	r.onSpecify()
 
-	r.write("main.go", "package main // fixed outside the write scope\n")
-	r.write("main_test.go", "package main\n")
+	r.workOnStage()
+	r.write("server/server.go", fixedServer) // fixed outside the write scope
 	out := r.submitAsAgent("--passed")
 
-	assert.Contains(t, out, "Changed files outside the 'specify' write scope: main.go.")
+	assert.Contains(t, out, specifyOutOfScope)
 	v := r.expect("specify", progress.AssignmentOpen, 1, 3)
-	assert.Equal(t, &progress.ProblemView{Kind: progress.ProblemFailedCheck, Attempt: 1,
-		Text: "Changed files outside the 'specify' write scope: main.go."}, v.Current.LastProblem)
+	assert.Equal(t, progress.ProblemFailedCheck, v.Current.LastProblem.Kind)
+	assert.True(t, strings.HasPrefix(v.Current.LastProblem.Text, specifyOutOfScope+" specs-fail: no test written in this stage fails (TestPort_Is8080 passed)"),
+		v.Current.LastProblem.Text)
 
 	// Committing the change hides nothing: the baseline is the stage visit's start.
-	r.git("commit", "-q", "-am", "sneak it in")
-	r.submitAsAgent("--passed")
+	r.git("add", "-A")
+	r.git("commit", "-q", "-m", "sneak it in")
+	out = r.submitAsAgent("--passed")
+	assert.Contains(t, out, specifyOutOfScope)
 	r.expect("specify", progress.AssignmentOpen, 2, 3)
 
 	// Reverting it, with only tests changed, passes.
-	r.git("checkout", "-q", "HEAD~1", "--", "main.go")
+	r.git("checkout", "-q", "HEAD~1", "--", "server/server.go")
 	r.submitAsAgent("--passed")
 	r.expect("specify", progress.AssignmentAwaitingApproval, 2, 3)
 }
@@ -69,9 +75,8 @@ func TestScope_SpecifyWritingOnlyTests_Passes(t *testing.T) {
 	r := newRepo(t)
 	r.onSpecify()
 
-	r.write("main_test.go", "package main\n")
-	r.write("testdata/case.json", "{}\n")
-	r.write(r.status().Current.Artifact, "# specify\n")
+	r.workOnStage()
+	r.write("server/testdata/case.json", "{}\n")
 	r.submitAsAgent("--passed")
 
 	r.expect("specify", progress.AssignmentAwaitingApproval, 0, 3)
@@ -80,11 +85,12 @@ func TestScope_SpecifyWritingOnlyTests_Passes(t *testing.T) {
 func TestScope_ImplementWritingIntoGofast_FailsTheAttempt(t *testing.T) {
 	r := newRepo(t)
 	r.onSpecify()
+	r.workOnStage()
 	r.submitAsAgent("--passed")
 	r.gf("approve")
 	r.expect("implement", progress.AssignmentOpen, 0, 3)
 
-	r.write("main.go", "package main // the fix\n")
+	r.workOnStage()
 	r.write(".gofast/works/other/notes.md", "not this work's\n")
 	out := r.submitAsAgent("--passed")
 
@@ -96,14 +102,19 @@ func TestScope_WithoutBaseline_TheCheckStartsNow(t *testing.T) {
 	r := newRepo(t)
 	r.onSpecify()
 	require.NoError(t, os.RemoveAll(filepath.Join(r.dir, ".gofast", "runtime", "baselines")))
-	r.write("main.go", "package main // changed before gf knew the baseline\n")
+	r.write("server/notes.md", "changed before gf knew the baseline\n")
 
 	out := r.hook(nil, "subagent-start", subagentEvent("SubagentStart", "gofast:specify", false))
 	assert.Equal(t, tell("gofast had no record of the working tree when 'specify' began, so its write-scope check starts now."), out)
 	assert.Empty(t, r.hook(nil, "subagent-start", subagentEvent("SubagentStart", "gofast:specify", false)), "only once")
 
+	// Without a baseline nothing the visit did can be checked, so a pass fails closed.
 	require.NoError(t, os.RemoveAll(filepath.Join(r.dir, ".gofast", "runtime", "baselines")))
+	r.workOnStage()
 	out = r.submitAsAgent("--passed")
 	assert.Contains(t, out, "Note: no baseline of the working tree was recorded when 'specify' began, so its write-scope check starts now.")
-	r.expect("specify", progress.AssignmentAwaitingApproval, 0, 3)
+	noBaseline := "no baseline of the working tree was recorded when 'specify' began, so gf can't tell what changed during it"
+	assert.Contains(t, out, "artifact-written: "+noBaseline)
+	assert.Contains(t, out, "specs-fail: "+noBaseline)
+	r.expect("specify", progress.AssignmentOpen, 1, 3)
 }

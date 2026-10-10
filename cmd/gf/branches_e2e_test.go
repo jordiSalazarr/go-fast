@@ -55,6 +55,7 @@ func TestBranches_EachBranchHasItsOwnActiveWork(t *testing.T) {
 	assert.Equal(t, "b", v.OtherBranches[0].Branch)
 
 	// Commands act on the current branch's work only.
+	r.workOnStage()
 	r.gf("submit", "--passed")
 	assert.Equal(t, progress.AssignmentAwaitingApproval, r.status().Current.Assignment)
 	r.git("checkout", "-q", "b")
@@ -83,6 +84,7 @@ func TestBranches_ConcatenatedLogsOfTwoBranches_StillWorkOnEach(t *testing.T) {
 
 	r.git("checkout", "-q", "a")
 	r.gf("start", "--type", "fix-bug", "work on a")
+	r.workOnStage()
 	r.gf("submit", "--passed")
 	linesA, err := os.ReadFile(r.eventsFile())
 	require.NoError(t, err)

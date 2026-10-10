@@ -15,6 +15,7 @@ import (
 	"github.com/jordiSalazarr/go-fast/workflow/caller"
 	"github.com/jordiSalazarr/go-fast/workflow/domain"
 	"github.com/jordiSalazarr/go-fast/workflow/eventlog"
+	"github.com/jordiSalazarr/go-fast/workflow/exitchecks"
 	"github.com/jordiSalazarr/go-fast/workflow/gitbranch"
 	abandonwork "github.com/jordiSalazarr/go-fast/workflow/slices/abandonWork"
 	accepteventlog "github.com/jordiSalazarr/go-fast/workflow/slices/acceptEventLog"
@@ -79,7 +80,7 @@ func (a *app) rootCommand() *cobra.Command {
 	root.PersistentFlags().StringVar(&a.dir, "dir", "", "repository root (default: the git repository containing the working directory)")
 	root.AddCommand(
 		startwork.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch),
-		submitforacceptance.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch, a.changedFiles),
+		submitforacceptance.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch, a.changedFiles, a.runChecks),
 		approve.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch),
 		reject.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch),
 		extendbudget.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch),
@@ -201,6 +202,20 @@ func (a *app) changedFiles(id domain.AssignmentID) (domain.ChangedFiles, bool, e
 		return domain.ChangedFiles{}, false, err
 	}
 	return worktree.OpenBaselines(root).ChangedSince(id)
+}
+
+// runChecks runs a stage visit's exit checks in the repository, with the
+// environment gf itself was given.
+func (a *app) runChecks(v exitchecks.Visit, progress io.Writer) ([]domain.CheckResult, error) {
+	root, err := a.repositoryRoot()
+	if err != nil {
+		return nil, err
+	}
+	config, err := exitchecks.LoadConfig(root)
+	if err != nil {
+		return nil, err
+	}
+	return exitchecks.Runner{Root: root, Config: config, Env: os.Environ(), Progress: progress}.Run(v)
 }
 
 func (a *app) resolveCaller() (caller.Caller, error) {

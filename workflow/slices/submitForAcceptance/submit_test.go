@@ -1,21 +1,52 @@
 package submitforacceptance_test
 
 import (
+	"io"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/jordiSalazarr/go-fast/workflow/domain"
 	. "github.com/jordiSalazarr/go-fast/workflow/domain/domaintest"
 	"github.com/jordiSalazarr/go-fast/workflow/eventlog"
 	"github.com/jordiSalazarr/go-fast/workflow/eventlog/eventlogtest"
+	"github.com/jordiSalazarr/go-fast/workflow/exitchecks"
 	submitforacceptance "github.com/jordiSalazarr/go-fast/workflow/slices/submitForAcceptance"
 )
 
 var agent = eventlog.AgentActor("agent")
 
 func submitting(claim domain.AgentClaim, changed ...string) func(*eventlog.Session) error {
+	return submittingChecked(claim, checksPassing, changed...)
+}
+
+func submittingChecked(claim domain.AgentClaim, checks submitforacceptance.Checks, changed ...string) func(*eventlog.Session) error {
 	return func(log *eventlog.Session) error {
-		_, err := submitforacceptance.SubmitForAcceptance(log, agent, Branch, claim, changes(changed...))
+		_, err := submitforacceptance.SubmitForAcceptance(log, agent, Branch, claim, changes(changed...), checks)
 		return err
+	}
+}
+
+// checksPassing passes every check the stage requires.
+func checksPassing(v exitchecks.Visit, _ io.Writer) ([]domain.CheckResult, error) {
+	var results []domain.CheckResult
+	for _, c := range v.Stage.RequiredChecks() {
+		results = append(results, domain.CheckPassed(c))
+	}
+	return results, nil
+}
+
+// checksFailing fails one check and passes the rest.
+func checksFailing(failing domain.ExitCheck, summary string) submitforacceptance.Checks {
+	return func(v exitchecks.Visit, w io.Writer) ([]domain.CheckResult, error) {
+		results, _ := checksPassing(v, w)
+		for i, r := range results {
+			if r.Check() == failing {
+				results[i] = Must(domain.CheckFailed(failing, summary))
+			}
+		}
+		return results, nil
 	}
 }
 
@@ -89,4 +120,61 @@ func TestGivenNoActiveWork_WhenSubmitting_ThenItIsRejected(t *testing.T) {
 	eventlogtest.Given(t, Completed()...).
 		When(submitting(passed)).
 		ThenRejected(domain.ErrNoActiveWork)
+}
+
+func TestGivenOpenAssignment_WhenAPassFailsAnExitCheck_ThenTheAttemptFailsWithItsSummary(t *testing.T) {
+	eventlogtest.Given(t, OpenOn(domain.StageSpecify)...).
+		When(submittingChecked(passed, checksFailing(domain.CheckSpecsFail, "no test written in this stage fails"), "a_test.go")).
+		Then(Failed(domain.StageSpecify, 1, "specs-fail: no test written in this stage fails."))
+}
+
+func TestGivenOpenAssignment_WhenSubmittingAFailedClaim_ThenNoChecksRun(t *testing.T) {
+	noChecks := func(exitchecks.Visit, io.Writer) ([]domain.CheckResult, error) {
+		t.Fatal("checks ran for a failed claim")
+		return nil, nil
+	}
+	eventlogtest.Given(t, OpenOn(domain.StageImplement)...).
+		When(submittingChecked(failed, noChecks)).
+		Then(Failed(domain.StageImplement, 1, "tests fail"))
+}
+
+func TestGivenImplementAfterSpecify_WhenChecking_ThenTheChecksAreToldAboutBothVisits(t *testing.T) {
+	var got exitchecks.Visit
+	spy := func(v exitchecks.Visit, w io.Writer) ([]domain.CheckResult, error) {
+		got = v
+		return checksPassing(v, w)
+	}
+	eventlogtest.Given(t, OpenOn(domain.StageImplement, Failed(domain.StageImplement, 1, "a"))...).
+		When(submittingChecked(passed, spy, "main.go")).
+		Then(Accepted(domain.StageImplement))
+
+	assert.Equal(t, AssignmentOn(domain.StageImplement), got.Assignment)
+	assert.Equal(t, domain.StageImplement, got.Stage)
+	assert.Equal(t, Attempt(2), got.Attempt)
+	assert.Equal(t, AssignmentOn(domain.StageSpecify), got.Specify)
+	assert.Equal(t, []domain.RepoPath{Must(domain.NewRepoPath("/repo", "main.go"))}, got.Changed.Paths())
+}
+
+func TestGivenAFoundAssignment_WhenItChangesBeforeSubmitting_ThenTheSubmissionConflicts(t *testing.T) {
+	var target submitforacceptance.Target
+	var checked submitforacceptance.Checked
+	scenario := eventlogtest.Given(t, OpenOn(domain.StageImplement)...).
+		When(func(log *eventlog.Session) error {
+			var err error
+			if target, err = submitforacceptance.Find(log, Branch); err != nil {
+				return err
+			}
+			checked, err = submitforacceptance.Check(target, passed, changes(), checksPassing, io.Discard)
+			return err
+		}).
+		Then()
+	// While the checks ran, another submission used an attempt.
+	scenario.When(submitting(failed)).Then(Failed(domain.StageImplement, 1, "tests fail"))
+
+	scenario.When(func(log *eventlog.Session) error {
+		_, err := submitforacceptance.Submit(log, agent, target, passed, checked)
+		return err
+	})
+
+	require.ErrorIs(t, scenario.Err(), eventlog.ErrVersionConflict)
 }

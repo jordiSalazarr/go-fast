@@ -150,6 +150,41 @@ func TestSnapshot_WorksBeforeTheFirstCommit(t *testing.T) {
 	assert.Len(t, tree, 40)
 }
 
+func TestTreeDiffAndFileAt_ReadBaselines(t *testing.T) {
+	root := newRepo(t)
+	baselines := worktree.OpenBaselines(root)
+	_, ok, err := baselines.Tree(assignment)
+	require.NoError(t, err)
+	require.False(t, ok, "no baseline yet")
+	_, err = baselines.Ensure(assignment)
+	require.NoError(t, err)
+	base, ok, err := baselines.Tree(assignment)
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	writeFile(t, root, "main.go", "package main // edited\n")
+	writeFile(t, root, "new_test.go", "package main\n")
+	now, err := worktree.Snapshot(root)
+	require.NoError(t, err)
+
+	names, err := worktree.Diff(root, base, now)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"main.go", "new_test.go"}, names)
+
+	mainGo, err := domain.NewRepoPath(root, "main.go")
+	require.NoError(t, err)
+	content, ok, err := worktree.FileAt(root, base, mainGo)
+	require.NoError(t, err)
+	assert.True(t, ok)
+	assert.Equal(t, "package main\n", string(content))
+
+	newTest, err := domain.NewRepoPath(root, "new_test.go")
+	require.NoError(t, err)
+	_, ok, err = worktree.FileAt(root, base, newTest)
+	require.NoError(t, err)
+	assert.False(t, ok, "not in the baseline")
+}
+
 // Git trusts an index entry whose file stat is unchanged, unless the file
 // is as new as the index itself ("racy git"). A same-size edit in the second
 // the index was written must be seen even when the snapshot is taken later.

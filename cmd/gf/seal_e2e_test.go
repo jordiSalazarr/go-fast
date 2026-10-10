@@ -79,6 +79,7 @@ func TestSeal_GitCheckoutOfAnotherBranchAndBack_IsNotAChange(t *testing.T) {
 	v := r.status()
 	assert.Empty(t, v.LogWarning)
 	assert.Equal(t, "work on main", v.Work.Description)
+	r.workOnStage()
 	r.submitAsAgent("--passed")
 
 	r.git("stash", "-q")

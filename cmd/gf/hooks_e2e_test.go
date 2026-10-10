@@ -161,8 +161,10 @@ func TestHookSessionStart_EndToEnd(t *testing.T) {
 func TestHookStageAgentLifecycle_EndToEnd(t *testing.T) {
 	r := newRepo(t)
 	r.gf("start", "--type", "fix-bug", "login button does nothing")
+	r.workOnStage()
 	r.gf("submit", "--passed")
 	r.gf("approve")
+	r.workOnStage()
 	r.gf("submit", "--passed")
 	r.gf("approve") // now on implement, an auto gate
 	artifact := r.status().Current.Artifact
@@ -214,6 +216,7 @@ func TestHookStageAgentLifecycle_EndToEnd(t *testing.T) {
 func TestHookStop_WaitingForApproval_TellsTheOwnerWhatToReview(t *testing.T) {
 	r := newRepo(t)
 	r.gf("start", "--type", "fix-bug", "login button does nothing")
+	r.workOnStage()
 	r.gf("submit", "--passed")
 	artifact := r.status().Current.Artifact
 	r.hook(nil, "user-prompt-expansion", driveExpansion())
