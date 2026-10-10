@@ -20,6 +20,7 @@ import (
 	accepteventlog "github.com/jordiSalazarr/go-fast/workflow/slices/acceptEventLog"
 	"github.com/jordiSalazarr/go-fast/workflow/slices/approve"
 	briefagentonsessionstart "github.com/jordiSalazarr/go-fast/workflow/slices/briefAgentOnSessionStart"
+	"github.com/jordiSalazarr/go-fast/workflow/slices/checks"
 	extendbudget "github.com/jordiSalazarr/go-fast/workflow/slices/extendBudget"
 	guardagentactions "github.com/jordiSalazarr/go-fast/workflow/slices/guardAgentActions"
 	keepagentonstage "github.com/jordiSalazarr/go-fast/workflow/slices/keepAgentOnStage"
@@ -84,6 +85,7 @@ func (a *app) rootCommand() *cobra.Command {
 		extendbudget.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch),
 		abandonwork.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch),
 		status.NewCommand(a.openStore, a.currentBranch),
+		checks.NewCommand(a.repositoryRoot),
 		accepteventlog.NewCommand(a.openStore, a.resolveCaller),
 		a.hookCommand(),
 	)

@@ -245,6 +245,14 @@ func TestRule4_WriteScopeOfEachStage(t *testing.T) {
 	}
 }
 
+func TestRule4_TheCheckConfigurationIsTheOwners_OnEveryStage(t *testing.T) {
+	for _, stage := range domain.Stages() {
+		out := decide(write("gofast:"+stage.String(), "/repo/.gofast/checks.json"), on(stage), false, root)
+
+		assert.Equal(t, "deny", out.HookSpecificOutput.PermissionDecision, stage.String())
+	}
+}
+
 func TestRule4_RelativePathsResolveAgainstCwd(t *testing.T) {
 	in := write("gofast:specify", "login/login.go")
 	in.CWD = "/repo"

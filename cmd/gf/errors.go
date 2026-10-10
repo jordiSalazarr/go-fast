@@ -10,6 +10,7 @@ import (
 	"github.com/jordiSalazarr/go-fast/workflow/caller"
 	"github.com/jordiSalazarr/go-fast/workflow/domain"
 	"github.com/jordiSalazarr/go-fast/workflow/eventlog"
+	"github.com/jordiSalazarr/go-fast/workflow/exitchecks"
 	"github.com/jordiSalazarr/go-fast/workflow/gitbranch"
 )
 
@@ -23,6 +24,7 @@ func friendly(err error, cmd *cobra.Command, ran bool) string {
 		active    *domain.WorkAlreadyActiveError
 		conflict  *domain.ConflictingActiveWorkError
 		malformed *eventlog.MalformedLogError
+		config    *exitchecks.ConfigError
 	)
 	switch {
 	case errors.Is(err, gitbranch.ErrDetachedHead):
@@ -73,6 +75,8 @@ func friendly(err error, cmd *cobra.Command, ran bool) string {
 		return "The event log .gofast/events.jsonl has the same work advanced on two branches, which usually comes from a merge. Resolve it by hand, keeping one branch's events for that work. " + seeLog
 	case errors.As(err, &malformed):
 		return fmt.Sprintf("The event log .gofast/events.jsonl is damaged at line %d. Restore it from git. %s", malformed.Line, seeLog)
+	case errors.As(err, &config):
+		return fmt.Sprintf("The exit-check configuration %s is invalid: %s. The owner fixes it; `gf checks` shows the result.", exitchecks.ConfigPath, config.Problem)
 	case errors.Is(err, eventlog.ErrVersionConflict):
 		return "The workflow changed while this command ran. Run it again."
 	case errors.Is(err, domain.ErrInconsistentHistory):
