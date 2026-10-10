@@ -68,29 +68,4 @@ func TestValueConstructorsRejectInvalidInput(t *testing.T) {
 	}
 }
 
-func TestExitCheckOutcome_CombinesTheClaimWithTheScopeCheck(t *testing.T) {
-	clean := domain.CheckWriteScope(domain.StageSpecify, workID, domain.NewChangedFiles(must(domain.NewRepoPath("/repo", "a_test.go"))))
-	dirty := domain.CheckWriteScope(domain.StageSpecify, workID, domain.NewChangedFiles(must(domain.NewRepoPath("/repo", "a.go"))))
-	cases := []struct {
-		name   string
-		claim  domain.AgentClaim
-		scope  domain.ScopeCheck
-		passed bool
-		reason string
-	}{
-		{"passed, in scope", domain.ClaimPassed(), clean, true, ""},
-		{"failed, in scope", domain.ClaimFailed(reasonOf("tests fail")), clean, false, "tests fail"},
-		{"passed, out of scope", domain.ClaimPassed(), dirty, false, "Changed files outside the 'specify' write scope: a.go."},
-		{"failed, out of scope", domain.ClaimFailed(reasonOf("tests fail")), dirty, false, "tests fail. Changed files outside the 'specify' write scope: a.go."},
-		{"failed sentence, out of scope", domain.ClaimFailed(reasonOf("Tests fail!")), dirty, false, "Tests fail! Changed files outside the 'specify' write scope: a.go."},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			outcome := domain.NewExitCheckOutcome(c.claim, c.scope)
-			assert.Equal(t, c.passed, outcome.Passed())
-			assert.Equal(t, c.reason, outcome.Reason().String())
-		})
-	}
-}
-
 func second[T any](_ T, err error) error { return err }

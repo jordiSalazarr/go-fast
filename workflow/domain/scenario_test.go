@@ -86,3 +86,16 @@ func attempt(n int) domain.Attempt       { return must(domain.NewAttempt(n)) }
 func attempts(n int) domain.AttemptCount { return must(domain.NewAttemptCount(n)) }
 func budget(n int) domain.AttemptBudget  { return must(domain.NewAttemptBudget(n)) }
 func reasonOf(s string) domain.Reason    { return must(domain.NewReason(s)) }
+
+// passedChecks is every exit check the assignment's stage requires, passed.
+func passedChecks(open domain.Open) []domain.CheckResult {
+	var results []domain.CheckResult
+	for _, c := range open.Stage().RequiredChecks() {
+		results = append(results, domain.CheckPassed(c))
+	}
+	return results
+}
+
+func checkFailed(c domain.ExitCheck, summary string) domain.CheckResult {
+	return must(domain.CheckFailed(c, summary))
+}

@@ -61,7 +61,7 @@ func SubmitForAcceptance(log Log, actor eventlog.Actor, branch domain.Branch, cl
 	if err != nil {
 		return Submission{}, fmt.Errorf("submit for acceptance: %w", err)
 	}
-	events, err := open.SubmitForAcceptance(claim, changed)
+	events, err := open.SubmitForAcceptance(claim, changed, claimedChecks(open.Stage()))
 	if err != nil {
 		return Submission{}, err
 	}
@@ -69,6 +69,16 @@ func SubmitForAcceptance(log Log, actor eventlog.Actor, branch domain.Branch, cl
 		return Submission{}, fmt.Errorf("submit for acceptance: %w", err)
 	}
 	return Submission{Assignment: open, Events: events, ScopeCheckStarted: started}, nil
+}
+
+// claimedChecks takes the agent's word for the stage's exit checks until gf
+// runs them itself.
+func claimedChecks(stage domain.Stage) []domain.CheckResult {
+	var results []domain.CheckResult
+	for _, c := range stage.RequiredChecks() {
+		results = append(results, domain.CheckPassed(c))
+	}
+	return results
 }
 
 func NewCommand(openStore func() (*eventlog.Store, error), automate automations.Runner, resolveCaller func() (caller.Caller, error), currentBranch func() (domain.Branch, error), changes Changes) *cobra.Command {

@@ -19,6 +19,7 @@ var (
 	ErrEmptyDescription      = errors.New("description must not be empty")
 	ErrEmptyFeedback         = errors.New("feedback must not be empty")
 	ErrEmptyReason           = errors.New("reason must not be empty")
+	ErrEmptyCheckSummary     = errors.New("a failed check's summary must not be empty")
 	ErrInvalidOwner          = errors.New("owner must have a name")
 	ErrMissingValue          = errors.New("required value is missing")
 	ErrInvalidBranch         = errors.New("branch name must not be empty or contain whitespace")

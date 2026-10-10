@@ -85,7 +85,7 @@ func TestOpenAssignment_WithMissingValue_IsRejected(t *testing.T) {
 func TestSubmitForAcceptance_Failed_UsesAnAttempt(t *testing.T) {
 	open := stateIs[domain.Open](t, givenAssignment(t, openedOnAutoGate()...))
 
-	got, err := open.SubmitForAcceptance(domain.ClaimFailed(reason), noChanges)
+	got, err := open.SubmitForAcceptance(domain.ClaimFailed(reason), noChanges, nil)
 
 	thenEvents(t, got, err, failed(autoAssignmentID, 1))
 	after := stateIs[domain.Open](t, thenAssignmentState(t, openedOnAutoGate(), got))
@@ -96,7 +96,7 @@ func TestSubmitForAcceptance_FailedReachingTheBudget_Escalates(t *testing.T) {
 	given := history(openedOnAutoGate(), events(failed(autoAssignmentID, 1), failed(autoAssignmentID, 2)))
 	open := stateIs[domain.Open](t, givenAssignment(t, given...))
 
-	got, err := open.SubmitForAcceptance(domain.ClaimFailed(reason), noChanges)
+	got, err := open.SubmitForAcceptance(domain.ClaimFailed(reason), noChanges, nil)
 
 	thenEvents(t, got, err, failed(autoAssignmentID, 3), escalated(autoAssignmentID, 3, 3))
 	stateIs[domain.Escalated](t, thenAssignmentState(t, given, got))
@@ -105,7 +105,7 @@ func TestSubmitForAcceptance_FailedReachingTheBudget_Escalates(t *testing.T) {
 func TestSubmitForAcceptance_WithoutClaim_IsRejected(t *testing.T) {
 	open := stateIs[domain.Open](t, givenAssignment(t, openedOnAutoGate()...))
 
-	got, err := open.SubmitForAcceptance(domain.AgentClaim{}, noChanges)
+	got, err := open.SubmitForAcceptance(domain.AgentClaim{}, noChanges, nil)
 
 	thenRejected(t, got, err, domain.ErrMissingValue)
 }
@@ -114,7 +114,7 @@ func TestSubmitForAcceptance_PassedOnAutoGate_IsAccepted(t *testing.T) {
 	given := history(openedOnAutoGate(), events(failed(autoAssignmentID, 1)))
 	open := stateIs[domain.Open](t, givenAssignment(t, given...))
 
-	got, err := open.SubmitForAcceptance(domain.ClaimPassed(), noChanges)
+	got, err := open.SubmitForAcceptance(domain.ClaimPassed(), noChanges, passedChecks(open))
 
 	thenEvents(t, got, err, domain.AssignmentEvent(domain.AssignmentAccepted{
 		AssignmentID: autoAssignmentID, WorkID: workID, Stage: domain.StageImplement, Visit: visit1,
@@ -126,7 +126,7 @@ func TestSubmitForAcceptance_PassedOnHumanGate_AwaitsApproval(t *testing.T) {
 	given := history(openedOnHumanGate(), events(failed(humanAssignmentID, 1)))
 	open := stateIs[domain.Open](t, givenAssignment(t, given...))
 
-	got, err := open.SubmitForAcceptance(domain.ClaimPassed(), noChanges)
+	got, err := open.SubmitForAcceptance(domain.ClaimPassed(), noChanges, passedChecks(open))
 
 	thenEvents(t, got, err, awaitingApproval(2))
 	waiting := stateIs[domain.AwaitingApproval](t, thenAssignmentState(t, given, got))
@@ -138,7 +138,7 @@ func TestSubmitForAcceptance_PassedWithChangesOutsideTheWriteScope_FailsTheAttem
 	changed := domain.NewChangedFiles(
 		repoPath(t, "main.go"), repoPath(t, ".gofast/works/w1/discovery-v1.md"), repoPath(t, "internal/x.go"))
 
-	got, err := open.SubmitForAcceptance(domain.ClaimPassed(), changed)
+	got, err := open.SubmitForAcceptance(domain.ClaimPassed(), changed, passedChecks(open))
 
 	thenEvents(t, got, err, domain.AssignmentEvent(domain.AttemptFailed{
 		AssignmentID: humanAssignmentID, Attempt: attempt(1),
@@ -152,7 +152,7 @@ func TestSubmitForAcceptance_PassedWithChangesOutsideTheWriteScope_CanEscalate(t
 	given := history(openedOnHumanGate(), events(failed(humanAssignmentID, 1), failed(humanAssignmentID, 2)))
 	open := stateIs[domain.Open](t, givenAssignment(t, given...))
 
-	got, err := open.SubmitForAcceptance(domain.ClaimPassed(), domain.NewChangedFiles(repoPath(t, "main.go")))
+	got, err := open.SubmitForAcceptance(domain.ClaimPassed(), domain.NewChangedFiles(repoPath(t, "main.go")), passedChecks(open))
 
 	thenEvents(t, got, err,
 		domain.AssignmentEvent(domain.AttemptFailed{
@@ -166,7 +166,7 @@ func TestSubmitForAcceptance_PassedWithChangesOutsideTheWriteScope_CanEscalate(t
 func TestSubmitForAcceptance_FailedWithChangesOutsideTheWriteScope_GivesBothReasons(t *testing.T) {
 	open := stateIs[domain.Open](t, givenAssignment(t, openedOnHumanGate()...))
 
-	got, err := open.SubmitForAcceptance(domain.ClaimFailed(reasonOf("cannot reproduce")), domain.NewChangedFiles(repoPath(t, "main.go")))
+	got, err := open.SubmitForAcceptance(domain.ClaimFailed(reasonOf("cannot reproduce")), domain.NewChangedFiles(repoPath(t, "main.go")), nil)
 
 	thenEvents(t, got, err, domain.AssignmentEvent(domain.AttemptFailed{
 		AssignmentID: humanAssignmentID, Attempt: attempt(1),
@@ -177,9 +177,29 @@ func TestSubmitForAcceptance_FailedWithChangesOutsideTheWriteScope_GivesBothReas
 func TestSubmitForAcceptance_PassedWithChangesInsideTheWriteScope_Passes(t *testing.T) {
 	open := stateIs[domain.Open](t, givenAssignment(t, openedOnHumanGate()...))
 
-	got, err := open.SubmitForAcceptance(domain.ClaimPassed(), domain.NewChangedFiles(repoPath(t, ".gofast/works/w1/discovery-v1.md")))
+	got, err := open.SubmitForAcceptance(domain.ClaimPassed(), domain.NewChangedFiles(repoPath(t, ".gofast/works/w1/discovery-v1.md")), passedChecks(open))
 
 	thenEvents(t, got, err, awaitingApproval(1))
+}
+
+func TestSubmitForAcceptance_PassedWithAFailingExitCheck_FailsTheAttempt(t *testing.T) {
+	open := stateIs[domain.Open](t, givenAssignment(t, openedOnAutoGate()...))
+	results := passedChecks(open)
+	results[len(results)-1] = checkFailed(domain.CheckSuitePasses, "1 test failed (TestLogin)")
+
+	got, err := open.SubmitForAcceptance(domain.ClaimPassed(), noChanges, results)
+
+	thenEvents(t, got, err, domain.AssignmentEvent(domain.AttemptFailed{
+		AssignmentID: autoAssignmentID, Attempt: attempt(1), Reason: reasonOf("suite-passes: 1 test failed (TestLogin)."),
+	}))
+}
+
+func TestSubmitForAcceptance_PassedWithoutAllCheckResults_IsRejected(t *testing.T) {
+	open := stateIs[domain.Open](t, givenAssignment(t, openedOnAutoGate()...))
+
+	got, err := open.SubmitForAcceptance(domain.ClaimPassed(), noChanges, passedChecks(open)[1:])
+
+	thenRejected(t, got, err, domain.ErrMissingValue)
 }
 
 func TestApprove_AcceptsTheAssignment(t *testing.T) {
@@ -246,7 +266,7 @@ func TestExtendBudget_ReopensWithTheNewBudget(t *testing.T) {
 	// The extension gives exactly the additional attempts.
 	full := append(append(given, got...), failed(autoAssignmentID, 4))
 	open = stateIs[domain.Open](t, givenAssignment(t, full...))
-	got, err = open.SubmitForAcceptance(domain.ClaimFailed(reason), noChanges)
+	got, err = open.SubmitForAcceptance(domain.ClaimFailed(reason), noChanges, nil)
 	thenEvents(t, got, err, failed(autoAssignmentID, 5), escalated(autoAssignmentID, 5, 5))
 }
 
