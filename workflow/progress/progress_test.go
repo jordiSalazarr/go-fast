@@ -66,6 +66,7 @@ func TestGivenAFailedAttemptOnImplement_WhenQueryingStatus_ThenTheAgentIsToldToW
 		Stage: "implement", Visit: 1, Gate: "auto", Assignment: progress.AssignmentOpen, AttemptsUsed: 1, Budget: 3,
 		Artifact:    ".gofast/works/w1/implement-v1.md",
 		LastProblem: &progress.ProblemView{Kind: progress.ProblemFailedCheck, Attempt: 1, Text: "unit tests fail"},
+		Checks:      []string{"artifact-written", "build-passes", "specs-pass", "specs-untouched", "suite-passes"},
 	}, v.Current)
 	assert.Equal(t, progress.NextView{
 		Actor:    progress.NextAgent,
@@ -126,6 +127,7 @@ func TestGivenAStageWhoseAssignmentIsNotOpenedYet_WhenQueryingStatus_ThenItIsSho
 	assert.Equal(t, &progress.CurrentView{
 		Stage: "specify", Visit: 1, Gate: "human", Assignment: progress.AssignmentOpen, AttemptsUsed: 0, Budget: 3,
 		Artifact: ".gofast/works/w1/specify-v1.md",
+		Checks:   []string{"artifact-written", "specs-fail"},
 	}, v.Current)
 	assert.Equal(t, progress.NextAgent, v.Next.Actor)
 }
@@ -155,6 +157,7 @@ func TestGivenWorkOnReview_WhenRenderingStatusText_ThenItShowsTheCurrentArtifact
 	progress.RenderText(&text, v)
 
 	assert.Contains(t, text.String(), "Artifact: .gofast/works/w1/review-v1.md")
+	assert.Contains(t, text.String(), "Exit checks (run by `gf submit --passed`): artifact-written, formatted, build-passes, suite-passes\n")
 }
 
 func TestGivenWork_WhenQueryingStatus_ThenItShowsItsBranch(t *testing.T) {

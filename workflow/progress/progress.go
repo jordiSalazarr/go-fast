@@ -96,6 +96,9 @@ type CurrentView struct {
 	Budget       int          `json:"budget"`
 	Artifact     string       `json:"artifact"`    // the artifact this stage visit writes
 	LastProblem  *ProblemView `json:"lastProblem"` // null when there is none
+	// Checks are the exit checks `gf submit --passed` runs for this stage,
+	// in order; never null.
+	Checks []string `json:"checks"`
 }
 
 // Problem kinds.
@@ -179,6 +182,7 @@ func Read(log Reader, branch domain.Branch) (View, error) {
 		Stage: work.CurrentStage().String(), Visit: work.CurrentVisit().Int(),
 		Gate: currentStep.Gate().String(), Assignment: AssignmentOpen, Budget: currentStep.Budget().Int(),
 		Artifact: domain.ArtifactFor(work.ID(), work.CurrentStage(), work.CurrentVisit()).String(),
+		Checks:   checkNames(work.CurrentStage()),
 	}
 	view.Current = current
 	stage := work.CurrentStage()
@@ -216,6 +220,14 @@ func Read(log Reader, branch domain.Branch) (View, error) {
 		}
 	}
 	return view, nil
+}
+
+func checkNames(stage domain.Stage) []string {
+	names := []string{}
+	for _, c := range stage.RequiredChecks() {
+		names = append(names, c.String())
+	}
+	return names
 }
 
 func otherBranches(works []domain.WorkState, branch domain.Branch) []OtherBranchView {
@@ -289,6 +301,7 @@ func RenderText(w io.Writer, v View) {
 	c := v.Current
 	fmt.Fprintf(w, "\nCurrent: %s (%s gate), %s, attempts used %d of %d\n", c.Stage, c.Gate, strings.ReplaceAll(c.Assignment, "-", " "), c.AttemptsUsed, c.Budget)
 	fmt.Fprintf(w, "Artifact: %s\n", c.Artifact)
+	fmt.Fprintf(w, "Exit checks (run by `gf submit --passed`): %s\n", strings.Join(c.Checks, ", "))
 	if p := c.LastProblem; p != nil {
 		label := "Last failure"
 		if p.Kind == ProblemRejection {

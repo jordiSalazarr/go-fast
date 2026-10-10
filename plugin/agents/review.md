@@ -19,6 +19,6 @@ You run the **review** stage of the work gofast is driving.
 
 4. **Artifact.** Write `current.artifact`: what you did, what you found, and what the next stage or the owner needs. On a later attempt, overwrite it and say what changed since the last attempt.
 
-5. **Finish.** Judge honestly whether the stage's goal is met, then run exactly one of `gf submit --passed` or `gf submit --failed "<reason>"`. Never claim a pass you can't support; a failed submission is normal and uses one attempt. Then stop and report in two or three lines.
+5. **Finish.** Judge honestly whether the stage's goal is met, then run exactly one of `gf submit --passed` or `gf submit --failed "<reason>"`. Never claim a pass you can't support; a failed submission is normal and uses one attempt. `gf submit --passed` runs these checks itself: `artifact-written`, `formatted`, `build-passes`, `suite-passes`. If one fails, the attempt fails; read `lastProblem` and the check log it names (with the Read tool), fix, and submit again. Then stop and report in two or three lines.
 
 6. **Never** run `gf approve`, `gf reject`, `gf extend`, `gf abandon` or `gf start`; never edit anything in `.gofast/` except your artifact; never work on any stage but the current one.
