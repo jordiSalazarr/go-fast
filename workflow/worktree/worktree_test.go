@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -147,4 +148,25 @@ func TestSnapshot_WorksBeforeTheFirstCommit(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Len(t, tree, 40)
+}
+
+// Git trusts an index entry whose file stat is unchanged, unless the file
+// is as new as the index itself ("racy git"). A same-size edit in the second
+// the index was written must be seen even when the snapshot is taken later.
+func TestChangedSince_SeesASameSizeEditMadeInTheSecondOfTheLastCommit(t *testing.T) {
+	root := newRepo(t)
+	start := time.Now().Truncate(time.Second).Add(time.Second)
+	time.Sleep(time.Until(start))
+
+	writeFile(t, root, "main.go", "package main // 1\n")
+	git(t, root, "-c", "user.name=T", "-c", "user.email=t@x", "commit", "-q", "-am", "one")
+	_, err := worktree.OpenBaselines(root).Ensure(assignment)
+	require.NoError(t, err)
+	writeFile(t, root, "main.go", "package main // 2\n") // same size
+	if time.Since(start) >= time.Second {
+		t.Skip("too slow to stay within one second")
+	}
+	time.Sleep(time.Until(start.Add(time.Second)))
+
+	assert.Equal(t, []string{"main.go"}, changed(t, root))
 }

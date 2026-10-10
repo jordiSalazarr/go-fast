@@ -20,8 +20,8 @@ import (
 
 // Snapshot writes the working state as a git tree and returns its id: tracked
 // files and untracked, non-ignored ones, as `git add -A` stages them. It uses
-// a temporary index, seeded from the real one so unchanged files are not
-// rehashed, and never touches the real index.
+// a temporary index, seeded from the real one (with its timestamp) so
+// unchanged files are not rehashed, and never touches the real index.
 func Snapshot(root string) (string, error) {
 	tmp, err := os.MkdirTemp("", "gf-index-")
 	if err != nil {
@@ -68,7 +68,20 @@ func copyIndex(root, to string) error {
 	if _, err := io.Copy(dst, src); err != nil {
 		return fmt.Errorf("copy index: %w", err)
 	}
-	return dst.Close()
+	if err := dst.Close(); err != nil {
+		return fmt.Errorf("copy index: %w", err)
+	}
+	// Git rechecks the content of entries as new as the index file ("racy
+	// git"). A copy dated now would make a same-size edit made in the second
+	// the real index was written look unchanged.
+	info, err := src.Stat()
+	if err != nil {
+		return fmt.Errorf("copy index: %w", err)
+	}
+	if err := os.Chtimes(to, info.ModTime(), info.ModTime()); err != nil {
+		return fmt.Errorf("copy index: %w", err)
+	}
+	return nil
 }
 
 // Baselines are the stage visits' baselines in one repository.
