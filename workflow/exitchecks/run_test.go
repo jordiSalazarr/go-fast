@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -378,3 +379,44 @@ func TestRun_PrintsEachCheckAsItRuns(t *testing.T) {
 type testWriter []byte
 
 func (w *testWriter) Write(p []byte) (int, error) { *w = append(*w, p...); return len(p), nil }
+
+// A later implement visit, after a rework.
+
+// checkImplementVisit runs implement's checks for its nth visit, whose specs
+// are those of specify's first visit, which ended when implement's first
+// visit began.
+func (m *module) checkImplementVisit(n int) map[domain.ExitCheck]domain.CheckResult {
+	m.t.Helper()
+	id := domain.AssignmentIDFor(WorkID, domain.StageImplement, Visit(n))
+	changed, _, err := worktree.OpenBaselines(m.root).ChangedSince(id)
+	require.NoError(m.t, err)
+	runner := exitchecks.Runner{Root: m.root, Config: exitchecks.Config{Timeout: time.Minute}, Env: os.Environ()}
+	results, err := runner.Run(exitchecks.Visit{
+		Assignment: id, Work: WorkID, Stage: domain.StageImplement, Visit: Visit(n), Attempt: Attempt(1),
+		Specify: AssignmentOn(domain.StageSpecify), SpecifyEnd: AssignmentOn(domain.StageImplement), Changed: changed,
+	})
+	require.NoError(m.t, err)
+	byCheck := map[domain.ExitCheck]domain.CheckResult{}
+	for _, r := range results {
+		byCheck[r.Check()] = r
+	}
+	return byCheck
+}
+
+func TestImplement_OnALaterVisit_TheSpecsAreSpecifysNotTheTestsTheFirstVisitWrote(t *testing.T) {
+	m := specified(t)
+	m.write("server/server.go", fixedCode)
+	m.write("server/extra_test.go", passingSpec) // implement v1's own test, not a spec
+	m.writeArtifact(domain.StageImplement)
+	_, err := worktree.OpenBaselines(m.root).Ensure(domain.AssignmentIDFor(WorkID, domain.StageImplement, Visit(2)))
+	require.NoError(t, err)
+	m.write("server/extra_test.go", strings.ReplaceAll(passingSpec, "IsPositive", "IsAboveZero")) // implement v2 may change it
+
+	results := m.checkImplementVisit(2)
+
+	passes(t, results[domain.CheckSpecsUntouched])
+	passes(t, results[domain.CheckSpecsPass])
+
+	m.write("server/server_test.go", passingSpec) // but not specify's
+	fails(t, m.checkImplementVisit(2)[domain.CheckSpecsUntouched], "server/server_test.go (modified)")
+}

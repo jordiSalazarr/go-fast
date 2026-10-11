@@ -43,7 +43,9 @@ type Target struct {
 	Open    domain.Open
 	version int
 	work    domain.ActiveWork
-	specify domain.AssignmentID
+	// specify is the latest accepted specify visit, and specifyEnd the visit
+	// entered when it was accepted.
+	specify, specifyEnd domain.AssignmentID
 }
 
 // Checked is what gf found out about the stage visit before deciding.
@@ -105,9 +107,23 @@ func Find(log Reader, branch domain.Branch) (Target, error) {
 		return Target{}, fmt.Errorf("submit for acceptance on %s: assignment is %T: %w", work.CurrentStage(), state, domain.ErrNotAwaitingSubmission)
 	}
 	target := Target{Open: open, version: version, work: work}
+	ending := false
 	for _, r := range history.Records(eventlog.WorkStream(work.ID())) {
-		if entered, ok := r.Event.(domain.StageEntered); ok && entered.Stage == domain.StageSpecify {
-			target.specify = domain.AssignmentIDFor(work.ID(), entered.Stage, entered.Visit)
+		entered, ok := r.Event.(domain.StageEntered)
+		if !ok {
+			continue
+		}
+		id := domain.AssignmentIDFor(work.ID(), entered.Stage, entered.Visit)
+		if ending {
+			target.specifyEnd, ending = id, false
+		}
+		if entered.Stage != domain.StageSpecify {
+			continue
+		}
+		if state, _, err := history.Assignment(id); err == nil {
+			if _, accepted := state.(domain.Accepted); accepted {
+				target.specify, target.specifyEnd, ending = id, domain.AssignmentID{}, true
+			}
 		}
 	}
 	return target, nil
@@ -146,7 +162,8 @@ func Check(target Target, claim domain.AgentClaim, changes Changes, checks Check
 	}
 	checked.Results, err = checks(exitchecks.Visit{
 		Assignment: open.ID(), Work: open.Work(), Stage: open.Stage(), Visit: open.Visit(),
-		Attempt: currentAttempt(open), Specify: target.specify, Changed: changed, BaselineStarted: started,
+		Attempt: currentAttempt(open), Specify: target.specify, SpecifyEnd: target.specifyEnd,
+		Changed: changed, BaselineStarted: started,
 	}, progress)
 	if err != nil {
 		return Checked{}, fmt.Errorf("submit for acceptance: %w", err)

@@ -29,9 +29,12 @@ type Visit struct {
 	Stage      domain.Stage
 	Visit      domain.Visit
 	Attempt    domain.Attempt
-	// Specify is the work's specify visit, whose tests implement must keep
-	// and make pass. Zero when the work has none.
-	Specify domain.AssignmentID
+	// Specify is the work's latest accepted specify visit, whose tests
+	// implement must keep and make pass, and SpecifyEnd the stage visit
+	// entered when it was accepted: the tests specify wrote are what changed
+	// between their baselines. Zero when the work has none.
+	Specify    domain.AssignmentID
+	SpecifyEnd domain.AssignmentID
 	// Changed is what the visit changed since its baseline.
 	Changed domain.ChangedFiles
 	// BaselineStarted: the visit had no baseline until this submission, so
@@ -230,7 +233,10 @@ func (c *checkRun) specsFail() (finding, error) {
 }
 
 // specTests are the test files specify changed and the tests it wrote in
-// them: what changed between the specify visit's baseline and this visit's.
+// them: what changed between the latest accepted specify visit's baseline
+// and the baseline of the visit entered when it was accepted. A rework that
+// returns to implement keeps the specs; one that returns to specify brings
+// new ones.
 func (c *checkRun) specTests() (files []domain.RepoPath, tests []string, problem *finding, err error) {
 	var specifyBase string
 	ok := false
@@ -248,7 +254,14 @@ func (c *checkRun) specTests() (files []domain.RepoPath, tests []string, problem
 		f := c.noOwnBaseline()
 		return nil, nil, &f, err
 	}
-	names, err := worktree.Diff(c.Root, specifyBase, ownBase)
+	specifyEnd := ownBase
+	if end := c.visit.SpecifyEnd; end != (domain.AssignmentID{}) && end != c.visit.Assignment {
+		if specifyEnd, ok, err = c.baselines.Tree(end); err != nil || !ok {
+			f := missingBaseline(domain.StageSpecify)
+			return nil, nil, &f, err
+		}
+	}
+	names, err := worktree.Diff(c.Root, specifyBase, specifyEnd)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -261,7 +274,7 @@ func (c *checkRun) specTests() (files []domain.RepoPath, tests []string, problem
 			files = append(files, p)
 		}
 	}
-	tests, broken, err := c.testsChanged(files, specifyBase, ownBase)
+	tests, broken, err := c.testsChanged(files, specifyBase, specifyEnd)
 	if err != nil {
 		return nil, nil, nil, err
 	}

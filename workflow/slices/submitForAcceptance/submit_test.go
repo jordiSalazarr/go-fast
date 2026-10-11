@@ -144,7 +144,8 @@ func TestGivenImplementAfterSpecify_WhenChecking_ThenTheChecksAreToldAboutBothVi
 		got = v
 		return checksPassing(v, w)
 	}
-	eventlogtest.Given(t, OpenOn(domain.StageImplement, Failed(domain.StageImplement, 1, "a"))...).
+	given := append(specifyAccepted(), Opened(domain.StageImplement), Failed(domain.StageImplement, 1, "a"))
+	eventlogtest.Given(t, given...).
 		When(submittingChecked(passed, spy, "main.go")).
 		Then(Accepted(domain.StageImplement))
 
@@ -152,6 +153,7 @@ func TestGivenImplementAfterSpecify_WhenChecking_ThenTheChecksAreToldAboutBothVi
 	assert.Equal(t, domain.StageImplement, got.Stage)
 	assert.Equal(t, Attempt(2), got.Attempt)
 	assert.Equal(t, AssignmentOn(domain.StageSpecify), got.Specify)
+	assert.Equal(t, AssignmentOn(domain.StageImplement), got.SpecifyEnd)
 	assert.Equal(t, []domain.RepoPath{Must(domain.NewRepoPath("/repo", "main.go"))}, got.Changed.Paths())
 }
 
@@ -231,4 +233,62 @@ func TestGivenReview_WhenTheSuiteFails_ThenTheWorkIsHandedToTheFixer(t *testing.
 	eventlogtest.Given(t, OpenOn(domain.StageReview)...).
 		When(submittingChecked(passed, checksFailing(domain.CheckSuitePasses, "1 test failed"))).
 		Then(HandedToFixer(domain.StageReview, 1, "suite-passes: 1 test failed."))
+}
+
+// specifyAccepted is the work on implement's first visit, after the owner
+// approved specify's first visit.
+func specifyAccepted() []domain.Event {
+	return append(OpenOn(domain.StageSpecify, SubmittedForApproval(domain.StageSpecify, 1), Accepted(domain.StageSpecify)),
+		StageEntered(domain.StageImplement))
+}
+
+// visitSpy records the visit the checks run for.
+func visitSpy(got *exitchecks.Visit) submitforacceptance.Checks {
+	return func(v exitchecks.Visit, w io.Writer) ([]domain.CheckResult, error) {
+		*got = v
+		return checksPassing(v, w)
+	}
+}
+
+// reviewHandedBackTo is the work after review's first visit handed it to
+// the fixer, which returned it to target's second visit.
+func reviewHandedBackTo(target domain.Stage) []domain.Event {
+	h := append(specifyAccepted(), Opened(domain.StageImplement), Accepted(domain.StageImplement), StageEntered(domain.StageReview),
+		Opened(domain.StageReview), HandedToFixer(domain.StageReview, 1, "suite fails"))
+	h = append(h, FixerEntered(domain.StageReview, "suite fails")...)
+	return append(h,
+		domain.ReworkStarted{WorkID: WorkID, Target: target, Visit: Visit(2), Reason: Reason("the fix misses a case")},
+		EnteredVisit(target, 2),
+		domain.AssignmentOpened{AssignmentID: domain.AssignmentIDFor(WorkID, target, Visit(2)), WorkID: WorkID, Stage: target, Visit: Visit(2),
+			Gate: EnteredVisit(target, 2).Gate, Budget: EnteredVisit(target, 2).Budget})
+}
+
+func TestGivenAReworkBackToImplement_WhenChecking_ThenTheSpecsAreStillThoseOfTheFirstSpecifyVisit(t *testing.T) {
+	var got exitchecks.Visit
+
+	eventlogtest.Given(t, reviewHandedBackTo(domain.StageImplement)...).
+		When(submittingChecked(passed, visitSpy(&got))).
+		Then(domain.AssignmentAccepted{AssignmentID: domain.AssignmentIDFor(WorkID, domain.StageImplement, Visit(2)), WorkID: WorkID,
+			Stage: domain.StageImplement, Visit: Visit(2)})
+
+	assert.Equal(t, AssignmentOn(domain.StageSpecify), got.Specify)
+	assert.Equal(t, AssignmentOn(domain.StageImplement), got.SpecifyEnd, "specify v1 ended when implement v1 began")
+}
+
+func TestGivenAReworkBackToSpecify_WhenImplementIsChecked_ThenTheSpecsAreThoseOfTheNewSpecifyVisit(t *testing.T) {
+	specify2 := domain.AssignmentIDFor(WorkID, domain.StageSpecify, Visit(2))
+	implement2 := domain.AssignmentIDFor(WorkID, domain.StageImplement, Visit(2))
+	given := append(reviewHandedBackTo(domain.StageSpecify),
+		domain.SubmittedForApproval{AssignmentID: specify2, Attempt: Attempt(1)},
+		domain.AssignmentAccepted{AssignmentID: specify2, WorkID: WorkID, Stage: domain.StageSpecify, Visit: Visit(2)},
+		EnteredVisit(domain.StageImplement, 2),
+		domain.AssignmentOpened{AssignmentID: implement2, WorkID: WorkID, Stage: domain.StageImplement, Visit: Visit(2), Gate: domain.GateAuto, Budget: Budget(3)})
+	var got exitchecks.Visit
+
+	eventlogtest.Given(t, given...).
+		When(submittingChecked(passed, visitSpy(&got))).
+		Then(domain.AssignmentAccepted{AssignmentID: implement2, WorkID: WorkID, Stage: domain.StageImplement, Visit: Visit(2)})
+
+	assert.Equal(t, specify2, got.Specify)
+	assert.Equal(t, implement2, got.SpecifyEnd)
 }
