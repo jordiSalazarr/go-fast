@@ -88,10 +88,12 @@ func TestRule1_OwnerOnlyCommandsAreDeniedInAnySegment(t *testing.T) {
 
 func TestRule1_EachOwnerOnlyCommandHasItsOwnReason(t *testing.T) {
 	cases := map[string]string{
-		"gf reject 'no'":       "Only the owner can reject a submission. Ask the owner to run `gf reject \"<feedback>\"` in their own terminal.",
-		"gf extend 2":          "Only the owner can extend a budget. Ask the owner to run `gf extend <attempts>` in their own terminal.",
-		"gf abandon 'give up'": "Only the owner can abandon work. Ask the owner to run `gf abandon \"<reason>\"` in their own terminal.",
-		"gf log accept":        "Only the owner can accept a changed event log. Ask the owner to run `gf log accept` in their own terminal.",
+		"gf reject 'no'":                  "Only the owner can reject a submission. Ask the owner to run `gf reject \"<feedback>\"` in their own terminal.",
+		"gf extend 2":                     "Only the owner can extend a budget. Ask the owner to run `gf extend <attempts>` in their own terminal.",
+		"gf rework-extend 1":              "Only the owner can allow more rework. Ask the owner to run `gf rework-extend <n>` in their own terminal.",
+		"cd x && GF=1 gf rework-extend 2": "Only the owner can allow more rework. Ask the owner to run `gf rework-extend <n>` in their own terminal.",
+		"gf abandon 'give up'":            "Only the owner can abandon work. Ask the owner to run `gf abandon \"<reason>\"` in their own terminal.",
+		"gf log accept":                   "Only the owner can accept a changed event log. Ask the owner to run `gf log accept` in their own terminal.",
 	}
 	for command, reason := range cases {
 		assert.Equal(t, denied(reason), decide(bash(command), on(domain.StageSpecify), true, root), command)

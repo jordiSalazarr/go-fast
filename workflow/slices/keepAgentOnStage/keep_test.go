@@ -195,6 +195,15 @@ func TestStop_DrivingAndEscalated_IsAllowedTellingTheOwnerTheOptions_AndStopsDri
 	assert.True(t, clear)
 }
 
+func TestStop_DrivingAtTheReworkLimit_IsAllowedTellingTheOwnerTheOptions_AndStopsDriving(t *testing.T) {
+	facts := on(t, domain.StageReview, true, HandedToFixer(domain.StageReview, 1, "suite fails"))
+
+	out, clear := sessionStop(mainStops(false), facts, true)
+
+	assert.Equal(t, claudehooks.Tell("Rework limit reached: 'review' found a problem in the code again, and the work has used its whole rework budget. Review `.gofast/works/w1/review-v1.md`, then run `gf rework-extend <n>` or `gf abandon \"<reason>\"` in your own terminal. After you act, run /gofast:drive to continue."), out)
+	assert.True(t, clear)
+}
+
 func TestStop_DrivingWithNoActiveWork_IsAllowedAndStopsDriving(t *testing.T) {
 	out, clear := sessionStop(mainStops(false), noActiveWork, true)
 

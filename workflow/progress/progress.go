@@ -13,6 +13,7 @@ import (
 
 	"github.com/jordiSalazarr/go-fast/workflow/domain"
 	"github.com/jordiSalazarr/go-fast/workflow/eventlog"
+	"github.com/jordiSalazarr/go-fast/workflow/exitchecks"
 )
 
 // Reader is what the read model needs from the event log.
@@ -62,6 +63,9 @@ type WorkView struct {
 	Branch      string      `json:"branch"`
 	ArtifactDir string      `json:"artifactDir"` // relative to the repository root, ends in "/"
 	Stages      []StageView `json:"stages"`
+	// Reworks is how many times the work entered the fixer, of ReworkBudget.
+	Reworks      int `json:"reworks"`
+	ReworkBudget int `json:"reworkBudget"`
 }
 
 // Stage status values.
@@ -100,6 +104,34 @@ type CurrentView struct {
 	// Checks are the exit checks `gf submit --passed` runs for this stage,
 	// in order; never null.
 	Checks []string `json:"checks"`
+	// Fixer is set while the work is in the fixer: what handed it over.
+	Fixer *FixerView `json:"fixer"`
+	// ReworkOf is set after the fixer returned the work to an earlier stage:
+	// every later stage visit reads the fixer's artifact first.
+	ReworkOf *ReworkOfView `json:"reworkOf"`
+}
+
+// FixerView is the stage visit that handed the work to the fixer.
+type FixerView struct {
+	From      string `json:"from"`
+	FromVisit int    `json:"fromVisit"`
+	Mode      string `json:"mode"`
+	Reason    string `json:"reason"`
+	// Artifact is the failing stage visit's artifact.
+	Artifact string `json:"artifact"`
+	// CheckLog is the full output of the failing attempt's exit checks. It
+	// exists only if they ran: not when the agent itself claimed the failure.
+	CheckLog string `json:"checkLog"`
+	// Targets are the stages the fixer may return the work to, in path order.
+	Targets []string `json:"targets"`
+}
+
+// ReworkOfView is the fixer visit that sent the work back.
+type ReworkOfView struct {
+	FixerArtifact string `json:"fixerArtifact"`
+	Reason        string `json:"reason"`
+	Target        string `json:"target"`
+	TargetVisit   int    `json:"targetVisit"`
 }
 
 // Problem kinds.
@@ -161,24 +193,46 @@ func Read(log Reader, branch domain.Branch) (View, error) {
 		ID: work.ID().String(), Type: work.Type().String(), Description: work.Description().String(),
 		Branch:      work.Branch().String(),
 		ArtifactDir: domain.ArtifactDir(work.ID()).String() + "/",
+		Reworks:     work.Reworks().Int(), ReworkBudget: work.ReworkBudget().Int(),
 	}}
 	lastVisit := map[domain.Stage]domain.Visit{}
+	var reworkOf *ReworkOfView
 	for _, r := range history.Records(eventlog.WorkStream(work.ID())) {
-		if entered, ok := r.Event.(domain.StageEntered); ok {
-			lastVisit[entered.Stage] = entered.Visit
+		switch e := r.Event.(type) {
+		case domain.StageEntered:
+			lastVisit[e.Stage] = e.Visit
+		case domain.ReworkStarted:
+			reworkOf = &ReworkOfView{
+				FixerArtifact: domain.ArtifactFor(work.ID(), domain.StageFixer, lastVisit[domain.StageFixer]).String(),
+				Reason:        e.Reason.String(), Target: e.Target.String(), TargetVisit: e.Visit.Int(),
+			}
 		}
 	}
+	fixer, inFixer := work.(domain.InFixerWork)
+	// In the fixer, the path is done up to the stage that handed over.
+	onPath := work.CurrentStage()
+	if inFixer {
+		onPath = fixer.From()
+	}
 	stageStatus := StageDone
-	currentStep := work.CurrentStep()
 	for _, step := range work.Path().Steps() {
 		sv := StageView{Stage: step.Stage().String(), Gate: step.Gate().String(), Budget: step.Budget().Int(), Status: stageStatus}
-		if step.Stage() == work.CurrentStage() {
+		if step.Stage() == onPath {
 			sv.Status, stageStatus = StageCurrent, StagePending
+			if inFixer {
+				sv.Status = StagePending
+			}
 		}
 		if sv.Status == StageDone {
 			sv.Artifact = domain.ArtifactFor(work.ID(), step.Stage(), lastVisit[step.Stage()]).String()
 		}
 		view.Work.Stages = append(view.Work.Stages, sv)
+	}
+	currentStep := work.CurrentStep()
+	if inFixer {
+		view.Work.Stages = append(view.Work.Stages, StageView{
+			Stage: currentStep.Stage().String(), Gate: currentStep.Gate().String(), Budget: currentStep.Budget().Int(), Status: StageCurrent,
+		})
 	}
 
 	current := &CurrentView{
@@ -186,6 +240,14 @@ func Read(log Reader, branch domain.Branch) (View, error) {
 		Gate: currentStep.Gate().String(), Assignment: AssignmentOpen, Budget: currentStep.Budget().Int(),
 		Artifact: domain.ArtifactFor(work.ID(), work.CurrentStage(), work.CurrentVisit()).String(),
 		Checks:   checkNames(work.CurrentStage()),
+	}
+	if inFixer {
+		current.Fixer, err = fixerView(history, fixer)
+		if err != nil {
+			return View{}, fmt.Errorf("progress: %w", err)
+		}
+	} else {
+		current.ReworkOf = reworkOf
 	}
 	view.Current = current
 	stage := work.CurrentStage()
@@ -202,18 +264,35 @@ func Read(log Reader, branch domain.Branch) (View, error) {
 	}
 	current.LastProblem = lastProblem(history.Records(eventlog.AssignmentStream(assignmentID)))
 
-	switch current.Assignment {
-	case AssignmentAwaitingApproval:
+	_, atReworkLimit := work.(domain.ReworkLimitReachedWork)
+	switch {
+	case atReworkLimit:
+		view.Next = NextView{
+			Actor: NextOwner,
+			Message: fmt.Sprintf("Rework limit reached: '%s' found a problem in the code, and the work already went to the fixer %d of %d times. "+
+				"The owner can run `gf rework-extend <n>` to allow more rework, or `gf abandon \"<reason>\"`.",
+				stage, view.Work.Reworks, view.Work.ReworkBudget),
+			Commands: []string{"gf rework-extend <n>", `gf abandon "<reason>"`},
+		}
+	case current.Assignment == AssignmentAwaitingApproval:
 		view.Next = NextView{
 			Actor:    NextOwner,
 			Message:  fmt.Sprintf("Waiting for the owner to approve '%s': run `gf approve` or `gf reject \"<feedback>\"`.", stage),
 			Commands: []string{"gf approve", `gf reject "<feedback>"`},
 		}
-	case AssignmentEscalated:
+	case current.Assignment == AssignmentEscalated:
 		view.Next = NextView{
 			Actor:    NextOwner,
 			Message:  fmt.Sprintf("Escalated: budget exhausted on '%s'; the owner can run `gf extend <n>` or `gf abandon \"<reason>\"`.", stage),
 			Commands: []string{"gf extend <n>", `gf abandon "<reason>"`},
+		}
+	case inFixer:
+		submit := fmt.Sprintf(`gf submit --passed --route <%s> "<reason>"`, strings.Join(current.Fixer.Targets, "|"))
+		view.Next = NextView{
+			Actor: NextAgent,
+			Message: fmt.Sprintf("Find the root cause of the '%s' failure, then run `%s` to send the work to the stage that can fix it, or `gf submit --failed \"<reason>\"`.",
+				fixer.From(), submit),
+			Commands: []string{submit, `gf submit --failed "<reason>"`},
 		}
 	default:
 		view.Next = NextView{
@@ -223,6 +302,27 @@ func Read(log Reader, branch domain.Branch) (View, error) {
 		}
 	}
 	return view, nil
+}
+
+// fixerView describes the stage visit that handed the work to the fixer.
+func fixerView(history eventlog.History, fixer domain.InFixerWork) (*FixerView, error) {
+	from := domain.AssignmentIDFor(fixer.ID(), fixer.From(), fixer.FromVisit())
+	v := &FixerView{
+		From: fixer.From().String(), FromVisit: fixer.FromVisit().Int(), Mode: fixer.Mode().String(), Reason: fixer.Reason().String(),
+		Artifact: domain.ArtifactFor(fixer.ID(), fixer.From(), fixer.FromVisit()).String(),
+		Targets:  []string{},
+	}
+	for _, t := range fixer.RouteTargets() {
+		v.Targets = append(v.Targets, t.String())
+	}
+	state, _, err := history.Assignment(from)
+	if err != nil {
+		return nil, err
+	}
+	if handed, ok := state.(domain.HandedToFixer); ok {
+		v.CheckLog = exitchecks.LogPath(from, handed.Attempt())
+	}
+	return v, nil
 }
 
 func checkNames(stage domain.Stage) []string {
@@ -306,7 +406,18 @@ func RenderText(w io.Writer, v View) {
 		fmt.Fprintf(w, "  %-9s %-20s %s gate\n", "["+s.Status+"]", s.Stage, s.Gate)
 	}
 	c := v.Current
-	fmt.Fprintf(w, "\nCurrent: %s (%s gate), %s, attempts used %d of %d\n", c.Stage, c.Gate, strings.ReplaceAll(c.Assignment, "-", " "), c.AttemptsUsed, c.Budget)
+	fmt.Fprintf(w, "\nCurrent: %s (%s gate, visit %d), %s, attempts used %d of %d\n", c.Stage, c.Gate, c.Visit, strings.ReplaceAll(c.Assignment, "-", " "), c.AttemptsUsed, c.Budget)
+	fmt.Fprintf(w, "Reworks: %d of %d\n", v.Work.Reworks, v.Work.ReworkBudget)
+	if f := c.Fixer; f != nil {
+		fmt.Fprintf(w, "Handed over by: %s (visit %d), %s: %s\n", f.From, f.FromVisit, f.Mode, f.Reason)
+		fmt.Fprintf(w, "Its artifact: %s\n", f.Artifact)
+		fmt.Fprintf(w, "Its check log: %s (if its checks ran)\n", f.CheckLog)
+		fmt.Fprintf(w, "May return the work to: %s\n", strings.Join(f.Targets, ", "))
+	}
+	if r := c.ReworkOf; r != nil {
+		fmt.Fprintf(w, "Rework: the fixer sent the work back to %s (visit %d): %s\n", r.Target, r.TargetVisit, r.Reason)
+		fmt.Fprintf(w, "Fixer's artifact: %s\n", r.FixerArtifact)
+	}
 	fmt.Fprintf(w, "Artifact: %s\n", c.Artifact)
 	fmt.Fprintf(w, "Exit checks (run by `gf submit --passed`): %s\n", strings.Join(c.Checks, ", "))
 	if p := c.LastProblem; p != nil {

@@ -13,7 +13,7 @@ You run the **specify** stage of the work gofast is driving.
 
 1. **Role.** Produce given/when/then tests that fail against the current code because of the bug. The artifact lists the tests and shows that they fail. Your tests must compile and must fail against the current code because of the bug.
 
-2. **Start.** Run `gf status --json`. Read the work description (`work.description`), the current stage (`current.stage`), and `current.lastProblem`: the previous failure reason or the owner's rejection feedback, which this attempt must address. Read the artifacts of earlier stages in `work.artifactDir`.
+2. **Start.** Run `gf status --json`. Read the work description (`work.description`), the current stage (`current.stage`), and `current.lastProblem`: the previous failure reason or the owner's rejection feedback, which this attempt must address. Read the artifacts of earlier stages in `work.artifactDir`. If `current.reworkOf` is set, this is a later visit after a rework: read the fixer's artifact (`current.reworkOf.fixerArtifact`) first, and address what it says this visit must do.
 
 3. **Work.** Do the stage. Stay inside its write scope: Only tests (`*_test.go`, files under `testdata/`) and the artifact. Writes outside it are denied, and `gf submit` checks every file changed since the stage began, however it was written (Bash included): a change outside the scope fails the attempt until you undo it.
 
@@ -21,4 +21,4 @@ You run the **specify** stage of the work gofast is driving.
 
 5. **Finish.** Judge honestly whether the stage's goal is met, then run exactly one of `gf submit --passed` or `gf submit --failed "<reason>"`. Never claim a pass you can't support; a failed submission is normal and uses one attempt. `gf submit --passed` runs these checks itself: `artifact-written`, `specs-fail`. If one fails, the attempt fails; read `lastProblem` and the check log it names (with the Read tool), fix, and submit again. Then stop and report in two or three lines.
 
-6. **Never** run `gf approve`, `gf reject`, `gf extend`, `gf abandon` or `gf start`; never edit anything in `.gofast/` except your artifact; never work on any stage but the current one.
+6. **Never** run `gf approve`, `gf reject`, `gf extend`, `gf rework-extend`, `gf abandon` or `gf start`; never edit anything in `.gofast/` except your artifact; never work on any stage but the current one.

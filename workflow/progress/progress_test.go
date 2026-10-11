@@ -183,3 +183,69 @@ func TestGivenWorkOnlyOnAnotherBranch_WhenQueryingStatus_ThenItListsIt(t *testin
 	assert.Contains(t, text.String(), "No active work on branch main.")
 	assert.Contains(t, text.String(), "fix-bug 'orders double-charge' is in progress on branch fix/double-charge.")
 }
+
+func TestGivenWorkInTheFixer_WhenQueryingStatus_ThenItShowsWhatHandedItOver(t *testing.T) {
+	v := whenQueried(t, eventlogtest.Given(t, InFixer(domain.StageReview)...))
+
+	require.NotNil(t, v.Current)
+	assert.Equal(t, "fixer", v.Current.Stage)
+	assert.Equal(t, ".gofast/works/w1/fixer-v1.md", v.Current.Artifact)
+	assert.Equal(t, []string{"artifact-written"}, v.Current.Checks)
+	assert.Equal(t, &progress.FixerView{
+		From: "review", FromVisit: 1, Mode: "correctness", Reason: "suite fails",
+		Artifact: ".gofast/works/w1/review-v1.md", CheckLog: ".gofast/runtime/checks/w1-review-1-attempt1.log",
+		Targets: []string{"specify", "implement"},
+	}, v.Current.Fixer)
+	assert.Nil(t, v.Current.ReworkOf)
+	assert.Equal(t, 1, v.Work.Reworks)
+	assert.Equal(t, 3, v.Work.ReworkBudget)
+	assert.Equal(t, map[string]string{
+		"discovery": progress.StageDone, "specify": progress.StageDone, "implement": progress.StageDone,
+		"review": progress.StagePending, "integration-testing": progress.StagePending, "fixer": progress.StageCurrent,
+	}, stageStatuses(v))
+	assert.Equal(t, progress.NextAgent, v.Next.Actor)
+	assert.Equal(t, []string{`gf submit --passed --route <specify|implement> "<reason>"`, `gf submit --failed "<reason>"`}, v.Next.Commands)
+
+	var text strings.Builder
+	progress.RenderText(&text, v)
+	assert.Contains(t, text.String(), "Handed over by: review (visit 1), correctness: suite fails\n")
+	assert.Contains(t, text.String(), "Its artifact: .gofast/works/w1/review-v1.md\n")
+	assert.Contains(t, text.String(), "Reworks: 1 of 3\n")
+}
+
+func TestGivenAReworkBackToImplement_WhenQueryingStatus_ThenEveryLaterVisitSeesTheFixersArtifact(t *testing.T) {
+	route := Route(domain.StageImplement, "the fix ignores negative ports")
+	given := append(InFixer(domain.StageReview),
+		domain.AssignmentAccepted{AssignmentID: AssignmentOn(domain.StageFixer), WorkID: WorkID, Stage: domain.StageFixer, Visit: Visit1, Route: route},
+		domain.ReworkStarted{WorkID: WorkID, Target: domain.StageImplement, Visit: Visit(2), Reason: Reason("the fix ignores negative ports")},
+		EnteredVisit(domain.StageImplement, 2), OpenedVisit(domain.StageImplement, 2))
+
+	v := whenQueried(t, eventlogtest.Given(t, given...))
+
+	assert.Equal(t, "implement", v.Current.Stage)
+	assert.Equal(t, 2, v.Current.Visit)
+	assert.Equal(t, ".gofast/works/w1/implement-v2.md", v.Current.Artifact)
+	want := &progress.ReworkOfView{FixerArtifact: ".gofast/works/w1/fixer-v1.md", Reason: "the fix ignores negative ports", Target: "implement", TargetVisit: 2}
+	assert.Equal(t, want, v.Current.ReworkOf)
+	assert.Nil(t, v.Current.Fixer)
+
+	v = whenQueried(t, eventlogtest.Given(t, append(given, Accepted(domain.StageImplement), EnteredVisit(domain.StageReview, 2))...))
+
+	assert.Equal(t, "review", v.Current.Stage)
+	assert.Equal(t, want, v.Current.ReworkOf, "later stages run again with the fixer's findings")
+}
+
+func TestGivenTheReworkLimit_WhenQueryingStatus_ThenTheOwnerIsAskedToExtendOrAbandon(t *testing.T) {
+	given := append(ReworkedOnReview(3), OpenedVisit(domain.StageReview, 4), HandedToFixerOnVisit(domain.StageReview, 4, "suite fails"),
+		domain.ReworkLimitReached{WorkID: WorkID, Reworks: Must(domain.NewReworkCount(3))})
+
+	v := whenQueried(t, eventlogtest.Given(t, given...))
+
+	assert.Equal(t, "review", v.Current.Stage)
+	assert.Equal(t, progress.AssignmentHandedToFixer, v.Current.Assignment)
+	assert.Equal(t, 3, v.Work.Reworks)
+	assert.Equal(t, progress.NextOwner, v.Next.Actor)
+	assert.Equal(t, []string{"gf rework-extend <n>", `gf abandon "<reason>"`}, v.Next.Commands)
+	assert.Contains(t, v.Next.Message, "Rework limit reached")
+	assert.Contains(t, v.Next.Message, "3 of 3 times")
+}

@@ -111,6 +111,11 @@ func sessionStop(in claudehooks.Input, facts assignmentFacts, driving bool) (out
 	case domain.Escalated:
 		return claudehooks.Tell(fmt.Sprintf("Budget exhausted on '%s'. Review `%s`, then run `gf extend <n>` or `gf abandon \"<reason>\"` in your own terminal. %s",
 			facts.stage, facts.artifact, resumeHint)), true
+	case domain.HandedToFixer:
+		// The automations take a handover into the fixer at once, so the
+		// current visit stays handed over only at the rework limit.
+		return claudehooks.Tell(fmt.Sprintf("Rework limit reached: '%s' found a problem in the code again, and the work has used its whole rework budget. Review `%s`, then run `gf rework-extend <n>` or `gf abandon \"<reason>\"` in your own terminal. %s",
+			facts.stage, facts.artifact, resumeHint)), true
 	}
 	return claudehooks.Nothing(), false
 }

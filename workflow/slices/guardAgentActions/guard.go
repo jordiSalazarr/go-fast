@@ -59,11 +59,12 @@ var protectedNames = []struct{ text, name string }{
 const clearEnvironmentReason = "Agents may not clear the environment while gofast is active."
 
 var ownerOnlyReasons = map[string]string{
-	"approve": "Only the owner can approve. Ask the owner to run `gf approve` in their own terminal.",
-	"reject":  "Only the owner can reject a submission. Ask the owner to run `gf reject \"<feedback>\"` in their own terminal.",
-	"extend":  "Only the owner can extend a budget. Ask the owner to run `gf extend <attempts>` in their own terminal.",
-	"abandon": "Only the owner can abandon work. Ask the owner to run `gf abandon \"<reason>\"` in their own terminal.",
-	"log":     "Only the owner can accept a changed event log. Ask the owner to run `gf log accept` in their own terminal.",
+	"approve":       "Only the owner can approve. Ask the owner to run `gf approve` in their own terminal.",
+	"reject":        "Only the owner can reject a submission. Ask the owner to run `gf reject \"<feedback>\"` in their own terminal.",
+	"extend":        "Only the owner can extend a budget. Ask the owner to run `gf extend <attempts>` in their own terminal.",
+	"rework-extend": "Only the owner can allow more rework. Ask the owner to run `gf rework-extend <n>` in their own terminal.",
+	"abandon":       "Only the owner can abandon work. Ask the owner to run `gf abandon \"<reason>\"` in their own terminal.",
+	"log":           "Only the owner can accept a changed event log. Ask the owner to run `gf log accept` in their own terminal.",
 }
 
 // decide is the guard's rule set:

@@ -1,11 +1,13 @@
 # gofast — Claude Code plugin
 
 Drives an agent along gofast's fix-bug path (discovery → specify → implement →
-review → integration-testing). The `gf` CLI decides where the work is and
-refuses invalid moves; this plugin connects it to Claude Code:
+review → integration-testing), with a fixer that sends work back when review
+or integration testing finds the code wrong. The `gf` CLI decides where the
+work is and refuses invalid moves; this plugin connects it to Claude Code:
 
 - **Stage agents** `gofast:discovery`, `gofast:specify`, `gofast:implement`,
-  `gofast:review`, `gofast:integration-testing`: one subagent per stage.
+  `gofast:review`, `gofast:integration-testing` and `gofast:fixer`: one
+  subagent per stage.
 - **`/gofast:drive`**: the orchestrator. It reads `gf status`, runs the right
   stage agent and repeats until the owner is needed.
 - **Hooks** (`gf hook <event>`): the agent can't approve, can't touch the
@@ -57,6 +59,7 @@ the hard layer, in `~/.claude/settings.json`
       "Bash(gf approve *)",
       "Bash(gf reject *)",
       "Bash(gf extend *)",
+      "Bash(gf rework-extend *)",
       "Bash(gf abandon *)",
       "Bash(gf log *)"
     ]
@@ -86,12 +89,14 @@ The guard hook and `gf`'s own owner check (below) cover those.
    agent that tries to finish without submitting is sent back to submit.
 4. **The loop.** While the stage is open, the driving session isn't allowed to
    stop: it runs the next agent. Failed submissions use attempts, and an
-   exhausted budget escalates, so the loop always ends.
+   exhausted budget escalates; a code failure sends the work to the fixer, and
+   reworks are limited too. So the loop always ends.
 5. **The owner is needed.** On a human gate (discovery, specify) the session
    stops once the stage is waiting for approval, and tells you which artifact
-   to read. When a budget is exhausted, it stops and tells you the options.
-   Either way, drive mode ends there: after you approve, reject, extend or
-   abandon in your own terminal, run `/gofast:drive` to continue. Until you
+   to read. When a budget is exhausted, or the work reaches its rework limit,
+   it stops and tells you the options. Either way, drive mode ends there:
+   after you approve, reject, extend or abandon in your own terminal, run
+   `/gofast:drive` to continue. Until you
    do, the session behaves like any other and is never held. Drive mode also
    ends when there is no active work left on the branch.
 
@@ -108,17 +113,50 @@ list them.
 | implement | artifact-written, build-passes, formatted, specs-pass, specs-untouched, suite-passes |
 | review | artifact-written, formatted, build-passes, suite-passes |
 | integration-testing | artifact-written, integration-passes |
+| fixer | artifact-written |
 
 A stage that may only write its artifact can't fix code, so every check
 about code it requires is also required by implement, which can: unformatted
 code fails implement, not review. The one exception is integration-passes,
 integration testing's own purpose.
 
+## The fixer and rework
+
+A failed submission doesn't always mean the stage did its own work badly.
+gf tells two kinds apart:
+
+- **Stage-work failure**: the artifact is missing or unchanged, a file
+  outside the write scope changed, or a stage that can change code (specify,
+  implement) failed. The same stage tries again, using an attempt.
+- **Code failure**: in a stage that checks code it can't change (review,
+  integration testing), any other failed check, or the agent's own
+  `--failed` (review found a blocking problem). Retrying that stage can never
+  fix the code, so the work goes to the **fixer** instead, using no attempt.
+
+The fixer (`gofast:fixer`) finds the root cause and writes it in its
+artifact, with what the next visit must do. It ends with
+`gf submit --passed --route <specify|implement> "<reason>"`: specify if the
+spec was wrong or missed a case, implement if the code is wrong. gf only
+accepts an earlier stage on the work's path that can change code; any other
+route is refused without using an attempt.
+
+The work then starts a **new visit** of that stage, with its own artifact
+(`<stage>-v2.md`), baseline and attempts, and every later stage runs again.
+Each of those visits shows the fixer's artifact as `current.reworkOf` in
+`gf status --json`, and its agent reads it first. Implement's specs are those
+of the latest accepted specify visit: a rework to specify brings new specs, a
+rework to implement keeps the old ones.
+
+A work may enter the fixer **3 times**. On the fourth handover it stops at
+its rework limit and drive mode ends. The owner runs
+`gf rework-extend <n>` (owner only, terminal required) to allow more, or
+`gf abandon "<reason>"`.
+
 ## Write scopes
 
 | Stage | May write |
 |---|---|
-| discovery, review, integration-testing | only the work's artifact directory |
+| discovery, review, integration-testing, fixer | only the work's artifact directory |
 | specify | tests (`*_test.go`, files under `testdata/`) and artifacts |
 | implement | anything except gofast's own files in `.gofast/` |
 
@@ -161,7 +199,8 @@ any that clears the environment: `env -i`, `env --ignore-environment`,
 ## How the owner approves
 
 **Approve from your own terminal, not from inside Claude Code.** `gf approve`,
-`gf reject`, `gf extend`, `gf abandon` and `gf log accept` are owner-only, and
+`gf reject`, `gf extend`, `gf rework-extend`, `gf abandon` and `gf log accept`
+are owner-only, and
 `gf` checks two things before they reach the workflow:
 
 1. **stdin is a terminal** (the isatty check, via the terminal driver).
@@ -179,6 +218,7 @@ a separate terminal, in the repository:
 gf status                       # what is waiting, and which artifact to read
 gf approve                      # or: gf reject "<feedback>"
 gf extend 2                     # after an escalation; or: gf abandon "<reason>"
+gf rework-extend 1              # at the rework limit; or: gf abandon "<reason>"
 ```
 
 Then go back to Claude Code and run `/gofast:drive` to continue.

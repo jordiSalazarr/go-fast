@@ -45,6 +45,7 @@ var (
 	ErrNotAwaitingSubmission = errors.New("assignment is not open for a submission")
 	ErrNotAwaitingApproval   = errors.New("assignment is not awaiting approval")
 	ErrNotEscalated          = errors.New("assignment is not escalated")
+	ErrNotAtReworkLimit      = errors.New("work has not reached its rework limit")
 )
 
 // ErrInconsistentHistory means a stream's events cannot have been produced by

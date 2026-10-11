@@ -63,6 +63,10 @@ func friendly(err error, cmd *cobra.Command, ran bool) string {
 		return "Only the fixer chooses a route. Submit with `gf submit --passed` or `gf submit --failed \"<reason>\"`. No attempt was used."
 	case errors.Is(err, domain.ErrUnknownStage):
 		return fmt.Sprintf("Unknown stage. Stages: %s.", stageNames(domain.Stages()))
+	case errors.Is(err, domain.ErrNotAtReworkLimit):
+		return "Rework can only be extended when the work reached its rework limit. Run `gf status` to see what happens next."
+	case errors.Is(err, domain.ErrInvalidReworkBudget):
+		return "The number of extra reworks must be a positive whole number, e.g. `gf rework-extend 1`."
 	case errors.Is(err, domain.ErrUnknownWorkType):
 		names := make([]string, 0, len(domain.WorkTypes()))
 		for _, t := range domain.WorkTypes() {

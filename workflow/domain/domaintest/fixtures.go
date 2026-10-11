@@ -167,3 +167,10 @@ func ReworkedOnReview(n int) []domain.Event {
 	}
 	return events
 }
+
+// OpenedVisit is the assignment of a stage's nth visit, opened.
+func OpenedVisit(stage domain.Stage, n int) domain.AssignmentOpened {
+	o := Opened(stage)
+	o.AssignmentID, o.Visit = domain.AssignmentIDFor(WorkID, stage, Visit(n)), Visit(n)
+	return o
+}

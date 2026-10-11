@@ -23,6 +23,7 @@ import (
 	briefagentonsessionstart "github.com/jordiSalazarr/go-fast/workflow/slices/briefAgentOnSessionStart"
 	"github.com/jordiSalazarr/go-fast/workflow/slices/checks"
 	extendbudget "github.com/jordiSalazarr/go-fast/workflow/slices/extendBudget"
+	extendreworkbudget "github.com/jordiSalazarr/go-fast/workflow/slices/extendReworkBudget"
 	guardagentactions "github.com/jordiSalazarr/go-fast/workflow/slices/guardAgentActions"
 	keepagentonstage "github.com/jordiSalazarr/go-fast/workflow/slices/keepAgentOnStage"
 	"github.com/jordiSalazarr/go-fast/workflow/slices/reject"
@@ -84,6 +85,7 @@ func (a *app) rootCommand() *cobra.Command {
 		approve.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch),
 		reject.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch),
 		extendbudget.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch),
+		extendreworkbudget.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch),
 		abandonwork.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch),
 		status.NewCommand(a.openStore, a.currentBranch),
 		checks.NewCommand(a.repositoryRoot),
