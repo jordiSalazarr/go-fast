@@ -66,7 +66,7 @@ func statusText(repo claudehooks.Repo, branchOf func(root string) (domain.Branch
 	}
 	var text strings.Builder
 	err = repo.Store.Shared(func(s *eventlog.Snapshot) error {
-		view, err := progress.Read(s, branch)
+		view, err := progress.Read(s, branch, progress.FactsAt(repo.Root))
 		if err != nil {
 			return err
 		}

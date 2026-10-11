@@ -11,7 +11,7 @@ import (
 	"github.com/jordiSalazarr/go-fast/workflow/progress"
 )
 
-func NewCommand(openStore func() (*eventlog.Store, error), currentBranch func() (domain.Branch, error)) *cobra.Command {
+func NewCommand(openStore func() (*eventlog.Store, error), currentBranch func() (domain.Branch, error), repositoryRoot func() (string, error)) *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
 		Use:   "status [--json]",
@@ -26,9 +26,13 @@ func NewCommand(openStore func() (*eventlog.Store, error), currentBranch func() 
 			if err != nil {
 				return err
 			}
+			root, err := repositoryRoot()
+			if err != nil {
+				return err
+			}
 			var view progress.View
 			err = store.Shared(func(s *eventlog.Snapshot) error {
-				view, err = progress.Read(s, branch)
+				view, err = progress.Read(s, branch, progress.FactsAt(root))
 				progress.WarnIfChanged(&view, s)
 				return err
 			})

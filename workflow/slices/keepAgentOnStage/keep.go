@@ -77,7 +77,19 @@ func subagentStop(in claudehooks.Input, facts assignmentFacts, start agentsessio
 	if in.StopHookActive {
 		return claudehooks.Tell(fmt.Sprintf("%s finished without submitting '%s'; run /gofast:drive to continue.", in.AgentType, facts.stage))
 	}
-	return claudehooks.Block("Submit before finishing: run `gf submit --passed` or `gf submit --failed \"<reason>\"`.")
+	return claudehooks.Block(submitBeforeFinishing(facts.stage))
+}
+
+// submitBeforeFinishing says how the stage's agent submits: review's pass
+// decides stress testing, the fixer's names its route.
+func submitBeforeFinishing(stage domain.Stage) string {
+	switch stage {
+	case domain.StressDecider():
+		return "Submit before finishing: run `gf submit --passed --stress <include|skip> \"<reason>\"` or `gf submit --failed \"<reason>\"`."
+	case domain.StageFixer:
+		return "Submit before finishing: run `gf submit --passed --route <stage> \"<reason>\"` or `gf submit --failed \"<reason>\"`."
+	}
+	return "Submit before finishing: run `gf submit --passed` or `gf submit --failed \"<reason>\"`."
 }
 
 // sessionStop keeps a driving session going while the stage is open, and lets

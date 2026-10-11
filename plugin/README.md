@@ -248,6 +248,14 @@ run leaves is in `.gofast/runtime/checks/<assignment>-attempt<n>/`
   ready. That is a **code failure**: the work goes to the fixer in
   **performance** mode, with the measurements in the reason.
 
+`gf status` (`current.stress` in `--json`) shows, in review, whether stress
+testing is mandatory and which NFRs force it; once decided, the decision,
+its reason and who made it (a skipped stage is `skipped` in the stage list);
+in stress testing, the mandatory NFRs with their script paths and, after an
+attempt, each NFR's measurement against its targets. In performance mode,
+the fixer names the bottleneck with evidence (the measurements, the run's
+files in `current.fixer.stressRunDir`, profiling) before choosing a route.
+
 ## Write scopes
 
 | Stage | May write |

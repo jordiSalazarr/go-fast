@@ -259,6 +259,17 @@ func TestRule4_TheCheckConfigurationIsTheOwners_OnEveryStage(t *testing.T) {
 	}
 }
 
+// Stress testing writes its k6 scripts in the artifact directory, and
+// nothing else.
+func TestRule4_StressTestingWritesItsScriptsAndArtifact(t *testing.T) {
+	agent := "gofast:stress-testing"
+	on := on(domain.StageStressTesting)
+	assert.Equal(t, allowed, decide(write(agent, "/repo/.gofast/works/w1/stress/wallet-latency.js"), on, false, root))
+	assert.Equal(t, allowed, decide(write(agent, "/repo/.gofast/works/w1/stress-testing-v1.md"), on, false, root))
+	assert.Equal(t, denied("During 'stress-testing' you may only write the stage artifact `.gofast/works/w1/stress-testing-v1.md` and k6 scripts in `.gofast/works/w1/stress/`."),
+		decide(write(agent, "/repo/server/wallet.go"), on, false, root))
+}
+
 // The NFRs are the owner's: no stage agent may change their targets, not even
 // the stress-testing agent, whose scripts live in its artifact directory.
 func TestRule4_TheNFRsAreTheOwners_OnEveryStage(t *testing.T) {

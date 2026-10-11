@@ -89,7 +89,7 @@ func (a *app) rootCommand() *cobra.Command {
 		extendreworkbudget.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch),
 		overridestressdecision.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch, a.stressFacts),
 		abandonwork.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch),
-		status.NewCommand(a.openStore, a.currentBranch),
+		status.NewCommand(a.openStore, a.currentBranch, a.repositoryRoot),
 		checks.NewCommand(a.repositoryRoot),
 		accepteventlog.NewCommand(a.openStore, a.resolveCaller),
 		a.hookCommand(),

@@ -149,6 +149,16 @@ func TestStress_AFastService_MeetsTheNFR_MeasuredByGf(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(log), "measured wallet-latency: p95 ")
 	assert.False(t, answering("http://"+m.addr+"/healthz"), "the service is stopped")
+
+	attempt, recorded, ok, err := exitchecks.ReadStressResults(m.root, AssignmentOn(domain.StageStressTesting))
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, 1, attempt)
+	require.Len(t, recorded, 1)
+	assert.Equal(t, "wallet-latency", recorded[0].NFR)
+	assert.True(t, recorded[0].Met)
+	assert.Equal(t, "p95 ≤ 500ms, error rate ≤ 0%", recorded[0].Targets)
+	assert.Positive(t, recorded[0].Requests)
 }
 
 func TestStress_ASlowService_MissesTheNFR_WithMeasuredAgainstTarget(t *testing.T) {
@@ -160,6 +170,11 @@ func TestStress_ASlowService_MissesTheNFR_WithMeasuredAgainstTarget(t *testing.T
 
 	passes(t, results[domain.CheckStressScriptsValid])
 	fails(t, results[domain.CheckNFRsMet], "wallet-latency: p95 ", "ms > 5ms", "(log: .gofast/runtime/checks/")
+	_, recorded, ok, err := exitchecks.ReadStressResults(m.root, AssignmentOn(domain.StageStressTesting))
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.False(t, recorded[0].Met)
+	assert.Len(t, recorded[0].Missed, 1)
 }
 
 func TestStress_AServiceThatNeverGetsReady_MissesTheNFR(t *testing.T) {

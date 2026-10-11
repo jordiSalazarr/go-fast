@@ -14,11 +14,23 @@ import (
 	"github.com/jordiSalazarr/go-fast/workflow/domain"
 	"github.com/jordiSalazarr/go-fast/workflow/eventlog"
 	"github.com/jordiSalazarr/go-fast/workflow/exitchecks"
+	"github.com/jordiSalazarr/go-fast/workflow/worktree"
 )
 
 // Reader is what the read model needs from the event log.
 type Reader interface {
 	ReadAll() ([]eventlog.Recorded, error)
+}
+
+// Facts are what the view needs beyond the event log. A nil func leaves its
+// part of the view out.
+type Facts struct {
+	// Stress returns the repository's NFRs and the files the work changed
+	// since it started.
+	Stress func(work domain.ActiveWork) ([]domain.NFR, domain.ChangedFiles, error)
+	// StressResults returns the NFR results of a stage visit's latest
+	// attempt that measured any.
+	StressResults func(id domain.AssignmentID) (attempt int, results []exitchecks.StressResult, ok bool, err error)
 }
 
 // View is the progress document. Its JSON form is consumed by hooks: field
@@ -73,6 +85,8 @@ const (
 	StageDone    = "done"
 	StageCurrent = "current"
 	StagePending = "pending"
+	// StageSkipped: an optional stage the work decided not to include.
+	StageSkipped = "skipped"
 )
 
 type StageView struct {
@@ -80,6 +94,8 @@ type StageView struct {
 	Gate   string `json:"gate"`
 	Budget int    `json:"budget"`
 	Status string `json:"status"`
+	// Optional is set for a stage entered only if the work includes it.
+	Optional bool `json:"optional,omitempty"`
 	// Artifact is set for done stages: the artifact of their last visit.
 	Artifact string `json:"artifact,omitempty"`
 }
@@ -109,6 +125,52 @@ type CurrentView struct {
 	// ReworkOf is set after the fixer returned the work to an earlier stage:
 	// every later stage visit reads the fixer's artifact first.
 	ReworkOf *ReworkOfView `json:"reworkOf"`
+	// Stress is set on review, integration testing and stress testing.
+	Stress *StressView `json:"stress,omitempty"`
+}
+
+// StressView is what the current stage needs to know about stress testing.
+type StressView struct {
+	// Mandatory are the NFRs covering what the work changed: they make
+	// stress testing mandatory, and each needs a script; never null.
+	Mandatory []MandatoryNFRView `json:"mandatory"`
+	// Decision is this pass's stress decision; null until one is recorded.
+	Decision *StressDecisionView `json:"decision"`
+	// Results are the latest stress run of this stage visit (stress testing
+	// only); null before one measured anything.
+	Results *StressResultsView `json:"results"`
+	// Problem says why the NFRs or the work's changes couldn't be read.
+	Problem string `json:"problem,omitempty"`
+}
+
+type MandatoryNFRView struct {
+	ID        string   `json:"id"`
+	Areas     []string `json:"areas"`
+	Operation string   `json:"operation"`
+	Load      string   `json:"load"`
+	Targets   string   `json:"targets"`
+	// Script is where the stress-testing agent writes its k6 script.
+	Script string `json:"script"`
+}
+
+// Who decided stress testing.
+const (
+	DecidedByReview = "review"
+	DecidedByOwner  = "owner"
+)
+
+type StressDecisionView struct {
+	Decision  string   `json:"decision"` // include or skip
+	Reason    string   `json:"reason"`
+	ForcedBy  []string `json:"forcedBy"` // never null
+	DecidedBy string   `json:"decidedBy"`
+}
+
+type StressResultsView struct {
+	Attempt int    `json:"attempt"`
+	RunDir  string `json:"runDir"`
+	// NFRs are each scripted NFR's measurement against its targets.
+	NFRs []exitchecks.StressResult `json:"nfrs"`
 }
 
 // FixerView is the stage visit that handed the work to the fixer.
@@ -124,6 +186,9 @@ type FixerView struct {
 	CheckLog string `json:"checkLog"`
 	// Targets are the stages the fixer may return the work to, in path order.
 	Targets []string `json:"targets"`
+	// StressRunDir holds the failing stress run's raw k6 output and logs,
+	// when stress testing handed over after measuring.
+	StressRunDir string `json:"stressRunDir,omitempty"`
 }
 
 // ReworkOfView is the fixer visit that sent the work back.
@@ -161,8 +226,28 @@ type NextView struct {
 	Commands []string `json:"commands"`
 }
 
-// Read projects the event log into the View of a branch's active work.
-func Read(log Reader, branch domain.Branch) (View, error) {
+// FactsAt reads the facts from the repository at root: its NFRs, what the
+// work changed since its first stage visit's baseline, and the stress runs'
+// results.
+func FactsAt(root string) Facts {
+	return Facts{
+		Stress: func(work domain.ActiveWork) ([]domain.NFR, domain.ChangedFiles, error) {
+			nfrs, err := exitchecks.LoadNFRs(root)
+			if err != nil {
+				return nil, domain.ChangedFiles{}, err
+			}
+			changed, err := worktree.OpenBaselines(root).WorkChanges(work.FirstAssignment())
+			return nfrs, changed, err
+		},
+		StressResults: func(id domain.AssignmentID) (int, []exitchecks.StressResult, bool, error) {
+			return exitchecks.ReadStressResults(root, id)
+		},
+	}
+}
+
+// Read projects the event log, and the facts, into the View of a branch's
+// active work.
+func Read(log Reader, branch domain.Branch, facts Facts) (View, error) {
 	records, err := log.ReadAll()
 	if err != nil {
 		return View{}, fmt.Errorf("progress: %w", err)
@@ -214,14 +299,18 @@ func Read(log Reader, branch domain.Branch) (View, error) {
 	if inFixer {
 		onPath = fixer.From()
 	}
+	stress, _, decided := work.StressDecision()
 	stageStatus := StageDone
 	for _, step := range work.Path().Steps() {
-		sv := StageView{Stage: step.Stage().String(), Gate: step.Gate().String(), Budget: step.Budget().Int(), Status: stageStatus}
+		sv := StageView{Stage: step.Stage().String(), Gate: step.Gate().String(), Budget: step.Budget().Int(), Status: stageStatus, Optional: step.Optional()}
 		if step.Stage() == onPath {
 			sv.Status, stageStatus = StageCurrent, StagePending
 			if inFixer {
 				sv.Status = StagePending
 			}
+		}
+		if step.Optional() && sv.Status == StagePending && decided && stress.Decision() == domain.StressSkip {
+			sv.Status = StageSkipped
 		}
 		if sv.Status == StageDone {
 			sv.Artifact = domain.ArtifactFor(work.ID(), step.Stage(), lastVisit[step.Stage()]).String()
@@ -242,12 +331,16 @@ func Read(log Reader, branch domain.Branch) (View, error) {
 		Checks:   checkNames(work.CurrentStage()),
 	}
 	if inFixer {
-		current.Fixer, err = fixerView(history, fixer)
+		current.Fixer, err = fixerView(history, fixer, facts)
 		if err != nil {
 			return View{}, fmt.Errorf("progress: %w", err)
 		}
 	} else {
 		current.ReworkOf = reworkOf
+	}
+	switch work.CurrentStage() {
+	case domain.StressDecider(), domain.StageIntegrationTesting, domain.StageStressTesting:
+		current.Stress = stressView(work, facts)
 	}
 	view.Current = current
 	stage := work.CurrentStage()
@@ -286,6 +379,8 @@ func Read(log Reader, branch domain.Branch) (View, error) {
 			Message:  fmt.Sprintf("Escalated: budget exhausted on '%s'; the owner can run `gf extend <n>` or `gf abandon \"<reason>\"`.", stage),
 			Commands: []string{"gf extend <n>", `gf abandon "<reason>"`},
 		}
+	case stage == domain.StressDecider():
+		view.Next = reviewNext(current.Stress)
 	case inFixer:
 		submit := fmt.Sprintf(`gf submit --passed --route <%s> "<reason>"`, strings.Join(current.Fixer.Targets, "|"))
 		view.Next = NextView{
@@ -304,8 +399,91 @@ func Read(log Reader, branch domain.Branch) (View, error) {
 	return view, nil
 }
 
+// reviewNext tells review to decide stress testing as it passes; skip only
+// if no NFR makes it mandatory.
+func reviewNext(stress *StressView) NextView {
+	failed := `gf submit --failed "<reason>"`
+	if stress != nil && len(stress.Mandatory) > 0 {
+		include := `gf submit --passed --stress include "<reason>"`
+		return NextView{
+			Actor: NextAgent,
+			Message: fmt.Sprintf("Work on 'review', then run `%s` (stress testing is mandatory: the change touches the areas of %s) or `%s`.",
+				include, mandatoryIDs(stress), failed),
+			Commands: []string{include, failed},
+		}
+	}
+	decide := `gf submit --passed --stress <include|skip> "<reason>"`
+	return NextView{
+		Actor: NextAgent,
+		Message: fmt.Sprintf("Work on 'review', then run `%s` (include stress testing if the change can affect behaviour under load) or `%s`.",
+			decide, failed),
+		Commands: []string{decide, failed},
+	}
+}
+
+func mandatoryIDs(stress *StressView) string {
+	ids := make([]string, len(stress.Mandatory))
+	for i, m := range stress.Mandatory {
+		ids[i] = m.ID
+	}
+	return strings.Join(ids, ", ")
+}
+
+// stressView is the work's stress decision, the NFRs its changes make
+// mandatory and, on stress testing, the latest run's results.
+func stressView(work domain.ActiveWork, facts Facts) *StressView {
+	v := &StressView{Mandatory: []MandatoryNFRView{}}
+	if choice, owner, ok := work.StressDecision(); ok {
+		d := &StressDecisionView{Decision: choice.Decision().String(), Reason: choice.Reason().String(), ForcedBy: []string{}, DecidedBy: DecidedByReview}
+		if owner != (domain.Owner{}) {
+			d.DecidedBy = DecidedByOwner
+		}
+		for _, id := range choice.ForcedBy() {
+			d.ForcedBy = append(d.ForcedBy, id.String())
+		}
+		v.Decision = d
+	}
+	if facts.Stress != nil {
+		nfrs, changed, err := facts.Stress(work)
+		if err != nil {
+			v.Problem = "gf could not tell which NFRs this change makes mandatory: " + err.Error()
+		}
+		for _, n := range domain.Covering(nfrs, changed) {
+			areas := []string{}
+			for _, a := range n.Areas() {
+				areas = append(areas, a.String())
+			}
+			v.Mandatory = append(v.Mandatory, MandatoryNFRView{
+				ID: n.ID().String(), Areas: areas, Operation: n.Operation().String(),
+				Load:    fmt.Sprintf("%d vus for %s", n.Load().VUs(), n.Load().Duration()),
+				Targets: n.Targets().Describe(), Script: domain.StressScriptFor(work.ID(), n.ID()).String(),
+			})
+		}
+	}
+	if work.CurrentStage() == domain.StageStressTesting && facts.StressResults != nil {
+		if r, err := stressResults(work.CurrentAssignment(), facts); err != nil {
+			v.Problem = "gf could not read the last stress run: " + err.Error()
+		} else {
+			v.Results = r
+		}
+	}
+	return v
+}
+
+func stressResults(id domain.AssignmentID, facts Facts) (*StressResultsView, error) {
+	attempt, results, ok, err := facts.StressResults(id)
+	if err != nil || !ok {
+		return nil, err
+	}
+	a, err := domain.NewAttempt(attempt)
+	if err != nil {
+		return nil, err
+	}
+	return &StressResultsView{Attempt: attempt, RunDir: exitchecks.StressRunDir(id, a) + "/", NFRs: results}, nil
+}
+
 // fixerView describes the stage visit that handed the work to the fixer.
-func fixerView(history eventlog.History, fixer domain.InFixerWork) (*FixerView, error) {
+func fixerView(history eventlog.History, fixer domain.InFixerWork, facts Facts) (*FixerView, error) {
 	from := domain.AssignmentIDFor(fixer.ID(), fixer.From(), fixer.FromVisit())
 	v := &FixerView{
 		From: fixer.From().String(), FromVisit: fixer.FromVisit().Int(), Mode: fixer.Mode().String(), Reason: fixer.Reason().String(),
@@ -321,6 +499,11 @@ func fixerView(history eventlog.History, fixer domain.InFixerWork) (*FixerView, 
 	}
 	if handed, ok := state.(domain.HandedToFixer); ok {
 		v.CheckLog = exitchecks.LogPath(from, handed.Attempt())
+		if fixer.From() == domain.StageStressTesting && facts.StressResults != nil {
+			if r, err := stressResults(from, facts); err == nil && r != nil && r.Attempt == handed.Attempt().Int() {
+				v.StressRunDir = r.RunDir
+			}
+		}
 	}
 	return v, nil
 }
@@ -403,7 +586,11 @@ func RenderText(w io.Writer, v View) {
 	}
 	fmt.Fprintf(w, "%s: %s (%s) on branch %s\n\n", v.Work.Type, v.Work.Description, v.Work.ID, v.Work.Branch)
 	for _, s := range v.Work.Stages {
-		fmt.Fprintf(w, "  %-9s %-20s %s gate\n", "["+s.Status+"]", s.Stage, s.Gate)
+		optional := ""
+		if s.Optional {
+			optional = ", optional"
+		}
+		fmt.Fprintf(w, "  %-9s %-20s %s gate%s\n", "["+s.Status+"]", s.Stage, s.Gate, optional)
 	}
 	c := v.Current
 	fmt.Fprintf(w, "\nCurrent: %s (%s gate, visit %d), %s, attempts used %d of %d\n", c.Stage, c.Gate, c.Visit, strings.ReplaceAll(c.Assignment, "-", " "), c.AttemptsUsed, c.Budget)
@@ -413,6 +600,9 @@ func RenderText(w io.Writer, v View) {
 		fmt.Fprintf(w, "Its artifact: %s\n", f.Artifact)
 		fmt.Fprintf(w, "Its check log: %s (if its checks ran)\n", f.CheckLog)
 		fmt.Fprintf(w, "May return the work to: %s\n", strings.Join(f.Targets, ", "))
+		if f.StressRunDir != "" {
+			fmt.Fprintf(w, "Its stress run (k6 output and logs): %s\n", f.StressRunDir)
+		}
 	}
 	if r := c.ReworkOf; r != nil {
 		fmt.Fprintf(w, "Rework: the fixer sent the work back to %s (visit %d): %s\n", r.Target, r.TargetVisit, r.Reason)
@@ -420,6 +610,9 @@ func RenderText(w io.Writer, v View) {
 	}
 	fmt.Fprintf(w, "Artifact: %s\n", c.Artifact)
 	fmt.Fprintf(w, "Exit checks (run by `gf submit --passed`): %s\n", strings.Join(c.Checks, ", "))
+	if st := c.Stress; st != nil {
+		renderStress(w, c.Stage, st)
+	}
 	if p := c.LastProblem; p != nil {
 		label := "Last failure"
 		if p.Kind == ProblemRejection {
@@ -428,4 +621,42 @@ func RenderText(w io.Writer, v View) {
 		fmt.Fprintf(w, "%s (attempt %d): %s\n", label, p.Attempt, p.Text)
 	}
 	fmt.Fprintf(w, "\nNext: %s\n", v.Next.Message)
+}
+
+func renderStress(w io.Writer, stage string, st *StressView) {
+	if st.Problem != "" {
+		fmt.Fprintf(w, "Stress testing: %s\n", st.Problem)
+	}
+	switch {
+	case len(st.Mandatory) > 0:
+		fmt.Fprintln(w, "Stress testing is mandatory: the change touches the areas of these NFRs:")
+		for _, m := range st.Mandatory {
+			fmt.Fprintf(w, "  %s (%s): %s, %s; %s\n", m.ID, strings.Join(m.Areas, ", "), m.Operation, m.Load, m.Targets)
+			if stage == domain.StageStressTesting.String() {
+				fmt.Fprintf(w, "    script: %s\n", m.Script)
+			}
+		}
+	case stage == domain.StressDecider().String() && st.Problem == "":
+		fmt.Fprintln(w, "Stress testing: no NFR covers this change; include it if the change can affect behaviour under load.")
+	}
+	if d := st.Decision; d != nil {
+		forced := ""
+		if len(d.ForcedBy) > 0 {
+			forced = " (mandatory: " + strings.Join(d.ForcedBy, ", ") + ")"
+		}
+		fmt.Fprintf(w, "Stress decision: %s%s, by %s: %s\n", d.Decision, forced, d.DecidedBy, d.Reason)
+	}
+	if r := st.Results; r != nil {
+		fmt.Fprintf(w, "Last stress run (attempt %d, %s):\n", r.Attempt, r.RunDir)
+		for _, n := range r.NFRs {
+			switch {
+			case n.Problem != "":
+				fmt.Fprintf(w, "  %s: not measured: %s\n", n.NFR, n.Problem)
+			case n.Met:
+				fmt.Fprintf(w, "  %s: met (%s; targets %s)\n", n.NFR, n.Measured, n.Targets)
+			default:
+				fmt.Fprintf(w, "  %s: %s (%s; targets %s)\n", n.NFR, strings.Join(n.Missed, ", "), n.Measured, n.Targets)
+			}
+		}
+	}
 }

@@ -96,6 +96,21 @@ func TestSubagentStop_WithoutSubmitting_IsBlocked(t *testing.T) {
 	assert.Equal(t, claudehooks.Block("Submit before finishing: run `gf submit --passed` or `gf submit --failed \"<reason>\"`."), out)
 }
 
+// The reminder says how the stage submits: review decides stress testing,
+// the fixer names its route.
+func TestSubagentStop_WithoutSubmitting_TellsReviewAndTheFixerHowTheySubmit(t *testing.T) {
+	for stage, want := range map[domain.Stage]string{
+		domain.StageReview: "Submit before finishing: run `gf submit --passed --stress <include|skip> \"<reason>\"` or `gf submit --failed \"<reason>\"`.",
+		domain.StageFixer:  "Submit before finishing: run `gf submit --passed --route <stage> \"<reason>\"` or `gf submit --failed \"<reason>\"`.",
+	} {
+		facts := on(t, stage, true)
+
+		out := subagentStop(stageAgentStops(stage, false), facts, startedOn(stage, 1), true)
+
+		assert.Equal(t, claudehooks.Block(want), out, stage.String())
+	}
+}
+
 func TestSubagentStop_WithoutSubmitting_ButStopHookActive_IsAllowedWithAMessage(t *testing.T) {
 	facts := on(t, domain.StageImplement, true)
 

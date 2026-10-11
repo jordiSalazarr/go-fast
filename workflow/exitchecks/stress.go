@@ -3,6 +3,7 @@ package exitchecks
 import (
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -114,7 +115,79 @@ func (c *checkRun) runStress() (*stressRun, error) {
 			return run, err
 		}
 	}
+	if len(run.problems) == 0 {
+		if err := writeStressResults(filepath.Join(dir, stressResultsFile), run.outcomes); err != nil {
+			return run, err
+		}
+	}
 	return run, nil
+}
+
+// StressResult is how one NFR went in a stress run: gf records them in the
+// run's directory, for gf status.
+type StressResult struct {
+	NFR     string `json:"nfr"`
+	Targets string `json:"targets"`
+	Met     bool   `json:"met"`
+	// Missed describes each missed target, measured against target.
+	Missed []string `json:"missed,omitempty"`
+	// Problem is set when the service failed before it could be measured.
+	Problem   string  `json:"problem,omitempty"`
+	Measured  string  `json:"measured,omitempty"`
+	P95Ms     float64 `json:"p95Ms"`
+	P99Ms     float64 `json:"p99Ms"`
+	ErrorRate float64 `json:"errorRate"`
+	RPS       float64 `json:"rps"`
+	Requests  int     `json:"requests"`
+}
+
+const stressResultsFile = "results.json"
+
+func writeStressResults(path string, outcomes []nfrOutcome) error {
+	results := []StressResult{}
+	for _, o := range outcomes {
+		r := StressResult{NFR: o.nfr.ID().String(), Targets: o.nfr.Targets().Describe(), Problem: o.problem}
+		if o.problem == "" {
+			m := o.result.Measurement().Values()
+			r.Met, r.Missed, r.Measured = o.result.Met(), o.result.Missed(), o.result.Measurement().Describe()
+			r.P95Ms, r.P99Ms = float64(m.P95)/float64(time.Millisecond), float64(m.P99)/float64(time.Millisecond)
+			r.ErrorRate, r.RPS, r.Requests = m.ErrorRate, m.RPS, m.Requests
+		}
+		results = append(results, r)
+	}
+	data, err := json.MarshalIndent(results, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(data, '\n'), 0o644)
+}
+
+// ReadStressResults returns the NFR results of a stage visit's latest
+// attempt that measured any; ok is false if none did.
+func ReadStressResults(root string, id domain.AssignmentID) (attempt int, results []StressResult, ok bool, err error) {
+	prefix := filepath.Join(root, filepath.FromSlash(eventlog.Dir("")+"/"+eventlog.RuntimeDir+"/checks/"+id.String()+"-attempt"))
+	matches, err := filepath.Glob(prefix + "*/" + stressResultsFile)
+	if err != nil {
+		return 0, nil, false, err
+	}
+	latest := ""
+	for _, m := range matches {
+		n, err := strconv.Atoi(strings.TrimPrefix(filepath.Dir(m), prefix))
+		if err == nil && n > attempt {
+			attempt, latest = n, m
+		}
+	}
+	if latest == "" {
+		return 0, nil, false, nil
+	}
+	data, err := os.ReadFile(latest)
+	if err != nil {
+		return 0, nil, false, err
+	}
+	if err := json.Unmarshal(data, &results); err != nil {
+		return 0, nil, false, fmt.Errorf("read %s: %w", latest, err)
+	}
+	return attempt, results, true, nil
 }
 
 type plannedScript struct {

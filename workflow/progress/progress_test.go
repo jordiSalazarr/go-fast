@@ -20,7 +20,7 @@ func whenQueried(t *testing.T, s *eventlogtest.Scenario) progress.View {
 	var view progress.View
 	s.WhenQueried(func(log *eventlog.Snapshot) error {
 		var err error
-		view, err = progress.Read(log, Branch)
+		view, err = progress.Read(log, Branch, progress.Facts{})
 		return err
 	})
 	return view

@@ -143,6 +143,10 @@ func scopeApplies(in claudehooks.Input, driving bool) bool {
 func scopeReason(facts stageFacts, p domain.RepoPath) string {
 	switch facts.stage.WriteScope() {
 	case domain.WriteScopeArtifacts:
+		if facts.stage == domain.StageStressTesting {
+			return fmt.Sprintf("During '%s' you may only write the stage artifact `%s` and k6 scripts in `%s/`.",
+				facts.stage, facts.artifact, domain.StressScriptsDir(facts.work))
+		}
 		return fmt.Sprintf("During '%s' you may only write the stage artifact `%s`.", facts.stage, facts.artifact)
 	case domain.WriteScopeTestsAndArtifacts:
 		return fmt.Sprintf("During '%s' you may only write tests and the stage artifact `%s`.", facts.stage, facts.artifact)
