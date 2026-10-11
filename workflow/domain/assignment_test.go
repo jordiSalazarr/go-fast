@@ -389,3 +389,75 @@ func TestRebuildAssignment_RejectsInconsistentHistory(t *testing.T) {
 		})
 	}
 }
+
+var fixerAssignmentID = domain.AssignmentIDFor(workID, domain.StageFixer, visit1)
+
+func openedOnFixer() []domain.AssignmentEvent {
+	return []domain.AssignmentEvent{domain.AssignmentOpened{
+		AssignmentID: fixerAssignmentID, WorkID: workID, Stage: domain.StageFixer,
+		Visit: visit1, Gate: domain.GateAuto, Budget: budget3,
+	}}
+}
+
+var toImplement = must(domain.NewRoute(domain.StageImplement, reasonOf("the fix ignores negative ports")))
+
+func TestSubmitForAcceptance_FixerPassWithARoute_IsAcceptedWithTheRoute(t *testing.T) {
+	open := stateIs[domain.Open](t, givenAssignment(t, openedOnFixer()...))
+
+	got, err := open.SubmitForAcceptance(domain.ClaimRouted(toImplement), noChanges, passedChecks(open))
+
+	thenEvents(t, got, err, domain.AssignmentEvent(domain.AssignmentAccepted{
+		AssignmentID: fixerAssignmentID, WorkID: workID, Stage: domain.StageFixer, Visit: visit1, Route: toImplement,
+	}))
+	stateIs[domain.Accepted](t, thenAssignmentState(t, openedOnFixer(), got))
+}
+
+func TestSubmitForAcceptance_FixerPassWithoutARoute_IsRejected(t *testing.T) {
+	open := stateIs[domain.Open](t, givenAssignment(t, openedOnFixer()...))
+
+	got, err := open.SubmitForAcceptance(domain.ClaimPassed(), noChanges, passedChecks(open))
+
+	thenRejected(t, got, err, domain.ErrMissingRoute)
+}
+
+func TestSubmitForAcceptance_ARouteOutsideTheFixer_IsRejected(t *testing.T) {
+	open := stateIs[domain.Open](t, givenAssignment(t, openedOnReview()...))
+
+	got, err := open.SubmitForAcceptance(domain.ClaimRouted(toImplement), noChanges, passedChecks(open))
+
+	thenRejected(t, got, err, domain.ErrRouteOutsideFixer)
+}
+
+func TestSubmitForAcceptance_FixerFailure_IsItsOwnWorkAndUsesAnAttempt(t *testing.T) {
+	open := stateIs[domain.Open](t, givenAssignment(t, openedOnFixer()...))
+
+	got, err := open.SubmitForAcceptance(domain.ClaimFailed(reasonOf("can't find the cause yet")), noChanges, nil)
+
+	thenEvents(t, got, err, domain.AssignmentEvent(domain.AttemptFailed{
+		AssignmentID: fixerAssignmentID, Attempt: attempt(1), Reason: reasonOf("can't find the cause yet"),
+	}))
+}
+
+func TestNewRoute_NeedsATargetAndAReason(t *testing.T) {
+	_, err := domain.NewRoute(domain.Stage{}, reason)
+	require.ErrorIs(t, err, domain.ErrMissingValue)
+	_, err = domain.NewRoute(domain.StageImplement, domain.Reason{})
+	require.ErrorIs(t, err, domain.ErrMissingValue)
+}
+
+func TestRebuildAssignment_RejectsAcceptanceWithTheWrongRoute(t *testing.T) {
+	cases := map[string][]domain.AssignmentEvent{
+		"fixer accepted without a route": history(openedOnFixer(), events(domain.AssignmentAccepted{
+			AssignmentID: fixerAssignmentID, WorkID: workID, Stage: domain.StageFixer, Visit: visit1,
+		})),
+		"review accepted with a route": history(openedOnReview(), events(domain.AssignmentAccepted{
+			AssignmentID: reviewAssignmentID, WorkID: workID, Stage: domain.StageReview, Visit: visit1, Route: toImplement,
+		})),
+	}
+	for name, h := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := domain.RebuildAssignment(h)
+			require.ErrorIs(t, err, domain.ErrInconsistentHistory)
+		})
+	}
+}

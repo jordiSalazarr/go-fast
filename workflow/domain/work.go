@@ -298,10 +298,10 @@ func (w InFixerWork) RouteTargets() []Stage {
 // CheckRoute rejects a target the fixer may not return the work to, naming
 // the ones it may.
 func (w InFixerWork) CheckRoute(target Stage) error {
-	if err := requirePresent(required{"target stage", target}); err != nil {
-		return fmt.Errorf("route work %s: %w", w.id, err)
-	}
 	targets := w.RouteTargets()
+	if target.isZero() {
+		return fmt.Errorf("route work %s: %w", w.id, &RouteMissingError{Allowed: targets})
+	}
 	if !slices.Contains(targets, target) {
 		return fmt.Errorf("route work %s: %w", w.id, &InvalidRouteError{Target: target, Allowed: targets})
 	}

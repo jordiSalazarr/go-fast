@@ -25,6 +25,8 @@ func friendly(err error, cmd *cobra.Command, ran bool) string {
 		conflict  *domain.ConflictingActiveWorkError
 		malformed *eventlog.MalformedLogError
 		config    *exitchecks.ConfigError
+		route     *domain.InvalidRouteError
+		noRoute   *domain.RouteMissingError
 	)
 	switch {
 	case errors.Is(err, gitbranch.ErrDetachedHead):
@@ -51,6 +53,16 @@ func friendly(err error, cmd *cobra.Command, ran bool) string {
 		return "Nothing is waiting for approval. Run `gf status` to see what happens next."
 	case errors.Is(err, domain.ErrNotEscalated):
 		return "The budget can only be extended when a stage is escalated. Run `gf status` to see what happens next."
+	case errors.As(err, &route):
+		return fmt.Sprintf("The fixer can only send the work back to an earlier stage that can change code: %s. '%s' is not one of them. No attempt was used.",
+			stageNames(route.Allowed), route.Target)
+	case errors.As(err, &noRoute):
+		return fmt.Sprintf("The fixer says where the work goes: `gf submit --passed --route <%s> \"<reason>\"`. No attempt was used.",
+			strings.ReplaceAll(stageNames(noRoute.Allowed), ", ", "|"))
+	case errors.Is(err, domain.ErrRouteOutsideFixer):
+		return "Only the fixer chooses a route. Submit with `gf submit --passed` or `gf submit --failed \"<reason>\"`. No attempt was used."
+	case errors.Is(err, domain.ErrUnknownStage):
+		return fmt.Sprintf("Unknown stage. Stages: %s.", stageNames(domain.Stages()))
 	case errors.Is(err, domain.ErrUnknownWorkType):
 		names := make([]string, 0, len(domain.WorkTypes()))
 		for _, t := range domain.WorkTypes() {
@@ -88,4 +100,12 @@ func friendly(err error, cmd *cobra.Command, ran bool) string {
 	default:
 		return "Something went wrong. " + seeLog
 	}
+}
+
+func stageNames(stages []domain.Stage) string {
+	names := make([]string, len(stages))
+	for i, s := range stages {
+		names[i] = s.String()
+	}
+	return strings.Join(names, ", ")
 }

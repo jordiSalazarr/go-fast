@@ -178,3 +178,57 @@ func TestGivenAFoundAssignment_WhenItChangesBeforeSubmitting_ThenTheSubmissionCo
 
 	require.ErrorIs(t, scenario.Err(), eventlog.ErrVersionConflict)
 }
+
+// checksMustNotRun fails the test if the exit checks run.
+func checksMustNotRun(t *testing.T) submitforacceptance.Checks {
+	return func(exitchecks.Visit, io.Writer) ([]domain.CheckResult, error) {
+		t.Error("the exit checks ran")
+		return nil, nil
+	}
+}
+
+func TestGivenTheFixer_WhenSubmittingAPassWithAnAllowedRoute_ThenItIsAcceptedWithTheRoute(t *testing.T) {
+	route := Route(domain.StageImplement, "the fix ignores negative ports")
+
+	eventlogtest.Given(t, InFixer(domain.StageReview)...).
+		When(submitting(domain.ClaimRouted(route), ".gofast/works/w1/fixer-v1.md")).
+		Then(domain.AssignmentAccepted{AssignmentID: AssignmentOn(domain.StageFixer), WorkID: WorkID, Stage: domain.StageFixer, Visit: Visit1, Route: route})
+}
+
+func TestGivenTheFixer_WhenSubmittingARouteThatIsNotAllowed_ThenItIsRejectedBeforeAnyCheckRuns(t *testing.T) {
+	s := eventlogtest.Given(t, InFixer(domain.StageReview)...).
+		When(submittingChecked(domain.ClaimRouted(Route(domain.StageReview, "review again")), checksMustNotRun(t))).
+		ThenRejected(domain.ErrInvalidRoute)
+
+	var route *domain.InvalidRouteError
+	require.ErrorAs(t, s.Err(), &route)
+	assert.Equal(t, []domain.Stage{domain.StageSpecify, domain.StageImplement}, route.Allowed)
+}
+
+func TestGivenTheFixer_WhenSubmittingAPassWithoutARoute_ThenItIsRejectedNamingTheTargets(t *testing.T) {
+	s := eventlogtest.Given(t, InFixer(domain.StageReview)...).
+		When(submittingChecked(passed, checksMustNotRun(t))).
+		ThenRejected(domain.ErrMissingRoute)
+
+	var missing *domain.RouteMissingError
+	require.ErrorAs(t, s.Err(), &missing)
+	assert.Equal(t, []domain.Stage{domain.StageSpecify, domain.StageImplement}, missing.Allowed)
+}
+
+func TestGivenTheFixer_WhenSubmittingAFailedClaim_ThenAnAttemptFails(t *testing.T) {
+	eventlogtest.Given(t, InFixer(domain.StageReview)...).
+		When(submitting(failed)).
+		Then(Failed(domain.StageFixer, 1, "tests fail"))
+}
+
+func TestGivenAnotherStage_WhenSubmittingARoute_ThenItIsRejectedBeforeAnyCheckRuns(t *testing.T) {
+	eventlogtest.Given(t, OpenOn(domain.StageReview)...).
+		When(submittingChecked(domain.ClaimRouted(Route(domain.StageImplement, "x")), checksMustNotRun(t))).
+		ThenRejected(domain.ErrRouteOutsideFixer)
+}
+
+func TestGivenReview_WhenTheSuiteFails_ThenTheWorkIsHandedToTheFixer(t *testing.T) {
+	eventlogtest.Given(t, OpenOn(domain.StageReview)...).
+		When(submittingChecked(passed, checksFailing(domain.CheckSuitePasses, "1 test failed"))).
+		Then(HandedToFixer(domain.StageReview, 1, "suite-passes: 1 test failed."))
+}

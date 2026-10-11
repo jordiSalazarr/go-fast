@@ -91,17 +91,43 @@ func (r CheckResult) Passed() bool     { return r.passed }
 func (r CheckResult) Summary() string  { return r.summary }
 
 // AgentClaim is what the stage agent reports about its stage's exit check:
-// passed, or failed with a reason.
+// passed, or failed with a reason. The fixer's pass also carries its route.
 type AgentClaim struct {
 	passed bool
 	reason Reason
+	route  Route
 }
 
 func ClaimPassed() AgentClaim { return AgentClaim{passed: true} }
 
+// ClaimRouted is the fixer's pass: the work goes to the route's target.
+func ClaimRouted(route Route) AgentClaim { return AgentClaim{passed: true, route: route} }
+
 func ClaimFailed(reason Reason) AgentClaim { return AgentClaim{reason: reason} }
 
 func (c AgentClaim) Passed() bool { return c.passed }
+
+// Route is the fixer's route; ok is false for any other claim.
+func (c AgentClaim) Route() (route Route, ok bool) { return c.route, !c.route.isZero() }
+
+// Route is where the fixer sends the work, and why.
+type Route struct {
+	target Stage
+	reason Reason
+}
+
+// NewRoute needs both a target and a reason. Whether the target is allowed
+// depends on the work: see InFixerWork.CheckRoute.
+func NewRoute(target Stage, reason Reason) (Route, error) {
+	if err := requirePresent(required{"route target", target}, required{"route reason", reason}); err != nil {
+		return Route{}, fmt.Errorf("route: %w", err)
+	}
+	return Route{target: target, reason: reason}, nil
+}
+
+func (r Route) Target() Stage  { return r.target }
+func (r Route) Reason() Reason { return r.reason }
+func (r Route) isZero() bool   { return r.target.isZero() }
 
 func (c AgentClaim) isZero() bool { return !c.passed && c.reason.isZero() }
 

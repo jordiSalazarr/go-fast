@@ -279,3 +279,14 @@ func TestRebuildWork_RejectsImpossibleReworkHistories(t *testing.T) {
 		})
 	}
 }
+
+func TestCheckRoute_WithoutATarget_NamesTheAllowedOnes(t *testing.T) {
+	fixer := stateIs[domain.InFixerWork](t, givenWork(t, join(onReview(), intoFixer(domain.StageReview, 1, 1))...))
+
+	err := fixer.CheckRoute(domain.Stage{})
+
+	var missing *domain.RouteMissingError
+	require.ErrorAs(t, err, &missing)
+	assert.Equal(t, []domain.Stage{domain.StageSpecify, domain.StageImplement}, missing.Allowed)
+	require.NoError(t, fixer.CheckRoute(domain.StageSpecify))
+}

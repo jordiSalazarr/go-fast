@@ -29,6 +29,9 @@ func AssignmentOn(s domain.Stage) domain.AssignmentID {
 }
 
 func step(stage domain.Stage) domain.PathStep {
+	if stage == domain.StageFixer {
+		return domain.FixerStep()
+	}
 	for _, s := range Must(domain.PathFor(domain.WorkTypeFixBug)).Steps() {
 		if s.Stage() == stage {
 			return s
@@ -98,4 +101,34 @@ func EscalatedOn(stage domain.Stage) []domain.Event {
 	return OpenOn(stage,
 		Failed(stage, 1, "tests fail"), Failed(stage, 2, "tests fail"), Failed(stage, 3, "tests fail"),
 		Escalated(stage, 3, 3))
+}
+
+// HandedToFixer is the stage's first assignment handing the work to the fixer.
+func HandedToFixer(stage domain.Stage, attempt int, reason string) domain.AssignmentHandedToFixer {
+	return domain.AssignmentHandedToFixer{AssignmentID: AssignmentOn(stage), WorkID: WorkID, Stage: stage, Visit: Visit1, Attempt: Attempt(attempt), Reason: Reason(reason)}
+}
+
+// FixerEntered is the work entering the fixer for the first time, from the
+// first visit of stage.
+func FixerEntered(from domain.Stage, reason string) []domain.Event {
+	return []domain.Event{
+		domain.FixerEntered{WorkID: WorkID, From: from, FromVisit: Visit1, Visit: Visit1, Mode: domain.FixerModeCorrectness, Reason: Reason(reason)},
+		StageEntered(domain.StageFixer),
+	}
+}
+
+// HandedOverOn is the work on stage, whose assignment handed it to the fixer.
+func HandedOverOn(stage domain.Stage, reason string) []domain.Event {
+	return OpenOn(stage, HandedToFixer(stage, 1, reason))
+}
+
+// InFixer is the work in its first fixer visit, handed over by stage, with
+// the fixer's assignment open.
+func InFixer(from domain.Stage) []domain.Event {
+	return append(append(HandedOverOn(from, "suite fails"), FixerEntered(from, "suite fails")...), Opened(domain.StageFixer))
+}
+
+// Route is a route to target.
+func Route(target domain.Stage, reason string) domain.Route {
+	return Must(domain.NewRoute(target, Reason(reason)))
 }

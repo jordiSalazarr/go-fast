@@ -89,7 +89,7 @@ func OpenAssignment(work WorkID, stage Stage, visit Visit, gate Gate, budget Att
 // the code hands the work to the fixer instead, using none. A passing exit is
 // accepted on an auto gate and waits for the owner on a human gate.
 func (a Open) SubmitForAcceptance(claim AgentClaim, changed ChangedFiles, results []CheckResult) ([]AssignmentEvent, error) {
-	if err := requirePresent(required{"agent claim", claim}); err != nil {
+	if err := a.CheckClaim(claim); err != nil {
 		return nil, fmt.Errorf("submit assignment %s for acceptance: %w", a.id, err)
 	}
 	outcome, err := NewExitCheckOutcome(claim, CheckWriteScope(a.stage, a.work, changed), results)
@@ -109,8 +109,26 @@ func (a Open) SubmitForAcceptance(claim AgentClaim, changed ChangedFiles, result
 	case a.gate == GateHuman:
 		return []AssignmentEvent{SubmittedForApproval{AssignmentID: a.id, Attempt: attempt}}, nil
 	default:
-		return []AssignmentEvent{a.accepted()}, nil
+		route, _ := claim.Route()
+		return []AssignmentEvent{a.accepted(route)}, nil
 	}
+}
+
+// CheckClaim rejects a claim the stage can't make: the fixer's pass must
+// carry a route, and no other claim may. Whether the route's target is
+// allowed is the work's to say (InFixerWork.CheckRoute).
+func (a Open) CheckClaim(claim AgentClaim) error {
+	if err := requirePresent(required{"agent claim", claim}); err != nil {
+		return err
+	}
+	_, routed := claim.Route()
+	switch {
+	case a.stage == StageFixer && claim.Passed() && !routed:
+		return ErrMissingRoute
+	case a.stage != StageFixer && routed:
+		return fmt.Errorf("%s stage: %w", a.stage, ErrRouteOutsideFixer)
+	}
+	return nil
 }
 
 func (a Open) Cancel(reason Reason) ([]AssignmentEvent, error) { return a.cancel(reason) }
@@ -120,7 +138,7 @@ func (a AwaitingApproval) Approve(owner Owner) ([]AssignmentEvent, error) {
 	if err := requirePresent(required{"owner", owner}); err != nil {
 		return nil, fmt.Errorf("approve assignment %s: %w", a.id, err)
 	}
-	return []AssignmentEvent{a.accepted()}, nil
+	return []AssignmentEvent{a.accepted(Route{})}, nil
 }
 
 // Reject sends the submission back with feedback; it uses one attempt.
@@ -156,8 +174,13 @@ func (a assignment) withEscalationIfExhausted(used AssignmentEvent) []Assignment
 	return events
 }
 
-func (a assignment) accepted() AssignmentAccepted {
-	return AssignmentAccepted{AssignmentID: a.id, WorkID: a.work, Stage: a.stage, Visit: a.visit}
+func (a assignment) accepted(route Route) AssignmentAccepted {
+	return AssignmentAccepted{AssignmentID: a.id, WorkID: a.work, Stage: a.stage, Visit: a.visit, Route: route}
+}
+
+// acceptable: the fixer is accepted with its route, every other stage without.
+func (a assignment) acceptable(e AssignmentAccepted) bool {
+	return (a.stage == StageFixer) == !e.Route.isZero()
 }
 
 func (a assignment) cancel(reason Reason) ([]AssignmentEvent, error) {
@@ -217,7 +240,7 @@ func evolveAssignment(state AssignmentState, e AssignmentEvent) (AssignmentState
 			}
 			return AwaitingApproval{assignment: s.assignment, attempt: e.Attempt}, true
 		case AssignmentAccepted:
-			if s.gate != GateAuto {
+			if s.gate != GateAuto || !s.acceptable(e) {
 				return nil, false
 			}
 			return Accepted{s.assignment}, true
@@ -237,6 +260,9 @@ func evolveAssignment(state AssignmentState, e AssignmentEvent) (AssignmentState
 	case AwaitingApproval:
 		switch e := e.(type) {
 		case AssignmentAccepted:
+			if !s.acceptable(e) {
+				return nil, false
+			}
 			return Accepted{s.assignment}, true
 		case AssignmentRejected:
 			if e.Attempt != s.attempt {

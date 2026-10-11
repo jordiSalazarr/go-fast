@@ -32,6 +32,8 @@ var (
 	agent        = AgentActor("agent")
 )
 
+var fixerID = domain.AssignmentIDFor(workID, domain.StageFixer, domain.FirstVisit())
+
 func allEvents() []domain.Event {
 	return []domain.Event{
 		domain.WorkStarted{WorkID: workID, WorkType: domain.WorkTypeFixBug, Description: must(domain.NewDescription("login broken")), Branch: must(domain.NewBranch("main"))},
@@ -49,6 +51,8 @@ func allEvents() []domain.Event {
 		domain.AssignmentEscalated{AssignmentID: assignmentID, AttemptsUsed: must(domain.NewAttemptCount(3)), Budget: budget3},
 		domain.BudgetExtended{AssignmentID: assignmentID, Owner: owner, Additional: must(domain.NewAttemptBudget(2)), NewBudget: must(domain.NewAttemptBudget(5))},
 		domain.AssignmentAccepted{AssignmentID: assignmentID, WorkID: workID, Stage: domain.StageDiscovery, Visit: domain.FirstVisit()},
+		domain.AssignmentAccepted{AssignmentID: fixerID, WorkID: workID, Stage: domain.StageFixer, Visit: domain.FirstVisit(),
+			Route: must(domain.NewRoute(domain.StageImplement, must(domain.NewReason("the fix misses a case"))))},
 		domain.AssignmentCancelled{AssignmentID: assignmentID, Reason: reason},
 		domain.AssignmentHandedToFixer{AssignmentID: assignmentID, WorkID: workID, Stage: domain.StageReview, Visit: domain.FirstVisit(), Attempt: must(domain.NewAttempt(2)), Reason: reason},
 	}

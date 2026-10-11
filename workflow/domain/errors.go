@@ -36,6 +36,8 @@ var (
 	ErrNoActiveWork      = errors.New("no active work")
 	ErrCannotEnterFixer  = errors.New("only a stage that checks code can hand work to the fixer")
 	ErrInvalidRoute      = errors.New("the fixer can only return work to an earlier stage on its path that can change code")
+	ErrMissingRoute      = errors.New("the fixer's pass must say which stage the work returns to")
+	ErrRouteOutsideFixer = errors.New("only the fixer chooses a route")
 )
 
 // The current assignment is not in a state that accepts the command.
@@ -111,3 +113,19 @@ func (e *InvalidRouteError) Error() string {
 }
 
 func (e *InvalidRouteError) Unwrap() error { return ErrInvalidRoute }
+
+// RouteMissingError names the stages the fixer may return the work to, when
+// it passed without saying which.
+type RouteMissingError struct {
+	Allowed []Stage // in path order
+}
+
+func (e *RouteMissingError) Error() string {
+	names := make([]string, len(e.Allowed))
+	for i, s := range e.Allowed {
+		names[i] = s.name
+	}
+	return fmt.Sprintf("%s: one of %s", ErrMissingRoute, strings.Join(names, ", "))
+}
+
+func (e *RouteMissingError) Unwrap() error { return ErrMissingRoute }

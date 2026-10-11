@@ -157,6 +157,9 @@ type assignmentAcceptedV1 struct {
 	WorkID       string `json:"workId"`
 	Stage        string `json:"stage"`
 	Visit        int    `json:"visit"`
+	// The fixer's route; absent for every other stage.
+	Route       string `json:"route,omitempty"`
+	RouteReason string `json:"routeReason,omitempty"`
 }
 
 type assignmentCancelledV1 struct {
@@ -281,6 +284,7 @@ func encodeEvent(e domain.Event) (eventType string, stream Stream, payload any, 
 		return typeAssignmentAccepted, AssignmentStream(e.AssignmentID), assignmentAcceptedV1{
 			AssignmentID: e.AssignmentID.String(), WorkID: e.WorkID.String(),
 			Stage: e.Stage.String(), Visit: e.Visit.Int(),
+			Route: e.Route.Target().String(), RouteReason: e.Route.Reason().String(),
 		}, nil
 	case domain.AssignmentCancelled:
 		return typeAssignmentCancelled, AssignmentStream(e.AssignmentID), assignmentCancelledV1{
@@ -383,10 +387,14 @@ func decodeEvent(eventType string, payload json.RawMessage) (domain.Event, Strea
 	case typeAssignmentAccepted:
 		var p assignmentAcceptedV1
 		d.unmarshal(payload, &p)
-		event = domain.AssignmentAccepted{
+		accepted := domain.AssignmentAccepted{
 			AssignmentID: d.assignmentID(p.AssignmentID), WorkID: d.workID(p.WorkID),
 			Stage: d.stage(p.Stage), Visit: d.visit(p.Visit),
 		}
+		if p.Route != "" || p.RouteReason != "" {
+			accepted.Route = d.route(p.Route, p.RouteReason)
+		}
+		event = accepted
 	case typeAssignmentCancelled:
 		var p assignmentCancelledV1
 		d.unmarshal(payload, &p)
@@ -465,6 +473,12 @@ func (d *decoder) visit(n int) domain.Visit {
 
 func (d *decoder) budget(n int) domain.AttemptBudget {
 	v, err := domain.NewAttemptBudget(n)
+	d.keep(err)
+	return v
+}
+
+func (d *decoder) route(target, reason string) domain.Route {
+	v, err := domain.NewRoute(d.stage(target), d.reason(reason))
 	d.keep(err)
 	return v
 }

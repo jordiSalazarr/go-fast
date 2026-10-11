@@ -42,6 +42,7 @@ type Checks func(v exitchecks.Visit, progress io.Writer) ([]domain.CheckResult, 
 type Target struct {
 	Open    domain.Open
 	version int
+	work    domain.ActiveWork
 	specify domain.AssignmentID
 }
 
@@ -68,6 +69,9 @@ type Submission struct {
 func SubmitForAcceptance(log Log, actor eventlog.Actor, branch domain.Branch, claim domain.AgentClaim, changes Changes, checks Checks) (Submission, error) {
 	target, err := Find(log, branch)
 	if err != nil {
+		return Submission{}, err
+	}
+	if err := CheckClaim(target, claim); err != nil {
 		return Submission{}, err
 	}
 	checked, err := Check(target, claim, changes, checks, io.Discard)
@@ -100,13 +104,31 @@ func Find(log Reader, branch domain.Branch) (Target, error) {
 	if !ok {
 		return Target{}, fmt.Errorf("submit for acceptance on %s: assignment is %T: %w", work.CurrentStage(), state, domain.ErrNotAwaitingSubmission)
 	}
-	target := Target{Open: open, version: version}
+	target := Target{Open: open, version: version, work: work}
 	for _, r := range history.Records(eventlog.WorkStream(work.ID())) {
 		if entered, ok := r.Event.(domain.StageEntered); ok && entered.Stage == domain.StageSpecify {
 			target.specify = domain.AssignmentIDFor(work.ID(), entered.Stage, entered.Visit)
 		}
 	}
 	return target, nil
+}
+
+// CheckClaim rejects a claim before any check runs, so it uses no attempt:
+// the fixer's pass needs a route its work allows, and no other stage takes
+// a route.
+func CheckClaim(target Target, claim domain.AgentClaim) error {
+	if err := target.Open.CheckClaim(claim); err != nil && !errors.Is(err, domain.ErrMissingRoute) {
+		return fmt.Errorf("submit for acceptance: %w", err)
+	}
+	fixer, ok := target.work.(domain.InFixerWork)
+	if !ok || !claim.Passed() {
+		return nil
+	}
+	route, _ := claim.Route()
+	if err := fixer.CheckRoute(route.Target()); err != nil {
+		return fmt.Errorf("submit for acceptance: %w", err)
+	}
+	return nil
 }
 
 // Check finds the files the visit changed and, when the agent claims a
@@ -154,21 +176,44 @@ func Submit(log Log, actor eventlog.Actor, target Target, claim domain.AgentClai
 
 func NewCommand(openStore func() (*eventlog.Store, error), automate automations.Runner, resolveCaller func() (caller.Caller, error), currentBranch func() (domain.Branch, error), changes Changes, checks Checks) *cobra.Command {
 	var passed bool
-	var failed string
+	var failed, routeTo string
 	cmd := &cobra.Command{
-		Use:   `submit (--passed | --failed "<reason>")`,
+		Use:   `submit (--passed [--route <stage> "<reason>"] | --failed "<reason>")`,
 		Short: "Submit the current stage; a pass is checked by running the stage's exit checks",
+		Long: "Submit the current stage; a pass is checked by running the stage's exit checks.\n\n" +
+			"In the fixer, a pass says where the work goes and why: gf submit --passed --route <specify|implement> \"<reason>\".",
 		Args: func(cmd *cobra.Command, args []string) error {
-			if err := cobra.NoArgs(cmd, args); err != nil {
-				return err
-			}
 			if passed == cmd.Flags().Changed("failed") {
 				return errors.New(`choose exactly one of --passed or --failed "<reason>"`)
+			}
+			if !cmd.Flags().Changed("route") {
+				return cobra.NoArgs(cmd, args)
+			}
+			if !passed {
+				return errors.New(`--route goes with --passed: gf submit --passed --route <stage> "<reason>"`)
+			}
+			if len(args) != 1 {
+				return errors.New(`--route needs a reason: gf submit --passed --route <stage> "<reason>"`)
 			}
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			claim := domain.ClaimPassed()
+			if cmd.Flags().Changed("route") {
+				target, err := domain.ParseStage(routeTo)
+				if err != nil {
+					return fmt.Errorf("route: %w", err)
+				}
+				reason, err := domain.NewReason(args[0])
+				if err != nil {
+					return err
+				}
+				route, err := domain.NewRoute(target, reason)
+				if err != nil {
+					return err
+				}
+				claim = domain.ClaimRouted(route)
+			}
 			if !passed {
 				reason, err := domain.NewReason(failed)
 				if err != nil {
@@ -194,8 +239,10 @@ func NewCommand(openStore func() (*eventlog.Store, error), automate automations.
 			var target Target
 			err = store.Exclusive(func(s *eventlog.Session) error {
 				return automate.AroundCommand(s, func() error {
-					target, err = Find(s, branch)
-					return err
+					if target, err = Find(s, branch); err != nil {
+						return err
+					}
+					return CheckClaim(target, claim)
 				})
 			})
 			if err != nil {
@@ -225,6 +272,7 @@ func NewCommand(openStore func() (*eventlog.Store, error), automate automations.
 	}
 	cmd.Flags().BoolVar(&passed, "passed", false, "the stage is done; gf runs its exit checks to confirm")
 	cmd.Flags().StringVar(&failed, "failed", "", "the stage is not done, with this reason")
+	cmd.Flags().StringVar(&routeTo, "route", "", "fixer only: the earlier stage the work returns to; the reason follows")
 	return cmd
 }
 
@@ -255,6 +303,10 @@ func describe(out io.Writer, submitted Submission) {
 		case domain.SubmittedForApproval:
 			fmt.Fprintf(out, "'%s' passed its exit checks and waits for the owner: `gf approve` or `gf reject \"<feedback>\"`.\n", stage)
 		case domain.AssignmentAccepted:
+			if route := e.Route; route.Target() != (domain.Stage{}) {
+				fmt.Fprintf(out, "'%s' accepted: the work returns to '%s' (%s). Run `gf status` to see what happens next.\n", stage, route.Target(), route.Reason())
+				continue
+			}
 			fmt.Fprintf(out, "'%s' accepted. Run `gf status` to see what happens next.\n", stage)
 		}
 	}

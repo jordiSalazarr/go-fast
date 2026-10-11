@@ -123,11 +123,14 @@ type BudgetExtended struct {
 	NewBudget    AttemptBudget
 }
 
+// AssignmentAccepted carries the fixer's route when the fixer is accepted;
+// for every other stage the route is zero.
 type AssignmentAccepted struct {
 	AssignmentID AssignmentID
 	WorkID       WorkID
 	Stage        Stage
 	Visit        Visit
+	Route        Route
 }
 
 // AssignmentHandedToFixer: the stage visit failed because the code is wrong,
