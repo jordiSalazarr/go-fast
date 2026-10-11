@@ -95,6 +95,25 @@ The guard hook and `gf`'s own owner check (below) cover those.
    do, the session behaves like any other and is never held. Drive mode also
    ends when there is no active work left on the branch.
 
+## Exit checks
+
+`gf submit --passed` runs the stage's exit checks itself; the agent's claim
+alone never passes a stage. `gf status` (`current.checks`) and `gf checks`
+list them.
+
+| Stage | Required checks |
+|---|---|
+| discovery | artifact-written |
+| specify | artifact-written, specs-fail |
+| implement | artifact-written, build-passes, formatted, specs-pass, specs-untouched, suite-passes |
+| review | artifact-written, formatted, build-passes, suite-passes |
+| integration-testing | artifact-written, integration-passes |
+
+A stage that may only write its artifact can't fix code, so every check
+about code it requires is also required by implement, which can: unformatted
+code fails implement, not review. The one exception is integration-passes,
+integration testing's own purpose.
+
 ## Write scopes
 
 | Stage | May write |

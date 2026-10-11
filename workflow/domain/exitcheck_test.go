@@ -1,6 +1,7 @@
 package domain_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -13,7 +14,7 @@ func TestEachStageRequiresItsExitChecks(t *testing.T) {
 	want := map[domain.Stage][]domain.ExitCheck{
 		domain.StageDiscovery: {domain.CheckArtifactWritten},
 		domain.StageSpecify:   {domain.CheckArtifactWritten, domain.CheckSpecsFail},
-		domain.StageImplement: {domain.CheckArtifactWritten, domain.CheckBuildPasses, domain.CheckSpecsPass,
+		domain.StageImplement: {domain.CheckArtifactWritten, domain.CheckBuildPasses, domain.CheckFormatted, domain.CheckSpecsPass,
 			domain.CheckSpecsUntouched, domain.CheckSuitePasses},
 		domain.StageReview:             {domain.CheckArtifactWritten, domain.CheckFormatted, domain.CheckBuildPasses, domain.CheckSuitePasses},
 		domain.StageIntegrationTesting: {domain.CheckArtifactWritten, domain.CheckIntegrationPasses},
@@ -96,8 +97,9 @@ func TestExitCheckOutcome_GivenFailingChecks_ThenTheReasonListsThemInTheStageOrd
 		domain.CheckPassed(domain.CheckSpecsPass),
 		checkFailed(domain.CheckSpecsUntouched, "server_test.go was modified"),
 		domain.CheckPassed(domain.CheckBuildPasses),
+		domain.CheckPassed(domain.CheckFormatted),
 		checkFailed(domain.CheckArtifactWritten, ".gofast/works/w1/implement-v1.md is missing"),
-		checkFailed(domain.CheckFormatted, "not required on implement, so ignored"),
+		checkFailed(domain.CheckIntegrationPasses, "not required on implement, so ignored"),
 	}
 
 	outcome, err := domain.NewExitCheckOutcome(domain.ClaimPassed(), implement, results)
@@ -133,4 +135,36 @@ func TestExitCheckOutcome_GivenAFailedClaim_ThenCheckResultsAreIgnored(t *testin
 
 	require.NoError(t, err)
 	assert.Equal(t, "cannot reproduce", outcome.Reason().String())
+}
+
+// A stage that can't change code can only fail a check about code until it
+// escalates, so an earlier stage on the path that can change code must
+// require that check too. Two checks are exempt:
+//   - artifact-written is about the artifact, which every stage can write;
+//   - integration-passes is integration testing's own purpose: a failure
+//     there is a finding that needs rework, not a check implement forgot.
+func TestEveryCheckAboutCode_IsRequiredBeforeTheStagesThatCantChangeCode(t *testing.T) {
+	exempt := map[domain.ExitCheck]bool{domain.CheckArtifactWritten: true, domain.CheckIntegrationPasses: true}
+	// Code is any Go file, tests included: specify writes test code.
+	code := []domain.RepoPath{must(domain.NewRepoPath("/repo", "server/server.go")), must(domain.NewRepoPath("/repo", "server/server_test.go"))}
+	canChangeCode := func(stage domain.Stage) bool {
+		return slices.ContainsFunc(code, func(p domain.RepoPath) bool { return stage.WriteScope().Allows(p, workID) })
+	}
+	for _, workType := range domain.WorkTypes() {
+		var requiredByCodeStages []domain.ExitCheck
+		for _, step := range must(domain.PathFor(workType)).Steps() {
+			stage := step.Stage()
+			if canChangeCode(stage) {
+				requiredByCodeStages = append(requiredByCodeStages, stage.RequiredChecks()...)
+				continue
+			}
+			for _, check := range stage.RequiredChecks() {
+				if !exempt[check] {
+					assert.Containsf(t, requiredByCodeStages, check,
+						"%s: '%s' can't change code but requires %s, which no earlier stage that can change code requires",
+						workType, stage, check)
+				}
+			}
+		}
+	}
 }

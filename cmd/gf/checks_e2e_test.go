@@ -19,7 +19,7 @@ func TestChecks_ShowsTheConfigurationAndEachStagesChecks(t *testing.T) {
 	assert.Contains(t, out, "defaults; .gofast/checks.json does not exist")
 	assert.Contains(t, out, "integration  not configured: integration-passes fails until the owner adds one to .gofast/checks.json")
 	assert.Contains(t, out, "  specify              artifact-written, specs-fail\n")
-	assert.Contains(t, out, "  implement            artifact-written, build-passes, specs-pass, specs-untouched, suite-passes\n")
+	assert.Contains(t, out, "  implement            artifact-written, build-passes, formatted, specs-pass, specs-untouched, suite-passes\n")
 
 	assert.NotContains(t, out, "Warning")
 
@@ -90,7 +90,7 @@ func TestExitChecks_FixBugRun_EndToEnd(t *testing.T) {
 
 	// Implement: changing specify's test instead of the code fails.
 	v = r.expect("implement", progress.AssignmentOpen, 0, 3)
-	assert.Equal(t, []string{"artifact-written", "build-passes", "specs-pass", "specs-untouched", "suite-passes"}, v.Current.Checks)
+	assert.Equal(t, []string{"artifact-written", "build-passes", "formatted", "specs-pass", "specs-untouched", "suite-passes"}, v.Current.Checks)
 	r.write("server/port_test.go", strings.ReplaceAll(portSpec, "8080", "8081"))
 	r.write(v.Current.Artifact, "# implement\n\nAdjusted the test.\n")
 	out = r.submitAsAgent("--passed")

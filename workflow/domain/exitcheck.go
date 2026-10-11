@@ -52,7 +52,7 @@ func (s Stage) RequiredChecks() []ExitCheck {
 	case StageSpecify:
 		return []ExitCheck{CheckArtifactWritten, CheckSpecsFail}
 	case StageImplement:
-		return []ExitCheck{CheckArtifactWritten, CheckBuildPasses, CheckSpecsPass, CheckSpecsUntouched, CheckSuitePasses}
+		return []ExitCheck{CheckArtifactWritten, CheckBuildPasses, CheckFormatted, CheckSpecsPass, CheckSpecsUntouched, CheckSuitePasses}
 	case StageReview:
 		return []ExitCheck{CheckArtifactWritten, CheckFormatted, CheckBuildPasses, CheckSuitePasses}
 	case StageIntegrationTesting:
