@@ -2,6 +2,7 @@ package domain
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -132,8 +133,12 @@ func (c ScopeCheck) reason() string {
 // no checks are needed then. The domain never runs checks; it interprets
 // their results.
 type ExitCheckOutcome struct {
+	stage  Stage
 	passed bool
 	reason Reason
+	// What failed, for ClassifyFailure.
+	scopeViolated bool
+	failedChecks  []ExitCheck
 }
 
 // NewExitCheckOutcome rejects a passing claim whose results lack a check the
@@ -142,6 +147,7 @@ type ExitCheckOutcome struct {
 // checks in the order the stage requires them.
 func NewExitCheckOutcome(claim AgentClaim, scope ScopeCheck, results []CheckResult) (ExitCheckOutcome, error) {
 	var failures []string
+	var failedChecks []ExitCheck
 	if !claim.passed {
 		failures = append(failures, sentence(claim.reason.text))
 	}
@@ -149,7 +155,9 @@ func NewExitCheckOutcome(claim AgentClaim, scope ScopeCheck, results []CheckResu
 		failures = append(failures, scope.reason())
 	}
 	if claim.passed {
-		failed, err := failedChecks(scope.stage, results)
+		var failed []string
+		var err error
+		failedChecks, failed, err = failingChecks(scope.stage, results)
 		if err != nil {
 			return ExitCheckOutcome{}, err
 		}
@@ -158,28 +166,34 @@ func NewExitCheckOutcome(claim AgentClaim, scope ScopeCheck, results []CheckResu
 		}
 	}
 	if len(failures) == 0 {
-		return ExitCheckOutcome{passed: true}, nil
+		return ExitCheckOutcome{stage: scope.stage, passed: true}, nil
 	}
+	outcome := ExitCheckOutcome{stage: scope.stage, scopeViolated: !scope.passed(), failedChecks: failedChecks}
 	if !claim.passed && scope.passed() {
-		return ExitCheckOutcome{reason: claim.reason}, nil // the agent's words, as given
+		outcome.reason = claim.reason // the agent's words, as given
+		return outcome, nil
 	}
-	return ExitCheckOutcome{reason: Reason{text: strings.Join(failures, " ")}}, nil
+	outcome.reason = Reason{text: strings.Join(failures, " ")}
+	return outcome, nil
 }
 
-// failedChecks describes the stage's required checks that failed, in the
-// stage's order. Results of checks the stage does not require are ignored.
-func failedChecks(stage Stage, results []CheckResult) ([]string, error) {
-	var failed []string
+// failingChecks returns the stage's required checks that failed, and a
+// description of each, in the stage's order. Results of checks the stage
+// does not require are ignored.
+func failingChecks(stage Stage, results []CheckResult) ([]ExitCheck, []string, error) {
+	var checks []ExitCheck
+	var described []string
 	for _, check := range stage.RequiredChecks() {
 		result, ok := resultOf(check, results)
 		if !ok {
-			return nil, fmt.Errorf("exit check %s of stage %s has no result: %w", check, stage, ErrMissingValue)
+			return nil, nil, fmt.Errorf("exit check %s of stage %s has no result: %w", check, stage, ErrMissingValue)
 		}
 		if !result.passed {
-			failed = append(failed, check.name+": "+strings.TrimSuffix(result.summary, "."))
+			checks = append(checks, check)
+			described = append(described, check.name+": "+strings.TrimSuffix(result.summary, "."))
 		}
 	}
-	return failed, nil
+	return checks, described, nil
 }
 
 func resultOf(check ExitCheck, results []CheckResult) (CheckResult, bool) {
@@ -193,6 +207,50 @@ func resultOf(check ExitCheck, results []CheckResult) (CheckResult, bool) {
 
 func (o ExitCheckOutcome) Passed() bool   { return o.passed }
 func (o ExitCheckOutcome) Reason() Reason { return o.reason }
+
+// FailureKind says why a stage visit's exit failed, which decides what
+// happens next.
+type FailureKind struct{ name string }
+
+var (
+	// StageWorkFailure: the agent didn't do its own stage properly. The same
+	// stage tries again, using an attempt.
+	StageWorkFailure = FailureKind{name: "stage-work"}
+	// CodeFailure: the code is wrong, and the stage can't change code. The
+	// work goes to the fixer.
+	CodeFailure = FailureKind{name: "code"}
+)
+
+func (k FailureKind) String() string { return k.name }
+
+// ClassifyFailure says why a failed outcome failed; ok is false for an
+// outcome that passed. It depends only on what failed and on the stage the
+// outcome is about: its write scope, and whether it checks code.
+//
+// A missing or unchanged artifact, or a change outside the write scope, is
+// always the stage's own work. So is any failure of a stage that can change
+// code: it fixes the code itself on its next attempt. A stage that checks
+// code it can't change (review, integration testing) fails on the code when
+// one of its other checks fails, or when its agent says the code is wrong.
+func ClassifyFailure(outcome ExitCheckOutcome) (kind FailureKind, ok bool) {
+	if outcome.passed {
+		return FailureKind{}, false
+	}
+	if outcome.scopeViolated || slices.Contains(outcome.failedChecks, CheckArtifactWritten) || !outcome.stage.ChecksCode() {
+		return StageWorkFailure, true
+	}
+	return CodeFailure, true
+}
+
+// ChecksCode reports whether the stage judges code it can't change: its
+// write scope can't change code, yet it requires a check other than
+// artifact-written. Discovery and the fixer only write their artifact, so
+// their failures are always their own work.
+func (s Stage) ChecksCode() bool {
+	return !s.WriteScope().CanChangeCode() && slices.ContainsFunc(s.RequiredChecks(), func(c ExitCheck) bool {
+		return c != CheckArtifactWritten
+	})
+}
 
 // sentence ends s with a full stop unless it already ends a sentence.
 func sentence(s string) string {

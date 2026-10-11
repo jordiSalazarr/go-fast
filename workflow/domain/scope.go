@@ -65,6 +65,11 @@ var (
 
 func (s WriteScope) String() string { return s.name }
 
+// CanChangeCode reports whether the scope allows any code, tests included.
+func (s WriteScope) CanChangeCode() bool {
+	return s == WriteScopeTestsAndArtifacts || s == WriteScopeAnything
+}
+
 // WriteScope is what may be written while the work is on this stage.
 func (s Stage) WriteScope() WriteScope {
 	switch s {
