@@ -68,7 +68,9 @@ func (r *repo) designAwaitsApproval(proposals string) {
 	}
 	out := r.submitAsAgent("--passed")
 	assert.Contains(r.t, out, "✓ design-valid\n✓ nfr-proposals-valid\n")
-	r.expect("design", progress.AssignmentAwaitingApproval, 0, 3)
+	c := r.status().Current
+	assert.Equal(r.t, "design", c.Stage)
+	assert.Equal(r.t, progress.AssignmentAwaitingApproval, c.Assignment)
 }
 
 // runWithInput runs gf as the owner in a terminal, typing input.
@@ -208,4 +210,50 @@ func TestChecks_WarnsAboutNFRsWithoutMinRPS(t *testing.T) {
 
 	assert.Contains(t, out, "Warning: NFR 'latency-only' has no minRps target: a script that sleeps between requests can keep latency low by sending little load.\n")
 	assert.NotContains(t, out, "NFR 'with-rps'")
+}
+
+func TestStatus_OnDesign_ShowsTheDesignsProblems_AndTheHandover(t *testing.T) {
+	r := newRepo(t)
+	r.toDesign("new-feature")
+	v := r.status()
+	assert.Empty(t, v.Current.DesignProblems, "no attempt failed yet")
+	assert.Nil(t, v.Work.Design, "no design accepted yet")
+
+	r.writeArtifact("Wallets.")
+	r.write(r.designFile(), strings.Replace(walletDesignJSON(t), `"invariants": ["balance never goes below zero", "a transaction is applied at most once"]`, `"invariants": []`, 1))
+	r.submitAsAgent("--passed")
+
+	v = r.expect("design", progress.AssignmentOpen, 1, 3)
+	assert.Equal(t, []string{"aggregate Wallet has no invariant"}, v.Current.DesignProblems)
+	assert.Contains(t, r.gf("status"), "Design problems (design-valid):\n  - aggregate Wallet has no invariant\n")
+
+	r.designAwaitsApproval(latencyProposal)
+	v = r.status()
+	assert.Equal(t, progress.NextOwner, v.Next.Actor)
+	assert.Equal(t, []string{"gf nfrs adopt", "gf approve", `gf reject "<feedback>"`}, v.Next.Commands)
+	assert.Contains(t, v.Next.Message, "(its `## Decisions for the owner` section, if any)")
+	assert.Contains(t, v.Next.Message, "adopt them with `gf nfrs adopt`, commit .gofast/nfrs.json, then run `gf approve`")
+
+	r.gf("nfrs", "adopt", "--yes")
+	v = r.status()
+	assert.Equal(t, []string{"gf approve", `gf reject "<feedback>"`}, v.Next.Commands, "nothing left to adopt")
+}
+
+func TestStatus_OnSpecify_ShowsTheAcceptedDesign_AndTheSlicesNeedingSpecs(t *testing.T) {
+	r := newRepo(t)
+	r.toDesign("new-feature")
+	r.designAwaitsApproval("")
+	r.gf("approve")
+
+	v := r.expect("specify", progress.AssignmentOpen, 0, 3)
+	dir := v.Work.ArtifactDir
+	assert.Equal(t, &progress.DesignView{
+		Visit: 1, Artifact: dir + "design-v1.md", File: dir + "design-v1.json", Aggregates: 1, Commands: 1,
+		Slices: map[string]int{"added": 3},
+	}, v.Work.Design)
+	assert.Equal(t, []string{"PostTransaction", "PublishWalletDebited"}, v.Current.SlicesNeedingSpecs)
+	assert.Equal(t, []string{"artifact-written", "specs-fail", "specs-cover-slices"}, v.Current.Checks)
+	out := r.gf("status")
+	assert.Contains(t, out, "Design (visit 1): "+dir+"design-v1.md, "+dir+"design-v1.json\n  1 aggregates, 1 commands, slices: 3 added\n")
+	assert.Contains(t, out, "Slices needing specs (a new Test<SliceName>… test each): PostTransaction, PublishWalletDebited\n")
 }

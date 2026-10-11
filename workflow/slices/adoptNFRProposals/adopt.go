@@ -71,7 +71,8 @@ func NewCommand(openStore func() (*eventlog.Store, error), resolveCaller func() 
 		Short: "Adopt the NFRs design proposes into .gofast/nfrs.json (owner only)",
 		Long: "Adopt the NFRs the design visit waiting for approval proposes into " + exitchecks.NFRsPath + " (owner only, from a terminal).\n\n" +
 			"A proposed NFR with an existing id replaces it; a new id adds one. It shows the changes and asks first, unless --yes.\n" +
-			"Commit " + exitchecks.NFRsPath + " before `gf approve`. Nothing is recorded in the event log.",
+			"Commit " + exitchecks.NFRsPath + " before `gf approve`. Nothing is recorded in the event log.\n" +
+			"To reject the design instead, restore " + exitchecks.NFRsPath + " first: design's next submission would see it changed.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := resolveCaller()

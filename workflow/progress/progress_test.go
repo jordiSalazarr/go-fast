@@ -39,8 +39,8 @@ func TestGivenNoWork_WhenQueryingStatus_ThenItSaysHowToStart(t *testing.T) {
 
 	assert.Equal(t, progress.View{Schema: 1, Next: progress.NextView{
 		Actor:    progress.NextAnyone,
-		Message:  "No active work on branch main. Start one with `gf start --type fix-bug \"<description>\"`.",
-		Commands: []string{`gf start --type fix-bug "<description>"`},
+		Message:  "No active work on branch main. Start one with `gf start --type <fix-bug|new-feature|modify-behaviour> \"<description>\"`.",
+		Commands: []string{`gf start --type <fix-bug|new-feature|modify-behaviour> "<description>"`},
 	}, OtherBranches: []progress.OtherBranchView{}}, v)
 }
 

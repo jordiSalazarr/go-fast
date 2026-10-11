@@ -49,7 +49,7 @@ func friendly(err error, cmd *cobra.Command, ran bool) string {
 		return fmt.Sprintf("Branch %s has more than one work in progress (%s), usually after a bad merge. Resolve .gofast/events.jsonl by hand. %s",
 			conflict.Branch, strings.Join(ids, ", "), seeLog)
 	case errors.Is(err, domain.ErrNoActiveWork):
-		return "There is no active work on this branch. Start one with `gf start --type fix-bug \"<description>\"`."
+		return "There is no active work on this branch. Start one with `gf start --type <fix-bug|new-feature|modify-behaviour> \"<description>\"`."
 	case errors.Is(err, domain.ErrNotAwaitingSubmission):
 		return "There is nothing to submit right now. Run `gf status` to see what happens next."
 	case errors.Is(err, domain.ErrNotAwaitingApproval):
@@ -93,7 +93,7 @@ func friendly(err error, cmd *cobra.Command, ran bool) string {
 		}
 		return fmt.Sprintf("Unknown work type. Available: %s.", strings.Join(names, ", "))
 	case errors.Is(err, domain.ErrEmptyDescription):
-		return "Describe the work: `gf start --type fix-bug \"<description>\"`."
+		return "Describe the work: `gf start --type <fix-bug|new-feature|modify-behaviour> \"<description>\"`."
 	case errors.Is(err, domain.ErrEmptyFeedback):
 		return "Say what needs to change: `gf reject \"<feedback>\"`."
 	case errors.Is(err, domain.ErrEmptyReason):

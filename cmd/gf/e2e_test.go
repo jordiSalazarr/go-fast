@@ -169,7 +169,7 @@ func TestFixBugPath_EndToEnd(t *testing.T) {
 
 	v := r.status()
 	assert.Nil(t, v.Work)
-	assert.Contains(t, v.Next.Message, "gf start --type fix-bug")
+	assert.Contains(t, v.Next.Message, "gf start --type <fix-bug|new-feature|modify-behaviour>")
 
 	r.gf("start", "--type", "fix-bug", "login button does nothing")
 	v = r.expect("discovery", progress.AssignmentOpen, 0, 3)
@@ -309,7 +309,7 @@ func TestErrors_AreFriendlyOnTheTerminalAndDetailedInTheLog(t *testing.T) {
 	r := newRepo(t)
 
 	res := r.gfFails(nil, "approve")
-	assert.Equal(t, "There is no active work on this branch. Start one with `gf start --type fix-bug \"<description>\"`.\n", res.stderr)
+	assert.Equal(t, "There is no active work on this branch. Start one with `gf start --type <fix-bug|new-feature|modify-behaviour> \"<description>\"`.\n", res.stderr)
 
 	res = r.gfFails(nil, "start", "--type", "feature", "x")
 	assert.Equal(t, "Unknown work type. Available: fix-bug, new-feature, modify-behaviour.\n", res.stderr)

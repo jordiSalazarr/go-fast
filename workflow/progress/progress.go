@@ -34,6 +34,9 @@ type Facts struct {
 	// NFRProposals returns what adopting a design visit's NFR proposals
 	// would change; ok is false when it proposes none.
 	NFRProposals func(proposals domain.RepoPath) (adoption domain.NFRAdoption, ok bool, err error)
+	// Design reads a structured design; an *exitchecks.DesignError says
+	// what is wrong with it.
+	Design func(path domain.RepoPath) (domain.Design, error)
 }
 
 // View is the progress document. Its JSON form is consumed by hooks: field
@@ -97,11 +100,18 @@ type NFRProposalsView struct {
 }
 
 // DesignView is the work's latest accepted design: its files, relative to
-// the repository root.
+// the repository root, and what it holds.
 type DesignView struct {
-	Visit    int    `json:"visit"`
-	Artifact string `json:"artifact"` // the markdown design
-	File     string `json:"file"`     // the structured design
+	Visit      int    `json:"visit"`
+	Artifact   string `json:"artifact"` // the markdown design
+	File       string `json:"file"`     // the structured design
+	Aggregates int    `json:"aggregates"`
+	Commands   int    `json:"commands"`
+	// Slices counts the slices by change: added, changed, removed,
+	// unchanged; never null.
+	Slices map[string]int `json:"slices"`
+	// Problem says why the structured design couldn't be read.
+	Problem string `json:"problem,omitempty"`
 }
 
 // Stage status values.
@@ -151,6 +161,13 @@ type CurrentView struct {
 	ReworkOf *ReworkOfView `json:"reworkOf"`
 	// Stress is set on review, integration testing and stress testing.
 	Stress *StressView `json:"stress,omitempty"`
+	// DesignProblems are what is wrong with this design visit's structured
+	// design, after an attempt failed; design only.
+	DesignProblems []string `json:"designProblems,omitempty"`
+	// SlicesNeedingSpecs are the slices of the latest accepted design that
+	// specify must cover with Test<SliceName> specs; specify on paths with
+	// design only.
+	SlicesNeedingSpecs []string `json:"slicesNeedingSpecs,omitempty"`
 }
 
 // StressView is what the current stage needs to know about stress testing.
@@ -273,6 +290,7 @@ func FactsAt(root string) Facts {
 			}
 			return plan.Adoption, err == nil, err
 		},
+		Design: func(path domain.RepoPath) (domain.Design, error) { return exitchecks.LoadDesign(root, path) },
 	}
 }
 
@@ -297,8 +315,8 @@ func Read(log Reader, branch domain.Branch, facts Facts) (View, error) {
 	if errors.Is(err, domain.ErrNoActiveWork) {
 		return View{Schema: 1, OtherBranches: others, Next: NextView{
 			Actor:    NextAnyone,
-			Message:  fmt.Sprintf("No active work on branch %s. Start one with `gf start --type fix-bug \"<description>\"`.", branch),
-			Commands: []string{`gf start --type fix-bug "<description>"`},
+			Message:  fmt.Sprintf("No active work on branch %s. Start one with `gf start --type <fix-bug|new-feature|modify-behaviour> \"<description>\"`.", branch),
+			Commands: []string{`gf start --type <fix-bug|new-feature|modify-behaviour> "<description>"`},
 		}}, nil
 	}
 	if err != nil {
@@ -324,7 +342,7 @@ func Read(log Reader, branch domain.Branch, facts Facts) (View, error) {
 				if _, accepted := state.(domain.Accepted); accepted {
 					view.Work.Design = &DesignView{
 						Visit: e.Visit.Int(), Artifact: domain.ArtifactFor(work.ID(), e.Stage, e.Visit).String(),
-						File: domain.DesignFor(work.ID(), e.Visit).String(),
+						File: domain.DesignFor(work.ID(), e.Visit).String(), Slices: map[string]int{},
 					}
 				}
 			}
@@ -334,6 +352,9 @@ func Read(log Reader, branch domain.Branch, facts Facts) (View, error) {
 				Reason:        e.Reason.String(), Target: e.Target.String(), TargetVisit: e.Visit.Int(),
 			}
 		}
+	}
+	if d := view.Work.Design; d != nil && facts.Design != nil {
+		describeDesign(d, work.ID(), facts)
 	}
 	if visit, ok := lastVisit[domain.StageDesign]; ok && facts.NFRProposals != nil {
 		view.Work.NFRProposals = nfrProposalsView(domain.NFRProposalsFor(work.ID(), visit), facts)
@@ -401,6 +422,14 @@ func Read(log Reader, branch domain.Branch, facts Facts) (View, error) {
 		current.Assignment, current.AttemptsUsed, current.Budget = describeAssignment(state)
 	}
 	current.LastProblem = lastProblem(history.Records(eventlog.AssignmentStream(assignmentID)))
+	if facts.Design != nil {
+		switch {
+		case stage == domain.StageDesign && current.LastProblem != nil:
+			current.DesignProblems = designProblems(domain.DesignFor(work.ID(), work.CurrentVisit()), facts)
+		case stage == domain.StageSpecify && view.Work.Design != nil:
+			current.SlicesNeedingSpecs = slicesNeedingSpecs(view.Work.Design, work.ID(), facts)
+		}
+	}
 
 	_, atReworkLimit := work.(domain.ReworkLimitReachedWork)
 	switch {
@@ -412,6 +441,8 @@ func Read(log Reader, branch domain.Branch, facts Facts) (View, error) {
 				stage, view.Work.Reworks, view.Work.ReworkBudget),
 			Commands: []string{"gf rework-extend <n>", `gf abandon "<reason>"`},
 		}
+	case current.Assignment == AssignmentAwaitingApproval && stage == domain.StageDesign:
+		view.Next = designAwaitsApproval(current, view.Work.NFRProposals)
 	case current.Assignment == AssignmentAwaitingApproval:
 		view.Next = NextView{
 			Actor:    NextOwner,
@@ -442,6 +473,74 @@ func Read(log Reader, branch domain.Branch, facts Facts) (View, error) {
 		}
 	}
 	return view, nil
+}
+
+// designAwaitsApproval tells the owner what to read in the design, and to
+// adopt its NFR proposals, if any, before approving.
+func designAwaitsApproval(current *CurrentView, proposals *NFRProposalsView) NextView {
+	read := fmt.Sprintf("Waiting for the owner to approve 'design': read %s (its `## Decisions for the owner` section, if any) and %s.",
+		current.Artifact, strings.TrimSuffix(current.Artifact, ".md")+".json")
+	if proposals == nil {
+		return NextView{
+			Actor:    NextOwner,
+			Message:  read + " Then run `gf approve` or `gf reject \"<feedback>\"`.",
+			Commands: []string{"gf approve", `gf reject "<feedback>"`},
+		}
+	}
+	return NextView{
+		Actor: NextOwner,
+		Message: fmt.Sprintf("%s It proposes NFRs (%s): adopt them with `gf nfrs adopt`, commit %s, then run `gf approve`; or `gf reject \"<feedback>\"`.",
+			read, proposals.File, exitchecks.NFRsPath),
+		Commands: []string{"gf nfrs adopt", "gf approve", `gf reject "<feedback>"`},
+	}
+}
+
+// describeDesign counts what the latest accepted design holds.
+func describeDesign(d *DesignView, work domain.WorkID, facts Facts) {
+	design, err := facts.Design(domain.DesignFor(work, mustVisit(d.Visit)))
+	if err != nil {
+		d.Problem = "gf could not read the design: " + err.Error()
+		return
+	}
+	d.Aggregates, d.Commands = len(design.Aggregates()), len(design.Commands())
+	for _, s := range design.Slices() {
+		d.Slices[s.Change().String()]++
+	}
+}
+
+// designProblems are what is wrong with a design visit's structured design;
+// none when it is valid.
+func designProblems(path domain.RepoPath, facts Facts) []string {
+	_, err := facts.Design(path)
+	var invalid *exitchecks.DesignError
+	switch {
+	case errors.As(err, &invalid) && invalid.Missing:
+		return []string{path.String() + " is missing"}
+	case errors.As(err, &invalid):
+		return invalid.Problems
+	case err != nil:
+		return []string{"gf could not read " + path.String() + ": " + err.Error()}
+	}
+	return nil
+}
+
+// slicesNeedingSpecs names the latest accepted design's slices that need
+// specs.
+func slicesNeedingSpecs(d *DesignView, work domain.WorkID, facts Facts) []string {
+	design, err := facts.Design(domain.DesignFor(work, mustVisit(d.Visit)))
+	if err != nil {
+		return nil // DesignView.Problem says why
+	}
+	var names []string
+	for _, s := range design.SlicesNeedingSpecs() {
+		names = append(names, s.Name())
+	}
+	return names
+}
+
+func mustVisit(n int) domain.Visit {
+	v, _ := domain.NewVisit(n)
+	return v
 }
 
 // reviewNext tells review to decide stress testing as it passes; skip only
@@ -670,8 +769,20 @@ func RenderText(w io.Writer, v View) {
 		fmt.Fprintf(w, "Rework: the fixer sent the work back to %s (visit %d): %s\n", r.Target, r.TargetVisit, r.Reason)
 		fmt.Fprintf(w, "Fixer's artifact: %s\n", r.FixerArtifact)
 	}
+	if d := v.Work.Design; d != nil {
+		renderDesign(w, d)
+	}
 	fmt.Fprintf(w, "Artifact: %s\n", c.Artifact)
 	fmt.Fprintf(w, "Exit checks (run by `gf submit --passed`): %s\n", strings.Join(c.Checks, ", "))
+	if len(c.DesignProblems) > 0 {
+		fmt.Fprintln(w, "Design problems (design-valid):")
+		for _, p := range c.DesignProblems {
+			fmt.Fprintf(w, "  - %s\n", p)
+		}
+	}
+	if len(c.SlicesNeedingSpecs) > 0 {
+		fmt.Fprintf(w, "Slices needing specs (a new Test<SliceName>… test each): %s\n", strings.Join(c.SlicesNeedingSpecs, ", "))
+	}
 	if st := c.Stress; st != nil {
 		renderStress(w, c.Stage, st)
 	}
@@ -687,6 +798,21 @@ func RenderText(w io.Writer, v View) {
 		fmt.Fprintf(w, "%s (attempt %d): %s\n", label, p.Attempt, p.Text)
 	}
 	fmt.Fprintf(w, "\nNext: %s\n", v.Next.Message)
+}
+
+func renderDesign(w io.Writer, d *DesignView) {
+	fmt.Fprintf(w, "Design (visit %d): %s, %s\n", d.Visit, d.Artifact, d.File)
+	if d.Problem != "" {
+		fmt.Fprintf(w, "  %s\n", d.Problem)
+		return
+	}
+	var slices []string
+	for _, c := range domain.Changes() {
+		if n := d.Slices[c.String()]; n > 0 {
+			slices = append(slices, fmt.Sprintf("%d %s", n, c))
+		}
+	}
+	fmt.Fprintf(w, "  %d aggregates, %d commands, slices: %s\n", d.Aggregates, d.Commands, strings.Join(slices, ", "))
 }
 
 func describeProposals(p *NFRProposalsView) string {

@@ -1,13 +1,15 @@
 # gofast — Claude Code plugin
 
-Drives an agent along gofast's fix-bug path (discovery → specify → implement →
-review → integration-testing), with a fixer that sends work back when review
-or integration testing finds the code wrong. The `gf` CLI decides where the
-work is and refuses invalid moves; this plugin connects it to Claude Code:
+Drives an agent along gofast's paths: fix-bug (discovery → specify →
+implement → review → integration-testing → [stress-testing]), and new-feature
+and modify-behaviour, which add design between discovery and specify. A
+fixer sends work back when a later stage finds the code (or the design)
+wrong. The `gf` CLI decides where the work is and refuses invalid moves; this
+plugin connects it to Claude Code:
 
-- **Stage agents** `gofast:discovery`, `gofast:specify`, `gofast:implement`,
-  `gofast:review`, `gofast:integration-testing` and `gofast:fixer`: one
-  subagent per stage.
+- **Stage agents** `gofast:discovery`, `gofast:design`, `gofast:specify`,
+  `gofast:implement`, `gofast:review`, `gofast:integration-testing`,
+  `gofast:stress-testing` and `gofast:fixer`: one subagent per stage.
 - **`/gofast:drive`**: the orchestrator. It reads `gf status`, runs the right
   stage agent and repeats until the owner is needed.
 - **Hooks** (`gf hook <event>`): the agent can't approve, can't touch the
@@ -120,7 +122,7 @@ The guard hook and `gf`'s own owner check (below) cover those.
    stop: it runs the next agent. Failed submissions use attempts, and an
    exhausted budget escalates; a code failure sends the work to the fixer, and
    reworks are limited too. So the loop always ends.
-5. **The owner is needed.** On a human gate (discovery, specify) the session
+5. **The owner is needed.** On a human gate (discovery, design, specify) the session
    stops once the stage is waiting for approval, and tells you which artifact
    to read. When a budget is exhausted, or the work reaches its rework limit,
    it stops and tells you the options. Either way, drive mode ends there:
@@ -137,8 +139,9 @@ list them.
 
 | Stage | Required checks |
 |---|---|
-| discovery | artifact-written |
-| specify | artifact-written, specs-fail |
+| discovery | artifact-written; on modify-behaviour also behaviour-delta |
+| design | artifact-written, design-valid, nfr-proposals-valid |
+| specify | artifact-written, specs-fail; on paths with design also specs-cover-slices |
 | implement | artifact-written, build-passes, formatted, specs-pass, specs-untouched, suite-passes |
 | review | artifact-written, formatted, build-passes, suite-passes |
 | integration-testing | artifact-written, integration-passes |
@@ -148,7 +151,53 @@ list them.
 A stage that may only write its artifact can't fix code, so every check
 about code it requires is also required by implement, which can: unformatted
 code fails implement, not review. The exceptions are integration-passes and
-nfrs-met, integration and stress testing's own purposes.
+nfrs-met, integration and stress testing's own purposes. Design's checks and
+behaviour-delta are about the stage's own artifacts, not code.
+
+## Design
+
+On new-feature and modify-behaviour work, design (`gofast:design`, human
+gate, artifacts only) models the change before any spec is written. On
+modify-behaviour, discovery first states both sides of the change: its
+artifact needs a non-empty `## Current behaviour` and `## Expected behaviour`
+section (`behaviour-delta`).
+
+Design writes two files describing the same design, both in the work's
+artifact directory:
+
+- `design-v<n>.md`: the event model, the aggregates with their invariants and
+  states, the commands with their events and rejections, the read models,
+  the slices and the contracts. When valid options change behaviour or
+  boundaries, it lists them under `## Decisions for the owner`, with
+  trade-offs and a recommendation, and designs the recommended one.
+- `design-v<n>.json`: the structured design. `design-valid` parses it and
+  checks the domain's rules: unique names, PascalCase slices, commands and
+  events, an invariant per aggregate, every reference resolved, every
+  external event under an event contract, at least one slice that changes.
+  The failure lists every problem; so does `gf status` (`current.designProblems`).
+
+After you approve, specify must cover every `command` and `automation` slice
+the design adds or changes with a new test named `Test<SliceName>…`
+(`specs-cover-slices`; `gf status` lists them as
+`current.slicesNeedingSpecs`). Specify and implement read the latest accepted
+design from `work.design` in `gf status --json`.
+
+Design may also propose NFRs in `nfrs.proposed-v<n>.json`, in the schema of
+`.gofast/nfrs.json` (`nfr-proposals-valid`): an existing id replaces that
+NFR, a new id adds one; proposals never remove one. While design waits for
+your approval, `gf status` shows them as pending. To adopt them, in your own
+terminal:
+
+```sh
+gf nfrs adopt        # shows what it adds and replaces, asks (or --yes), merges
+git add .gofast/nfrs.json && git commit -m "Adopt the design's NFRs"
+gf approve
+```
+
+`gf nfrs adopt` is owner only and works only while design waits for
+approval, so no stage's scope check sees `nfrs.json` change. It records
+nothing in the event log. An adopted NFR makes stress testing mandatory for
+the work, like any other.
 
 ## The fixer and rework
 
@@ -265,7 +314,7 @@ files in `current.fixer.stressRunDir`, profiling) before choosing a route.
 
 | Stage | May write |
 |---|---|
-| discovery, review, integration-testing, stress-testing, fixer | only the work's artifact directory |
+| discovery, design, review, integration-testing, stress-testing, fixer | only the work's artifact directory |
 | specify | tests (`*_test.go`, files under `testdata/`) and artifacts |
 | implement | anything except gofast's own files in `.gofast/` |
 
@@ -373,6 +422,9 @@ These are known and out of scope:
   `git reset` to an earlier commit.
 - **Changes the owner makes during a stage** count as the stage's changes at
   submit time.
+- **Rejecting a design after adopting its NFRs.** Design's next submission
+  sees `.gofast/nfrs.json` changed since design began, outside its scope.
+  Restore `nfrs.json` before rejecting, and adopt again later.
 - **Very old baselines.** Baseline trees aren't referenced by any branch, so
   `git gc` may prune them after a few weeks. The exit checks then fail with
   the missing-baseline message above, and the owner abandons and restarts the
