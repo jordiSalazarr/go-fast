@@ -168,17 +168,21 @@ gf tells two kinds apart:
 
 The fixer (`gofast:fixer`) finds the root cause and writes it in its
 artifact, with what the next visit must do. It ends with
-`gf submit --passed --route <specify|implement> "<reason>"`: specify if the
-spec was wrong or missed a case, implement if the code is wrong. gf only
-accepts an earlier stage on the work's path that can change code; any other
-route is refused without using an attempt.
+`gf submit --passed --route <design|specify|implement> "<reason>"`: design
+if the model is wrong (a missing invariant, a wrong aggregate boundary, a
+missing slice), specify if the spec was wrong or missed a case, implement if
+the code is wrong. gf only accepts an earlier stage on the work's path that
+can change code, or design on the paths that have it; any other route is
+refused without using an attempt. Design can't change code, but a wrong
+design is fixed by redesigning, and its human gate shows you the new design.
 
 The work then starts a **new visit** of that stage, with its own artifact
 (`<stage>-v2.md`), baseline and attempts, and every later stage runs again.
 Each of those visits shows the fixer's artifact as `current.reworkOf` in
 `gf status --json`, and its agent reads it first. Implement's specs are those
 of the latest accepted specify visit: a rework to specify brings new specs, a
-rework to implement keeps the old ones.
+rework to implement keeps the old ones. Likewise, specify covers the slices
+of the latest accepted design visit.
 
 A work may enter the fixer **3 times**. On the fourth handover it stops at
 its rework limit and drive mode ends. The owner runs

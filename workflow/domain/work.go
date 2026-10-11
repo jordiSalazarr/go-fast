@@ -370,12 +370,14 @@ func (w InProgressWork) requireCurrent(stage Stage, visit Visit) error {
 
 // RouteTargets are the stages the fixer may return the work to: on the
 // work's path, earlier than the stage that handed over, and able to change
-// code. In path order.
+// code, or design. Design can't change code, but a wrong design (a missing
+// invariant, a wrong aggregate boundary, a missing slice) is fixed by
+// redesigning, and its human gate shows the owner. In path order.
 func (w InFixerWork) RouteTargets() []Stage {
 	var targets []Stage
 	end, _ := w.path.indexOf(w.from)
 	for _, step := range w.path.steps[:end] {
-		if step.stage.WriteScope().CanChangeCode() {
+		if step.stage.WriteScope().CanChangeCode() || step.stage == StageDesign {
 			targets = append(targets, step.stage)
 		}
 	}

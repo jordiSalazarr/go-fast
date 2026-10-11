@@ -293,3 +293,75 @@ func TestCheckRoute_WithoutATarget_NamesTheAllowedOnes(t *testing.T) {
 	assert.Equal(t, []domain.Stage{domain.StageSpecify, domain.StageImplement}, missing.Allowed)
 	require.NoError(t, fixer.CheckRoute(domain.StageSpecify))
 }
+
+// newFeatureEntered is the StageEntered of a stage visit on new-feature's path.
+func newFeatureEntered(stage domain.Stage, v int) domain.WorkEvent {
+	step := domain.FixerStep()
+	for _, s := range must(domain.PathFor(domain.WorkTypeNewFeature)).Steps() {
+		if s.Stage() == stage {
+			step = s
+		}
+	}
+	return domain.StageEntered{WorkID: workID, Stage: stage, Visit: visit(v), Gate: step.Gate(), Budget: step.Budget()}
+}
+
+// newFeatureOnReview is new-feature work that reached its first review.
+func newFeatureOnReview() []domain.WorkEvent {
+	return []domain.WorkEvent{
+		domain.WorkStarted{WorkID: workID, WorkType: domain.WorkTypeNewFeature, Description: description, Branch: mainBranch},
+		newFeatureEntered(domain.StageDiscovery, 1), newFeatureEntered(domain.StageDesign, 1), newFeatureEntered(domain.StageSpecify, 1),
+		newFeatureEntered(domain.StageImplement, 1), newFeatureEntered(domain.StageReview, 1),
+	}
+}
+
+// Given new-feature work in the fixer, when the model is wrong, then the
+// fixer may send it back to design, whose new visit has its human gate;
+// every later stage runs again.
+func TestReturnToStage_Design_OnAPathWithDesign_StartsANewDesignVisit(t *testing.T) {
+	history := join(newFeatureOnReview(), intoFixer(domain.StageReview, 1, 1))
+	fixer := stateIs[domain.InFixerWork](t, givenWork(t, history...))
+	assert.Equal(t, []domain.Stage{domain.StageDesign, domain.StageSpecify, domain.StageImplement}, fixer.RouteTargets())
+
+	events, err := fixer.ReturnToStage(domain.StageDesign, reasonOf("the wallet misses an invariant"))
+
+	require.NoError(t, err)
+	design := newFeatureEntered(domain.StageDesign, 2)
+	assert.Equal(t, []domain.WorkEvent{
+		domain.ReworkStarted{WorkID: workID, Target: domain.StageDesign, Visit: visit(2), Reason: reasonOf("the wallet misses an invariant")},
+		design,
+	}, events)
+	assert.Equal(t, domain.GateHuman, design.(domain.StageEntered).Gate)
+	back := stateIs[domain.InProgressWork](t, givenWork(t, join(history, events)...))
+	next, err := back.AdvancePastStage(domain.StageDesign, visit(2), domain.StressChoice{})
+	require.NoError(t, err)
+	assert.Equal(t, []domain.WorkEvent{newFeatureEntered(domain.StageSpecify, 2)}, next)
+}
+
+func TestReturnToStage_Design_OnFixBug_IsRejected(t *testing.T) {
+	fixer := stateIs[domain.InFixerWork](t, givenWork(t, join(onReview(), intoFixer(domain.StageReview, 1, 1))...))
+
+	events, err := fixer.ReturnToStage(domain.StageDesign, reason)
+
+	thenRejected(t, events, err, domain.ErrInvalidRoute)
+	var route *domain.InvalidRouteError
+	require.ErrorAs(t, err, &route)
+	assert.Equal(t, []domain.Stage{domain.StageSpecify, domain.StageImplement}, route.Allowed)
+}
+
+func TestRebuildWork_AReworkIntoDesign_IsReplayed(t *testing.T) {
+	history := join(newFeatureOnReview(), intoFixer(domain.StageReview, 1, 1), []domain.WorkEvent{
+		domain.ReworkStarted{WorkID: workID, Target: domain.StageDesign, Visit: visit(2), Reason: reason},
+		newFeatureEntered(domain.StageDesign, 2),
+	})
+
+	w := stateIs[domain.InProgressWork](t, givenWork(t, history...))
+
+	assert.Equal(t, domain.StageDesign, w.CurrentStage())
+	assert.Equal(t, visit(2), w.CurrentVisit())
+
+	_, err := domain.RebuildWork(join(onReview(), intoFixer(domain.StageReview, 1, 1), []domain.WorkEvent{
+		domain.ReworkStarted{WorkID: workID, Target: domain.StageDesign, Visit: visit(1), Reason: reason},
+		newFeatureEntered(domain.StageDesign, 1),
+	}))
+	require.ErrorIs(t, err, domain.ErrInconsistentHistory, "fix-bug has no design")
+}

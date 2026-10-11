@@ -39,7 +39,7 @@ var (
 	ErrNotCurrentStage   = errors.New("stage is not the current stage of the work")
 	ErrNoActiveWork      = errors.New("no active work")
 	ErrCannotEnterFixer  = errors.New("only a stage that checks code can hand work to the fixer")
-	ErrInvalidRoute      = errors.New("the fixer can only return work to an earlier stage on its path that can change code")
+	ErrInvalidRoute      = errors.New("the fixer can only return work to an earlier stage on its path that can change code, or design")
 	ErrMissingRoute      = errors.New("the fixer's pass must say which stage the work returns to")
 	ErrRouteOutsideFixer = errors.New("only the fixer chooses a route")
 	// Stress testing.

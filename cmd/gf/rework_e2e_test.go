@@ -248,7 +248,7 @@ func TestRework_AnInvalidRoute_IsRejectedWithoutUsingAnAttempt(t *testing.T) {
 
 	res = r.runWithoutTerminal(asAgent, "submit", "--passed", "--route", "review", "review it again")
 	assert.Equal(t, 1, res.code)
-	assert.Equal(t, "The fixer can only send the work back to an earlier stage that can change code: specify, implement. 'review' is not one of them. No attempt was used.\n", res.stderr)
+	assert.Equal(t, "The fixer can only send the work back to an earlier stage that can fix it: specify, implement. 'review' is not one of them. No attempt was used.\n", res.stderr)
 	assert.NotContains(t, res.stdout, "Running the exit checks")
 	r.expect("fixer", progress.AssignmentOpen, 0, 3)
 

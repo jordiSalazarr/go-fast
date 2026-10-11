@@ -57,7 +57,7 @@ func friendly(err error, cmd *cobra.Command, ran bool) string {
 	case errors.Is(err, domain.ErrNotEscalated):
 		return "The budget can only be extended when a stage is escalated. Run `gf status` to see what happens next."
 	case errors.As(err, &route):
-		return fmt.Sprintf("The fixer can only send the work back to an earlier stage that can change code: %s. '%s' is not one of them. No attempt was used.",
+		return fmt.Sprintf("The fixer can only send the work back to an earlier stage that can fix it: %s. '%s' is not one of them. No attempt was used.",
 			stageNames(route.Allowed), route.Target)
 	case errors.As(err, &noRoute):
 		return fmt.Sprintf("The fixer says where the work goes: `gf submit --passed --route <%s> \"<reason>\"`. No attempt was used.",

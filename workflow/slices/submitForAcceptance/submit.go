@@ -236,7 +236,7 @@ func NewCommand(openStore func() (*eventlog.Store, error), automate automations.
 		Short: "Submit the current stage; a pass is checked by running the stage's exit checks",
 		Long: "Submit the current stage; a pass is checked by running the stage's exit checks.\n\n" +
 			"In review, a pass decides whether stress testing runs, and why: gf submit --passed --stress <include|skip> \"<reason>\".\n" +
-			"In the fixer, a pass says where the work goes and why: gf submit --passed --route <specify|implement> \"<reason>\".",
+			"In the fixer, a pass says where the work goes and why: gf submit --passed --route <design|specify|implement> \"<reason>\" (design only on paths with design).",
 		Args: func(cmd *cobra.Command, args []string) error {
 			if passed == cmd.Flags().Changed("failed") {
 				return errors.New(`choose exactly one of --passed or --failed "<reason>"`)
