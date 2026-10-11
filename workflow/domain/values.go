@@ -50,10 +50,19 @@ func (id AssignmentID) isZero() bool   { return id.value == "" }
 // WorkType is the kind of work; it determines the path.
 type WorkType struct{ name string }
 
-var WorkTypeFixBug = WorkType{name: "fix-bug"}
+var (
+	WorkTypeFixBug = WorkType{name: "fix-bug"}
+	// WorkTypeNewFeature builds something new, designed first.
+	WorkTypeNewFeature = WorkType{name: "new-feature"}
+	// WorkTypeModifyBehaviour changes what existing code does, designed
+	// first, from its current behaviour to the expected one.
+	WorkTypeModifyBehaviour = WorkType{name: "modify-behaviour"}
+)
 
 // WorkTypes lists every known work type.
-func WorkTypes() []WorkType { return []WorkType{WorkTypeFixBug} }
+func WorkTypes() []WorkType {
+	return []WorkType{WorkTypeFixBug, WorkTypeNewFeature, WorkTypeModifyBehaviour}
+}
 
 func ParseWorkType(s string) (WorkType, error) {
 	for _, t := range WorkTypes() {
@@ -71,7 +80,10 @@ func (t WorkType) isZero() bool   { return t.name == "" }
 type Stage struct{ name string }
 
 var (
-	StageDiscovery          = Stage{name: "discovery"}
+	StageDiscovery = Stage{name: "discovery"}
+	// StageDesign models the change before any spec is written: event and
+	// domain model, contracts and read models. It writes artifacts only.
+	StageDesign             = Stage{name: "design"}
 	StageSpecify            = Stage{name: "specify"}
 	StageImplement          = Stage{name: "implement"}
 	StageReview             = Stage{name: "review"}
@@ -85,7 +97,7 @@ var (
 )
 
 func Stages() []Stage {
-	return []Stage{StageDiscovery, StageSpecify, StageImplement, StageReview, StageIntegrationTesting, StageStressTesting, StageFixer}
+	return []Stage{StageDiscovery, StageDesign, StageSpecify, StageImplement, StageReview, StageIntegrationTesting, StageStressTesting, StageFixer}
 }
 
 func ParseStage(s string) (Stage, error) {

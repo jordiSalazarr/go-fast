@@ -328,7 +328,7 @@ func Read(log Reader, branch domain.Branch, facts Facts) (View, error) {
 		Stage: work.CurrentStage().String(), Visit: work.CurrentVisit().Int(),
 		Gate: currentStep.Gate().String(), Assignment: AssignmentOpen, Budget: currentStep.Budget().Int(),
 		Artifact: domain.ArtifactFor(work.ID(), work.CurrentStage(), work.CurrentVisit()).String(),
-		Checks:   checkNames(work.CurrentStage()),
+		Checks:   checkNames(work.CurrentStage(), work.Type()),
 	}
 	if inFixer {
 		current.Fixer, err = fixerView(history, fixer, facts)
@@ -508,9 +508,9 @@ func fixerView(history eventlog.History, fixer domain.InFixerWork, facts Facts) 
 	return v, nil
 }
 
-func checkNames(stage domain.Stage) []string {
+func checkNames(stage domain.Stage, workType domain.WorkType) []string {
 	names := []string{}
-	for _, c := range stage.RequiredChecks() {
+	for _, c := range domain.RequiredChecks(stage, workType) {
 		names = append(names, c.String())
 	}
 	return names

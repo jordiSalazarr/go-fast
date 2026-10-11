@@ -18,10 +18,19 @@ import (
 // change it.
 const NFRsPath = ".gofast/nfrs.json"
 
-// NFRsError says what is wrong with NFRsPath.
-type NFRsError struct{ Problem string }
+// NFRsError says what is wrong with a file of NFRs: NFRsPath, or the NFRs a
+// design proposes.
+type NFRsError struct {
+	Path    string // relative to the repository root; NFRsPath when empty
+	Problem string
+}
 
-func (e *NFRsError) Error() string { return NFRsPath + ": " + e.Problem }
+func (e *NFRsError) Error() string {
+	if e.Path == "" {
+		return NFRsPath + ": " + e.Problem
+	}
+	return e.Path + ": " + e.Problem
+}
 
 // nfrsFile is NFRsPath's JSON form.
 type nfrsFile struct {
@@ -48,36 +57,61 @@ type nfrJSON struct {
 // LoadNFRs reads the NFRs of the repository at root. A missing file is no
 // NFRs.
 func LoadNFRs(root string) ([]domain.NFR, error) {
-	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(NFRsPath)))
+	nfrs, _, err := LoadNFRsFrom(root, NFRsPath)
+	return nfrs, err
+}
+
+// LoadNFRsFrom reads a file of NFRs in NFRsPath's schema, by its path
+// relative to root; exists is false when there is no such file.
+func LoadNFRsFrom(root, path string) (nfrs []domain.NFR, exists bool, err error) {
+	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path)))
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
+		return nil, false, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("read NFRs: %w", err)
+		return nil, false, fmt.Errorf("read NFRs: %w", err)
+	}
+	nfrs, _, err = parseNFRs(data, path)
+	return nfrs, true, err
+}
+
+// parseNFRs checks a file of NFRs and returns them with each one's JSON as
+// written.
+func parseNFRs(data []byte, path string) ([]domain.NFR, []json.RawMessage, error) {
+	problem := func(s string) error {
+		if path == NFRsPath {
+			path = ""
+		}
+		return &NFRsError{Path: path, Problem: s}
+	}
+	var raw struct {
+		NFRs []json.RawMessage `json:"nfrs"`
 	}
 	var file nfrsFile
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&file); err != nil {
-		return nil, &NFRsError{Problem: "not valid JSON for gf: " + err.Error()}
-	}
-	if dec.More() {
-		return nil, &NFRsError{Problem: "not valid JSON for gf: more than one JSON value"}
+	for _, into := range []any{&file, &raw} {
+		dec := json.NewDecoder(bytes.NewReader(data))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(into); err != nil {
+			return nil, nil, problem("not valid JSON for gf: " + err.Error())
+		}
+		if dec.More() {
+			return nil, nil, problem("not valid JSON for gf: more than one JSON value")
+		}
 	}
 	var nfrs []domain.NFR
 	seen := map[string]bool{}
 	for i, n := range file.NFRs {
 		nfr, err := n.toDomain()
 		if err != nil {
-			return nil, &NFRsError{Problem: fmt.Sprintf("nfrs[%d] (%q): %s", i, n.ID, err)}
+			return nil, nil, problem(fmt.Sprintf("nfrs[%d] (%q): %s", i, n.ID, err))
 		}
 		if seen[n.ID] {
-			return nil, &NFRsError{Problem: fmt.Sprintf("nfrs[%d]: the id %q is used twice", i, n.ID)}
+			return nil, nil, problem(fmt.Sprintf("nfrs[%d]: the id %q is used twice", i, n.ID))
 		}
 		seen[n.ID] = true
 		nfrs = append(nfrs, nfr)
 	}
-	return nfrs, nil
+	return nfrs, raw.NFRs, nil
 }
 
 // toDomain checks one NFR; its error says what is wrong in owner's terms.

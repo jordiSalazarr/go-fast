@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -43,7 +44,7 @@ func StartWork(log Log, actor eventlog.Actor, branch domain.Branch, id domain.Wo
 func NewCommand(openStore func() (*eventlog.Store, error), automate automations.Runner, resolveCaller func() (caller.Caller, error), currentBranch func() (domain.Branch, error)) *cobra.Command {
 	var typeName string
 	cmd := &cobra.Command{
-		Use:   `start --type fix-bug "<description>"`,
+		Use:   `start --type <fix-bug|new-feature|modify-behaviour> "<description>"`,
 		Short: "Start work on the first stage of its path",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -91,7 +92,11 @@ func NewCommand(openStore func() (*eventlog.Store, error), automate automations.
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&typeName, "type", "", "work type (available: fix-bug)")
+	types := make([]string, 0, len(domain.WorkTypes()))
+	for _, t := range domain.WorkTypes() {
+		types = append(types, t.String())
+	}
+	cmd.Flags().StringVar(&typeName, "type", "", "work type (available: "+strings.Join(types, ", ")+")")
 	_ = cmd.MarkFlagRequired("type")
 	return cmd
 }

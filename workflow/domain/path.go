@@ -29,6 +29,19 @@ var paths = map[WorkType][]PathStep{
 		{stage: StageIntegrationTesting, gate: GateAuto, budget: AttemptBudget{n: 3}},
 		{stage: StageStressTesting, gate: GateAuto, budget: AttemptBudget{n: 3}, optional: true},
 	},
+	WorkTypeNewFeature:      designedPath,
+	WorkTypeModifyBehaviour: designedPath,
+}
+
+// designedPath is fix-bug's path with design between discovery and specify.
+var designedPath = []PathStep{
+	{stage: StageDiscovery, gate: GateHuman, budget: AttemptBudget{n: 3}},
+	{stage: StageDesign, gate: GateHuman, budget: AttemptBudget{n: 3}},
+	{stage: StageSpecify, gate: GateHuman, budget: AttemptBudget{n: 3}},
+	{stage: StageImplement, gate: GateAuto, budget: AttemptBudget{n: 3}},
+	{stage: StageReview, gate: GateAuto, budget: AttemptBudget{n: 3}},
+	{stage: StageIntegrationTesting, gate: GateAuto, budget: AttemptBudget{n: 3}},
+	{stage: StageStressTesting, gate: GateAuto, budget: AttemptBudget{n: 3}, optional: true},
 }
 
 // fixerStep is the fixer's gate and budget. The fixer is on no path.
@@ -44,6 +57,18 @@ func PathFor(t WorkType) (Path, error) {
 		return Path{}, fmt.Errorf("path for work type %q: %w", t, ErrUnknownWorkType)
 	}
 	return Path{steps: steps}, nil
+}
+
+// Includes reports whether the stage is on the path.
+func (p Path) Includes(stage Stage) bool {
+	_, ok := p.indexOf(stage)
+	return ok
+}
+
+// HasDesign reports whether the work type's path starts with a design.
+func (t WorkType) HasDesign() bool {
+	p, err := PathFor(t)
+	return err == nil && p.Includes(StageDesign)
 }
 
 // Steps returns the path's steps in order.

@@ -10,36 +10,60 @@ import (
 )
 
 func TestParseWorkType(t *testing.T) {
-	got, err := domain.ParseWorkType("fix-bug")
-	require.NoError(t, err)
-	assert.Equal(t, domain.WorkTypeFixBug, got)
+	for name, want := range map[string]domain.WorkType{
+		"fix-bug": domain.WorkTypeFixBug, "new-feature": domain.WorkTypeNewFeature, "modify-behaviour": domain.WorkTypeModifyBehaviour,
+	} {
+		got, err := domain.ParseWorkType(name)
+		require.NoError(t, err)
+		assert.Equal(t, want, got)
+	}
 
-	_, err = domain.ParseWorkType("feature")
+	_, err := domain.ParseWorkType("feature")
 	require.ErrorIs(t, err, domain.ErrUnknownWorkType)
-	assert.Contains(t, err.Error(), "available: fix-bug")
+	assert.Contains(t, err.Error(), "available: fix-bug, modify-behaviour, new-feature")
 }
 
-func TestFixBugPath(t *testing.T) {
-	path, err := domain.PathFor(domain.WorkTypeFixBug)
-	require.NoError(t, err)
+type pathStep struct {
+	stage    domain.Stage
+	gate     domain.Gate
+	budget   int
+	optional bool
+}
 
-	type step struct {
-		stage  domain.Stage
-		gate   domain.Gate
-		budget int
+func stepsOf(t domain.WorkType) []pathStep {
+	var got []pathStep
+	for _, s := range must(domain.PathFor(t)).Steps() {
+		got = append(got, pathStep{s.Stage(), s.Gate(), s.Budget().Int(), s.Optional()})
 	}
-	var got []step
-	for _, s := range path.Steps() {
-		got = append(got, step{s.Stage(), s.Gate(), s.Budget().Int()})
+	return got
+}
+
+// Given a work type, when its path is looked up, then it is this table.
+func TestPaths(t *testing.T) {
+	fixBug := []pathStep{
+		{domain.StageDiscovery, domain.GateHuman, 3, false},
+		{domain.StageSpecify, domain.GateHuman, 3, false},
+		{domain.StageImplement, domain.GateAuto, 3, false},
+		{domain.StageReview, domain.GateAuto, 3, false},
+		{domain.StageIntegrationTesting, domain.GateAuto, 3, false},
+		{domain.StageStressTesting, domain.GateAuto, 3, true},
 	}
-	assert.Equal(t, []step{
-		{domain.StageDiscovery, domain.GateHuman, 3},
-		{domain.StageSpecify, domain.GateHuman, 3},
-		{domain.StageImplement, domain.GateAuto, 3},
-		{domain.StageReview, domain.GateAuto, 3},
-		{domain.StageIntegrationTesting, domain.GateAuto, 3},
-		{domain.StageStressTesting, domain.GateAuto, 3},
-	}, got)
+	designed := []pathStep{
+		{domain.StageDiscovery, domain.GateHuman, 3, false},
+		{domain.StageDesign, domain.GateHuman, 3, false},
+		{domain.StageSpecify, domain.GateHuman, 3, false},
+		{domain.StageImplement, domain.GateAuto, 3, false},
+		{domain.StageReview, domain.GateAuto, 3, false},
+		{domain.StageIntegrationTesting, domain.GateAuto, 3, false},
+		{domain.StageStressTesting, domain.GateAuto, 3, true},
+	}
+	assert.Equal(t, fixBug, stepsOf(domain.WorkTypeFixBug))
+	assert.Equal(t, designed, stepsOf(domain.WorkTypeNewFeature))
+	assert.Equal(t, designed, stepsOf(domain.WorkTypeModifyBehaviour))
+
+	assert.False(t, domain.WorkTypeFixBug.HasDesign())
+	assert.True(t, domain.WorkTypeNewFeature.HasDesign())
+	assert.True(t, domain.WorkTypeModifyBehaviour.HasDesign())
 }
 
 func TestValueConstructorsRejectInvalidInput(t *testing.T) {

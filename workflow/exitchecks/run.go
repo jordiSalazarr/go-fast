@@ -26,6 +26,7 @@ import (
 type Visit struct {
 	Assignment domain.AssignmentID
 	Work       domain.WorkID
+	WorkType   domain.WorkType
 	Stage      domain.Stage
 	Visit      domain.Visit
 	Attempt    domain.Attempt
@@ -65,8 +66,8 @@ func LogPath(id domain.AssignmentID, attempt domain.Attempt) string {
 // maxSummary bounds a check result's summary, log path included.
 const maxSummary = 300
 
-// Run runs the exit checks the visit's stage requires, in order, and
-// returns how each went. An error means a check could not be run at all.
+// Run runs the exit checks the visit's stage requires on its work type's
+// path, in order, and returns how each went. An error means a check could not be run at all.
 func (r Runner) Run(v Visit) ([]domain.CheckResult, error) {
 	logPath := LogPath(v.Assignment, v.Attempt)
 	abs := filepath.Join(r.Root, filepath.FromSlash(logPath))
@@ -84,7 +85,7 @@ func (r Runner) Run(v Visit) ([]domain.CheckResult, error) {
 	}
 	run := &checkRun{Runner: r, visit: v, log: log, logPath: logPath, baselines: worktree.OpenBaselines(r.Root)}
 	var results []domain.CheckResult
-	for _, check := range v.Stage.RequiredChecks() {
+	for _, check := range domain.RequiredChecks(v.Stage, v.WorkType) {
 		fmt.Fprintf(log, "=== %s\n", check)
 		f, err := run.check(check)
 		if err != nil {
@@ -159,6 +160,12 @@ func (c *checkRun) check(check domain.ExitCheck) (finding, error) {
 		return c.stressScriptsValid()
 	case domain.CheckNFRsMet:
 		return c.nfrsMet()
+	case domain.CheckDesignValid:
+		return c.designValid()
+	case domain.CheckNFRProposalsValid:
+		return c.nfrProposalsValid()
+	case domain.CheckBehaviourDelta:
+		return c.behaviourDelta()
 	}
 	return finding{}, fmt.Errorf("gf does not know how to run %q", check)
 }

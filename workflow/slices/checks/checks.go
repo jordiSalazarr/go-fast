@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -85,12 +86,58 @@ func render(w io.Writer, config exitchecks.Config) {
 	}
 	fmt.Fprintln(w, "\nRequired checks per stage:")
 	for _, stage := range domain.Stages() {
-		names := make([]string, 0, len(stage.RequiredChecks()))
-		for _, c := range stage.RequiredChecks() {
-			names = append(names, c.String())
+		common, extra := stageChecks(stage)
+		fmt.Fprintf(w, "  %-20s %s\n", stage, strings.Join(common, ", "))
+		for _, e := range extra {
+			fmt.Fprintf(w, "  %-20s %s also: %s\n", "", strings.Join(e.types, ", "), strings.Join(e.checks, ", "))
 		}
-		fmt.Fprintf(w, "  %-20s %s\n", stage, strings.Join(names, ", "))
 	}
+}
+
+// pathChecks are the checks some work types' paths add to a stage.
+type pathChecks struct{ types, checks []string }
+
+// stageChecks are the checks a stage requires on every path it is on, and
+// those only some paths add. The fixer is on every path.
+func stageChecks(stage domain.Stage) (common []string, extra []pathChecks) {
+	byType := map[domain.WorkType][]string{}
+	var types []domain.WorkType
+	for _, t := range domain.WorkTypes() {
+		path, err := domain.PathFor(t)
+		if err != nil || (stage != domain.StageFixer && !path.Includes(stage)) {
+			continue
+		}
+		types = append(types, t)
+		for _, c := range domain.RequiredChecks(stage, t) {
+			byType[t] = append(byType[t], c.String())
+		}
+	}
+	if len(types) == 0 {
+		return nil, nil
+	}
+	for _, c := range byType[types[0]] {
+		if !slices.ContainsFunc(types, func(t domain.WorkType) bool { return !slices.Contains(byType[t], c) }) {
+			common = append(common, c)
+		}
+	}
+	for _, t := range types {
+		var own []string
+		for _, c := range byType[t] {
+			if !slices.Contains(common, c) {
+				own = append(own, c)
+			}
+		}
+		if len(own) == 0 {
+			continue
+		}
+		i := slices.IndexFunc(extra, func(e pathChecks) bool { return slices.Equal(e.checks, own) })
+		if i < 0 {
+			extra = append(extra, pathChecks{checks: own})
+			i = len(extra) - 1
+		}
+		extra[i].types = append(extra[i].types, t.String())
+	}
+	return common, extra
 }
 
 func renderNFRs(w io.Writer, nfrs []domain.NFR) {

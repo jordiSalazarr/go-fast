@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -13,16 +14,30 @@ import (
 )
 
 // Each stage agent names the exit checks gf runs for its stage, as the
-// domain lists them.
+// domain lists them: those of every path the stage is on, then those only
+// some paths add.
 func TestStageAgents_NameTheirExitChecks(t *testing.T) {
 	for _, stage := range domain.Stages() {
 		body, err := os.ReadFile(filepath.Join("..", "..", "plugin", "agents", stage.String()+".md"))
 		require.NoError(t, err)
-		names := make([]string, 0, len(stage.RequiredChecks()))
-		for _, c := range stage.RequiredChecks() {
-			names = append(names, "`"+c.String()+"`")
+		var byType [][]domain.ExitCheck
+		for _, workType := range domain.WorkTypes() {
+			if path, _ := domain.PathFor(workType); path.Includes(stage) || stage == domain.StageFixer {
+				byType = append(byType, domain.RequiredChecks(stage, workType))
+			}
 		}
-		assert.Contains(t, string(body), "`gf submit --passed` runs these checks itself: "+strings.Join(names, ", ")+".", stage.String())
+		var common []string
+		for _, c := range byType[0] {
+			if !slices.ContainsFunc(byType, func(checks []domain.ExitCheck) bool { return !slices.Contains(checks, c) }) {
+				common = append(common, "`"+c.String()+"`")
+			}
+		}
+		assert.Contains(t, string(body), "`gf submit --passed` runs these checks itself: "+strings.Join(common, ", ")+".", stage.String())
+		for _, checks := range byType {
+			for _, c := range checks {
+				assert.Contains(t, string(body), "`"+c.String()+"`", stage.String())
+			}
+		}
 	}
 }
 

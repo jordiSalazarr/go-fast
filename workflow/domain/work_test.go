@@ -253,3 +253,24 @@ func TestActiveWorkOn_WithoutABranch_IsRejected(t *testing.T) {
 
 	require.ErrorIs(t, err, domain.ErrMissingValue)
 }
+
+// Given a designed work type, when work starts, then it walks discovery,
+// design (human gate) and the rest of the path.
+func TestStartWork_OfADesignedType_GoesThroughDesign(t *testing.T) {
+	for _, workType := range []domain.WorkType{domain.WorkTypeNewFeature, domain.WorkTypeModifyBehaviour} {
+		started := must(domain.StartWork(workID, workType, must(domain.NewDescription("wallets")), mainBranch, activeOn(t, mainBranch)))
+		w := must(domain.RebuildWork(started)).(domain.InProgressWork)
+		assert.Equal(t, domain.StageDiscovery, w.CurrentStage())
+
+		next := must(w.AdvancePastStage(domain.StageDiscovery, domain.FirstVisit(), domain.StressChoice{}))
+		require.Len(t, next, 1)
+		entered := next[0].(domain.StageEntered)
+		assert.Equal(t, domain.StageDesign, entered.Stage, workType.String())
+		assert.Equal(t, domain.GateHuman, entered.Gate)
+		assert.Equal(t, 3, entered.Budget.Int())
+
+		w = must(domain.RebuildWork(append(started, next...))).(domain.InProgressWork)
+		next = must(w.AdvancePastStage(domain.StageDesign, domain.FirstVisit(), domain.StressChoice{}))
+		assert.Equal(t, domain.StageSpecify, next[0].(domain.StageEntered).Stage)
+	}
+}

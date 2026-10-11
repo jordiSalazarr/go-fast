@@ -19,6 +19,8 @@ func TestChecks_ShowsTheConfigurationAndEachStagesChecks(t *testing.T) {
 	assert.Contains(t, out, "defaults; .gofast/checks.json does not exist")
 	assert.Contains(t, out, "integration  not configured: integration-passes fails until the owner adds one to .gofast/checks.json")
 	assert.Contains(t, out, "  specify              artifact-written, specs-fail\n")
+	assert.Contains(t, out, "  discovery            artifact-written\n                       modify-behaviour also: behaviour-delta\n")
+	assert.Contains(t, out, "  design               artifact-written, design-valid, nfr-proposals-valid\n")
 	assert.Contains(t, out, "  implement            artifact-written, build-passes, formatted, specs-pass, specs-untouched, suite-passes\n")
 
 	assert.NotContains(t, out, "Warning")

@@ -1,0 +1,31 @@
+{
+  "boundedContext": "wallets",
+  "aggregates": [
+    {
+      "name": "Wallet",
+      "invariants": ["balance never goes below zero", "a transaction is applied at most once"],
+      "states": ["Open", "Frozen", "Closed"]
+    }
+  ],
+  "commands": [
+    { "name": "PostTransaction", "aggregate": "Wallet",
+      "events": ["TransactionPosted"], "rejections": ["InsufficientFunds", "WalletFrozen"] }
+  ],
+  "events": [
+    { "name": "TransactionPosted", "aggregate": "Wallet", "visibility": "internal" },
+    { "name": "WalletDebited", "aggregate": "Wallet", "visibility": "external" }
+  ],
+  "readModels": [
+    { "name": "WalletBalance", "from": ["TransactionPosted"] }
+  ],
+  "slices": [
+    { "name": "PostTransaction", "kind": "command", "command": "PostTransaction", "change": "added" },
+    { "name": "WalletBalance", "kind": "query", "readModel": "WalletBalance", "change": "added" },
+    { "name": "PublishWalletDebited", "kind": "automation", "on": "TransactionPosted",
+      "command": null, "publishes": "WalletDebited", "change": "added" }
+  ],
+  "contracts": [
+    { "kind": "http", "name": "POST /wallets/{id}/transactions", "slice": "PostTransaction" },
+    { "kind": "event", "name": "WalletDebited", "schema": "fields and types in prose or JSON" }
+  ]
+}

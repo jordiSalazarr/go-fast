@@ -42,10 +42,13 @@ func TestNewRepoPath(t *testing.T) {
 func TestArtifactPaths(t *testing.T) {
 	assert.Equal(t, ".gofast/works/w1", domain.ArtifactDir(workID).String())
 	assert.Equal(t, ".gofast/works/w1/specify-v1.md", domain.ArtifactFor(workID, domain.StageSpecify, visit1).String())
+	assert.Equal(t, ".gofast/works/w1/design-v2.json", domain.DesignFor(workID, must(domain.NewVisit(2))).String())
+	assert.Equal(t, ".gofast/works/w1/nfrs.proposed-v1.json", domain.NFRProposalsFor(workID, visit1).String())
 }
 
 func TestEachStageHasItsWriteScope(t *testing.T) {
 	assert.Equal(t, domain.WriteScopeArtifacts, domain.StageDiscovery.WriteScope())
+	assert.Equal(t, domain.WriteScopeArtifacts, domain.StageDesign.WriteScope())
 	assert.Equal(t, domain.WriteScopeTestsAndArtifacts, domain.StageSpecify.WriteScope())
 	assert.Equal(t, domain.WriteScopeAnything, domain.StageImplement.WriteScope())
 	assert.Equal(t, domain.WriteScopeArtifacts, domain.StageReview.WriteScope())

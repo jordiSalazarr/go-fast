@@ -57,6 +57,18 @@ func StressScriptsDir(work WorkID) RepoPath {
 	return RepoPath{value: ArtifactDir(work).value + "/stress"}
 }
 
+// DesignFor is the structured design a design visit writes next to its
+// artifact.
+func DesignFor(work WorkID, visit Visit) RepoPath {
+	return RepoPath{value: ArtifactDir(work).value + "/design-v" + strconv.Itoa(visit.n) + ".json"}
+}
+
+// NFRProposalsFor is where a design visit may propose NFR changes, in the
+// schema of the repository's NFRs.
+func NFRProposalsFor(work WorkID, visit Visit) RepoPath {
+	return RepoPath{value: ArtifactDir(work).value + "/nfrs.proposed-v" + strconv.Itoa(visit.n) + ".json"}
+}
+
 // ArtifactFor is the artifact every stage visit writes.
 func ArtifactFor(work WorkID, stage Stage, visit Visit) RepoPath {
 	return RepoPath{value: ArtifactDir(work).value + "/" + stage.name + "-v" + strconv.Itoa(visit.n) + ".md"}
@@ -88,7 +100,7 @@ func (s Stage) WriteScope() WriteScope {
 		return WriteScopeTestsAndArtifacts
 	case StageImplement:
 		return WriteScopeAnything
-	case StageDiscovery, StageReview, StageIntegrationTesting, StageStressTesting, StageFixer:
+	case StageDiscovery, StageDesign, StageReview, StageIntegrationTesting, StageStressTesting, StageFixer:
 		return WriteScopeArtifacts
 	}
 	return WriteScope{}

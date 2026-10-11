@@ -32,7 +32,7 @@ func submittingChecked(claim domain.AgentClaim, checks submitforacceptance.Check
 // checksPassing passes every check the stage requires.
 func checksPassing(v exitchecks.Visit, _ io.Writer) ([]domain.CheckResult, error) {
 	var results []domain.CheckResult
-	for _, c := range v.Stage.RequiredChecks() {
+	for _, c := range domain.RequiredChecks(v.Stage, v.WorkType) {
 		results = append(results, domain.CheckPassed(c))
 	}
 	return results, nil

@@ -313,7 +313,7 @@ func TestCheckClaim_StressDecision(t *testing.T) {
 	require.NoError(t, review.CheckClaim(domain.ClaimFailed(reasonOf("blocking finding"))), "a failed claim decides nothing")
 	require.ErrorIs(t, implement.CheckClaim(domain.ClaimStressDecided(skipStress)), domain.ErrStressOutsideReview)
 
-	events, err := review.SubmitForAcceptance(domain.ClaimPassed(), domain.NewChangedFiles(), passedChecks(review))
+	events, err := review.SubmitForAcceptance(domain.WorkTypeFixBug, domain.ClaimPassed(), domain.NewChangedFiles(), passedChecks(review))
 	thenRejected(t, events, err, domain.ErrMissingStressDecision)
 }
 
@@ -321,7 +321,7 @@ func TestReviewAccepted_CarriesItsStressDecision(t *testing.T) {
 	given := must(domain.OpenAssignment(workID, domain.StageReview, visit1, domain.GateAuto, budget3))
 	review := stateIs[domain.Open](t, givenAssignment(t, given...))
 
-	events, err := review.SubmitForAcceptance(domain.ClaimStressDecided(forcedInclude), domain.NewChangedFiles(), passedChecks(review))
+	events, err := review.SubmitForAcceptance(domain.WorkTypeFixBug, domain.ClaimStressDecided(forcedInclude), domain.NewChangedFiles(), passedChecks(review))
 
 	thenEvents(t, events, err, domain.AssignmentEvent(domain.AssignmentAccepted{
 		AssignmentID: review.ID(), WorkID: workID, Stage: domain.StageReview, Visit: visit1, Stress: forcedInclude,
