@@ -49,13 +49,35 @@ func StageEntered(stage domain.Stage) domain.StageEntered {
 	return domain.StageEntered{WorkID: WorkID, Stage: stage, Visit: Visit1, Gate: s.Gate(), Budget: s.Budget()}
 }
 
-// WorkOn is the work's history up to entering stage.
+// StressSkipped is review's choice not to stress test, which no NFR forces.
+var StressSkipped = Must(domain.NewStressChoice(domain.StressSkip, Reason("no change affects behaviour under load"), nil))
+
+// StressIncluded is review's choice to stress test, forced by no NFR.
+var StressIncluded = Must(domain.NewStressChoice(domain.StressInclude, Reason("the change touches a hot path"), nil))
+
+// StressDecided is review's decision, recorded as the work advances past it.
+func StressDecided(choice domain.StressChoice) domain.StressDecided {
+	return domain.StressDecided{WorkID: WorkID, Decision: choice.Decision(), Reason: choice.Reason(), ForcedBy: choice.ForcedBy()}
+}
+
+// WorkOn is the work's history up to entering stage. Review decides to skip
+// stress testing, unless stage is stress testing.
 func WorkOn(stage domain.Stage) []domain.Event {
 	events := []domain.Event{WorkStarted()}
+	choice := StressSkipped
+	if stage == domain.StageStressTesting {
+		choice = StressIncluded
+	}
 	for _, s := range Must(domain.PathFor(domain.WorkTypeFixBug)).Steps() {
+		if s.Optional() && stage != s.Stage() {
+			continue
+		}
 		events = append(events, StageEntered(s.Stage()))
 		if s.Stage() == stage {
 			return events
+		}
+		if s.Stage() == domain.StressDecider() {
+			events = append(events, StressDecided(choice))
 		}
 	}
 	panic("stage not on the fix-bug path: " + stage.String())
@@ -66,7 +88,8 @@ func OpenOn(stage domain.Stage, then ...domain.Event) []domain.Event {
 	return append(append(WorkOn(stage), Opened(stage)), then...)
 }
 
-// Completed is the history of a work that went through the whole path.
+// Completed is the history of a work that went through the whole path,
+// without stress testing.
 func Completed() []domain.Event {
 	return append(WorkOn(domain.StageIntegrationTesting), domain.WorkCompleted{WorkID: WorkID})
 }
@@ -92,8 +115,14 @@ func Escalated(stage domain.Stage, used, budget int) domain.AssignmentEscalated 
 	return domain.AssignmentEscalated{AssignmentID: AssignmentOn(stage), AttemptsUsed: Attempts(used), Budget: Budget(budget)}
 }
 
+// Accepted is the stage's first assignment accepted; review's carries the
+// choice to skip stress testing.
 func Accepted(stage domain.Stage) domain.AssignmentAccepted {
-	return domain.AssignmentAccepted{AssignmentID: AssignmentOn(stage), WorkID: WorkID, Stage: stage, Visit: Visit1}
+	accepted := domain.AssignmentAccepted{AssignmentID: AssignmentOn(stage), WorkID: WorkID, Stage: stage, Visit: Visit1}
+	if stage == domain.StressDecider() {
+		accepted.Stress = StressSkipped
+	}
+	return accepted
 }
 
 // EscalatedOn is the stage's assignment after its whole budget of 3 failed.

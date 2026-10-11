@@ -216,7 +216,7 @@ func TestSubmitForAcceptance_CodeFailureOfAFailingCheck_HandsTheWorkToTheFixer(t
 	results := passedChecks(open)
 	results[len(results)-1] = checkFailed(domain.CheckSuitePasses, "1 test failed (TestLogin)")
 
-	got, err := open.SubmitForAcceptance(domain.ClaimPassed(), noChanges, results)
+	got, err := open.SubmitForAcceptance(domain.ClaimStressDecided(skipStress), noChanges, results)
 
 	thenEvents(t, got, err, handedToFixer(2, "suite-passes: 1 test failed (TestLogin)."))
 	handed := stateIs[domain.HandedToFixer](t, thenAssignmentState(t, given, got))
@@ -247,7 +247,7 @@ func TestSubmitForAcceptance_StageWorkFailureOfAStageThatChecksCode_UsesAnAttemp
 	results := passedChecks(open)
 	results[0] = checkFailed(domain.CheckArtifactWritten, ".gofast/works/w1/review-v1.md is missing")
 
-	got, err := open.SubmitForAcceptance(domain.ClaimPassed(), noChanges, results)
+	got, err := open.SubmitForAcceptance(domain.ClaimStressDecided(skipStress), noChanges, results)
 
 	thenEvents(t, got, err, domain.AssignmentEvent(domain.AttemptFailed{
 		AssignmentID: reviewAssignmentID, Attempt: attempt(1), Reason: reasonOf("artifact-written: .gofast/works/w1/review-v1.md is missing."),

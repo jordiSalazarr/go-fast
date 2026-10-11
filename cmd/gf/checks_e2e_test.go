@@ -134,7 +134,7 @@ func TestExitChecks_FixBugRun_EndToEnd(t *testing.T) {
 	v = r.expect("review", progress.AssignmentOpen, 0, 3)
 	assert.Equal(t, []string{"artifact-written", "formatted", "build-passes", "suite-passes"}, v.Current.Checks)
 	r.workOnStage()
-	r.submitAsAgent("--passed")
+	r.submitAsAgent(reviewPass...)
 	v = r.expect("integration-testing", progress.AssignmentOpen, 0, 3)
 	assert.Equal(t, []string{"artifact-written", "integration-passes"}, v.Current.Checks)
 	r.workOnStage()
@@ -169,7 +169,7 @@ func TestExitChecks_IntegrationFailsClosedWithoutConfiguration(t *testing.T) {
 	}
 	for range 2 { // implement, review
 		r.workOnStage()
-		r.submitAsAgent("--passed")
+		r.submitAsAgent(r.passed()...)
 	}
 	r.expect("integration-testing", progress.AssignmentOpen, 0, 3)
 	r.workOnStage()

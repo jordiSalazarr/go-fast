@@ -71,6 +71,18 @@ type ReworkBudgetExtended struct {
 	NewBudget  ReworkBudget
 }
 
+// StressDecided: stress testing runs (include) or not (skip) on the work's
+// current pass along the path. Review decides it when it passes; the owner
+// may override it (Owner is then set). ForcedBy are the NFRs covering the
+// work's changes, which make include mandatory.
+type StressDecided struct {
+	WorkID   WorkID
+	Decision StressDecision
+	Reason   Reason
+	ForcedBy []NFRID
+	Owner    Owner
+}
+
 type WorkCompleted struct {
 	WorkID WorkID
 }
@@ -123,14 +135,15 @@ type BudgetExtended struct {
 	NewBudget    AttemptBudget
 }
 
-// AssignmentAccepted carries the fixer's route when the fixer is accepted;
-// for every other stage the route is zero.
+// AssignmentAccepted carries the fixer's route when the fixer is accepted,
+// and review's stress choice when review is; otherwise both are zero.
 type AssignmentAccepted struct {
 	AssignmentID AssignmentID
 	WorkID       WorkID
 	Stage        Stage
 	Visit        Visit
 	Route        Route
+	Stress       StressChoice
 }
 
 // AssignmentHandedToFixer: the stage visit failed because the code is wrong,
@@ -158,6 +171,7 @@ func (FixerEntered) isEvent()            {}
 func (ReworkLimitReached) isEvent()      {}
 func (ReworkStarted) isEvent()           {}
 func (ReworkBudgetExtended) isEvent()    {}
+func (StressDecided) isEvent()           {}
 func (AssignmentOpened) isEvent()        {}
 func (AttemptFailed) isEvent()           {}
 func (SubmittedForApproval) isEvent()    {}
@@ -176,6 +190,7 @@ func (e FixerEntered) workID() WorkID         { return e.WorkID }
 func (e ReworkLimitReached) workID() WorkID   { return e.WorkID }
 func (e ReworkStarted) workID() WorkID        { return e.WorkID }
 func (e ReworkBudgetExtended) workID() WorkID { return e.WorkID }
+func (e StressDecided) workID() WorkID        { return e.WorkID }
 
 func (e AssignmentOpened) assignmentID() AssignmentID        { return e.AssignmentID }
 func (e AttemptFailed) assignmentID() AssignmentID           { return e.AssignmentID }

@@ -33,6 +33,7 @@ const (
 	typeReworkLimitReached      = "ReworkLimitReached"
 	typeReworkStarted           = "ReworkStarted"
 	typeReworkBudgetExtended    = "ReworkBudgetExtended"
+	typeStressDecided           = "StressDecided"
 )
 
 type envelope struct {
@@ -112,6 +113,15 @@ type reworkBudgetExtendedV1 struct {
 	NewBudget  int     `json:"newBudget"`
 }
 
+type stressDecidedV1 struct {
+	WorkID   string   `json:"workId"`
+	Decision string   `json:"decision"`
+	Reason   string   `json:"reason"`
+	ForcedBy []string `json:"forcedBy,omitempty"`
+	// The owner who overrode the decision; absent when review decided.
+	Owner *ownerV1 `json:"owner,omitempty"`
+}
+
 type assignmentOpenedV1 struct {
 	AssignmentID string `json:"assignmentId"`
 	WorkID       string `json:"workId"`
@@ -160,6 +170,10 @@ type assignmentAcceptedV1 struct {
 	// The fixer's route; absent for every other stage.
 	Route       string `json:"route,omitempty"`
 	RouteReason string `json:"routeReason,omitempty"`
+	// Review's stress choice; absent for every other stage.
+	Stress         string   `json:"stress,omitempty"`
+	StressReason   string   `json:"stressReason,omitempty"`
+	StressForcedBy []string `json:"stressForcedBy,omitempty"`
 }
 
 type assignmentCancelledV1 struct {
@@ -253,6 +267,15 @@ func encodeEvent(e domain.Event) (eventType string, stream Stream, payload any, 
 		return typeReworkBudgetExtended, WorkStream(e.WorkID), reworkBudgetExtendedV1{
 			WorkID: e.WorkID.String(), Owner: encodeOwner(e.Owner), Additional: e.Additional.Int(), NewBudget: e.NewBudget.Int(),
 		}, nil
+	case domain.StressDecided:
+		p := stressDecidedV1{
+			WorkID: e.WorkID.String(), Decision: e.Decision.String(), Reason: e.Reason.String(), ForcedBy: nfrIDs(e.ForcedBy),
+		}
+		if e.Owner != (domain.Owner{}) {
+			owner := encodeOwner(e.Owner)
+			p.Owner = &owner
+		}
+		return typeStressDecided, WorkStream(e.WorkID), p, nil
 	case domain.AssignmentOpened:
 		return typeAssignmentOpened, AssignmentStream(e.AssignmentID), assignmentOpenedV1{
 			AssignmentID: e.AssignmentID.String(), WorkID: e.WorkID.String(), Stage: e.Stage.String(),
@@ -285,6 +308,7 @@ func encodeEvent(e domain.Event) (eventType string, stream Stream, payload any, 
 			AssignmentID: e.AssignmentID.String(), WorkID: e.WorkID.String(),
 			Stage: e.Stage.String(), Visit: e.Visit.Int(),
 			Route: e.Route.Target().String(), RouteReason: e.Route.Reason().String(),
+			Stress: e.Stress.Decision().String(), StressReason: e.Stress.Reason().String(), StressForcedBy: nfrIDs(e.Stress.ForcedBy()),
 		}, nil
 	case domain.AssignmentCancelled:
 		return typeAssignmentCancelled, AssignmentStream(e.AssignmentID), assignmentCancelledV1{
@@ -347,6 +371,17 @@ func decodeEvent(eventType string, payload json.RawMessage) (domain.Event, Strea
 			WorkID: d.workID(p.WorkID), Owner: d.owner(p.Owner),
 			Additional: d.reworkBudget(p.Additional), NewBudget: d.reworkBudget(p.NewBudget),
 		}
+	case typeStressDecided:
+		var p stressDecidedV1
+		d.unmarshal(payload, &p)
+		choice := d.stressChoice(p.Decision, p.Reason, p.ForcedBy)
+		decided := domain.StressDecided{
+			WorkID: d.workID(p.WorkID), Decision: choice.Decision(), Reason: choice.Reason(), ForcedBy: choice.ForcedBy(),
+		}
+		if p.Owner != nil {
+			decided.Owner = d.owner(*p.Owner)
+		}
+		event = decided
 	case typeAssignmentOpened:
 		var p assignmentOpenedV1
 		d.unmarshal(payload, &p)
@@ -394,6 +429,9 @@ func decodeEvent(eventType string, payload json.RawMessage) (domain.Event, Strea
 		if p.Route != "" || p.RouteReason != "" {
 			accepted.Route = d.route(p.Route, p.RouteReason)
 		}
+		if p.Stress != "" || p.StressReason != "" || len(p.StressForcedBy) > 0 {
+			accepted.Stress = d.stressChoice(p.Stress, p.StressReason, p.StressForcedBy)
+		}
 		event = accepted
 	case typeAssignmentCancelled:
 		var p assignmentCancelledV1
@@ -417,6 +455,14 @@ func decodeEvent(eventType string, payload json.RawMessage) (domain.Event, Strea
 }
 
 func encodeOwner(o domain.Owner) ownerV1 { return ownerV1{Name: o.Name(), Email: o.Email()} }
+
+func nfrIDs(ids []domain.NFRID) []string {
+	var out []string
+	for _, id := range ids {
+		out = append(out, id.String())
+	}
+	return out
+}
 
 func strictUnmarshal(data []byte, v any) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
@@ -479,6 +525,20 @@ func (d *decoder) budget(n int) domain.AttemptBudget {
 
 func (d *decoder) route(target, reason string) domain.Route {
 	v, err := domain.NewRoute(d.stage(target), d.reason(reason))
+	d.keep(err)
+	return v
+}
+
+func (d *decoder) stressChoice(decision, reason string, forcedBy []string) domain.StressChoice {
+	dec, err := domain.ParseStressDecision(decision)
+	d.keep(err)
+	var ids []domain.NFRID
+	for _, s := range forcedBy {
+		id, err := domain.NewNFRID(s)
+		d.keep(err)
+		ids = append(ids, id)
+	}
+	v, err := domain.NewStressChoice(dec, d.reason(reason), ids)
 	d.keep(err)
 	return v
 }

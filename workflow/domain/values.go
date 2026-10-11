@@ -76,13 +76,16 @@ var (
 	StageImplement          = Stage{name: "implement"}
 	StageReview             = Stage{name: "review"}
 	StageIntegrationTesting = Stage{name: "integration-testing"}
+	// StageStressTesting is optional: entered only when the work decided to
+	// include it.
+	StageStressTesting = Stage{name: "stress-testing"}
 	// StageFixer is on no path: a work enters it only when a stage that
 	// checks code hands it over, and leaves it for an earlier stage.
 	StageFixer = Stage{name: "fixer"}
 )
 
 func Stages() []Stage {
-	return []Stage{StageDiscovery, StageSpecify, StageImplement, StageReview, StageIntegrationTesting, StageFixer}
+	return []Stage{StageDiscovery, StageSpecify, StageImplement, StageReview, StageIntegrationTesting, StageStressTesting, StageFixer}
 }
 
 func ParseStage(s string) (Stage, error) {
@@ -179,8 +182,7 @@ var (
 	// FixerModeCorrectness: the code does the wrong thing (from review or
 	// integration testing).
 	FixerModeCorrectness = FixerMode{name: "correctness"}
-	// FixerModePerformance: the code is too slow (from stress testing, which
-	// doesn't exist yet).
+	// FixerModePerformance: the code is too slow (from stress testing).
 	FixerModePerformance = FixerMode{name: "performance"}
 )
 
@@ -195,9 +197,14 @@ func ParseFixerMode(s string) (FixerMode, error) {
 
 func (m FixerMode) String() string { return m.name }
 
-// fixerModeFor is the mode of the fixer entered from a stage. Every stage
-// that can hand over today judges correctness.
-func fixerModeFor(Stage) FixerMode { return FixerModeCorrectness }
+// fixerModeFor is the mode of the fixer entered from a stage: stress testing
+// judges performance, every other stage that can hand over correctness.
+func fixerModeFor(from Stage) FixerMode {
+	if from == StageStressTesting {
+		return FixerModePerformance
+	}
+	return FixerModeCorrectness
+}
 
 // Attempt is the ordinal of an attempt within an assignment, starting at 1.
 type Attempt struct{ n int }

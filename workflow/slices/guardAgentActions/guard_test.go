@@ -93,6 +93,7 @@ func TestRule1_EachOwnerOnlyCommandHasItsOwnReason(t *testing.T) {
 		"gf extend 2":                     "Only the owner can extend a budget. Ask the owner to run `gf extend <attempts>` in their own terminal.",
 		"gf rework-extend 1":              "Only the owner can allow more rework. Ask the owner to run `gf rework-extend <n>` in their own terminal.",
 		"cd x && GF=1 gf rework-extend 2": "Only the owner can allow more rework. Ask the owner to run `gf rework-extend <n>` in their own terminal.",
+		"gf stress skip 'docs only'":      "Only the owner can override the stress-testing decision. Review decides it with `gf submit --passed --stress <include|skip> \"<reason>\"`; otherwise ask the owner to run `gf stress <include|skip> \"<reason>\"` in their own terminal.",
 		"gf abandon 'give up'":            "Only the owner can abandon work. Ask the owner to run `gf abandon \"<reason>\"` in their own terminal.",
 		"gf log accept":                   "Only the owner can accept a changed event log. Ask the owner to run `gf log accept` in their own terminal.",
 	}
@@ -106,6 +107,8 @@ func TestRule1_AgentCommandsAndMentionsAreAllowed(t *testing.T) {
 		"gf status --json",
 		"gf submit --passed",
 		"gf submit --failed 'approve flow broken'",
+		"gf submit --passed --stress include 'new query per request'",
+		"k6 run .gofast/works/w1/stress/wallet.js",
 		"go test ./...",
 		"git commit -m 'gf approve wording'",
 		"grep -r approve .",

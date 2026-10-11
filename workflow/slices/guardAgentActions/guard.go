@@ -63,6 +63,7 @@ var ownerOnlyReasons = map[string]string{
 	"reject":        "Only the owner can reject a submission. Ask the owner to run `gf reject \"<feedback>\"` in their own terminal.",
 	"extend":        "Only the owner can extend a budget. Ask the owner to run `gf extend <attempts>` in their own terminal.",
 	"rework-extend": "Only the owner can allow more rework. Ask the owner to run `gf rework-extend <n>` in their own terminal.",
+	"stress":        "Only the owner can override the stress-testing decision. Review decides it with `gf submit --passed --stress <include|skip> \"<reason>\"`; otherwise ask the owner to run `gf stress <include|skip> \"<reason>\"` in their own terminal.",
 	"abandon":       "Only the owner can abandon work. Ask the owner to run `gf abandon \"<reason>\"` in their own terminal.",
 	"log":           "Only the owner can accept a changed event log. Ask the owner to run `gf log accept` in their own terminal.",
 }

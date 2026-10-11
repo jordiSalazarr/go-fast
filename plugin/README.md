@@ -87,6 +87,7 @@ the hard layer, in `~/.claude/settings.json`
       "Bash(gf reject *)",
       "Bash(gf extend *)",
       "Bash(gf rework-extend *)",
+      "Bash(gf stress *)",
       "Bash(gf abandon *)",
       "Bash(gf log *)"
     ]
@@ -179,11 +180,30 @@ its rework limit and drive mode ends. The owner runs
 `gf rework-extend <n>` (owner only, terminal required) to allow more, or
 `gf abandon "<reason>"`.
 
+## Stress testing
+
+Stress testing is an **optional** stage after integration testing: it runs
+only if the work decided to include it. **Review decides**, when it passes:
+`gf submit --passed --stress <include|skip> "<reason>"` (required in review,
+refused elsewhere). No work gets past review without a decision.
+
+If the work's changes (everything changed since its first stage began) touch
+the `areas` of an NFR in `.gofast/nfrs.json`, stress testing is
+**mandatory**: `--stress skip` is refused, naming the NFRs and their areas,
+without using an attempt.
+
+The owner may override review with `gf stress <include|skip> "<reason>"`
+(owner only, terminal required) until the work has passed integration
+testing; a mandatory stress test still can't be skipped. The owner's
+decision stands over review's, unless the change later touches an NFR's
+areas. A rework clears the decision: the next review decides again, since
+the diff may have changed.
+
 ## Write scopes
 
 | Stage | May write |
 |---|---|
-| discovery, review, integration-testing, fixer | only the work's artifact directory |
+| discovery, review, integration-testing, stress-testing, fixer | only the work's artifact directory |
 | specify | tests (`*_test.go`, files under `testdata/`) and artifacts |
 | implement | anything except gofast's own files in `.gofast/` |
 
@@ -226,8 +246,8 @@ any that clears the environment: `env -i`, `env --ignore-environment`,
 ## How the owner approves
 
 **Approve from your own terminal, not from inside Claude Code.** `gf approve`,
-`gf reject`, `gf extend`, `gf rework-extend`, `gf abandon` and `gf log accept`
-are owner-only, and
+`gf reject`, `gf extend`, `gf rework-extend`, `gf stress`, `gf abandon` and
+`gf log accept` are owner-only, and
 `gf` checks two things before they reach the workflow:
 
 1. **stdin is a terminal** (the isatty check, via the terminal driver).
@@ -246,6 +266,7 @@ gf status                       # what is waiting, and which artifact to read
 gf approve                      # or: gf reject "<feedback>"
 gf extend 2                     # after an escalation; or: gf abandon "<reason>"
 gf rework-extend 1              # at the rework limit; or: gf abandon "<reason>"
+gf stress include "<reason>"    # until integration testing passes; or: skip
 ```
 
 Then go back to Claude Code and run `/gofast:drive` to continue.

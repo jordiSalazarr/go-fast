@@ -32,7 +32,12 @@ var (
 	agent        = AgentActor("agent")
 )
 
-var fixerID = domain.AssignmentIDFor(workID, domain.StageFixer, domain.FirstVisit())
+var (
+	fixerID       = domain.AssignmentIDFor(workID, domain.StageFixer, domain.FirstVisit())
+	reviewID      = domain.AssignmentIDFor(workID, domain.StageReview, domain.FirstVisit())
+	forcedInclude = must(domain.NewStressChoice(domain.StressInclude, must(domain.NewReason("touches the ledger")),
+		[]domain.NFRID{must(domain.NewNFRID("wallet-transaction-latency")), must(domain.NewNFRID("ledger-write"))}))
+)
 
 func allEvents() []domain.Event {
 	return []domain.Event{
@@ -53,6 +58,9 @@ func allEvents() []domain.Event {
 		domain.AssignmentAccepted{AssignmentID: assignmentID, WorkID: workID, Stage: domain.StageDiscovery, Visit: domain.FirstVisit()},
 		domain.AssignmentAccepted{AssignmentID: fixerID, WorkID: workID, Stage: domain.StageFixer, Visit: domain.FirstVisit(),
 			Route: must(domain.NewRoute(domain.StageImplement, must(domain.NewReason("the fix misses a case"))))},
+		domain.AssignmentAccepted{AssignmentID: reviewID, WorkID: workID, Stage: domain.StageReview, Visit: domain.FirstVisit(), Stress: forcedInclude},
+		domain.StressDecided{WorkID: workID, Decision: domain.StressSkip, Reason: must(domain.NewReason("only docs changed"))},
+		domain.StressDecided{WorkID: workID, Decision: forcedInclude.Decision(), Reason: forcedInclude.Reason(), ForcedBy: forcedInclude.ForcedBy(), Owner: owner},
 		domain.AssignmentCancelled{AssignmentID: assignmentID, Reason: reason},
 		domain.AssignmentHandedToFixer{AssignmentID: assignmentID, WorkID: workID, Stage: domain.StageReview, Visit: domain.FirstVisit(), Attempt: must(domain.NewAttempt(2)), Reason: reason},
 	}
@@ -101,6 +109,16 @@ func TestCodec_RejectsEventOnTheWrongStream(t *testing.T) {
 	e := domain.WorkCompleted{WorkID: workID}
 	_, err := encodeLine(Recorded{Stream: AssignmentStream(assignmentID), Event: e, Actor: agent, Schema: schemaV1})
 	require.Error(t, err)
+}
+
+func TestCodec_RejectsAForcedSkip(t *testing.T) {
+	for name, payload := range map[string]string{
+		"StressDecided":      `{"workId":"w1","decision":"skip","reason":"r","forcedBy":["wallet"]}`,
+		"AssignmentAccepted": `{"assignmentId":"w1-review-1","workId":"w1","stage":"review","visit":1,"stress":"skip","stressReason":"r","stressForcedBy":["wallet"]}`,
+	} {
+		_, _, err := decodeEvent(name, []byte(payload))
+		require.ErrorIs(t, err, domain.ErrStressForced, name)
+	}
 }
 
 func TestOpen_CreatesDirectoryWithGitignore(t *testing.T) {

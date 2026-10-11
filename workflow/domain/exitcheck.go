@@ -58,7 +58,7 @@ func (s Stage) RequiredChecks() []ExitCheck {
 		return []ExitCheck{CheckArtifactWritten, CheckFormatted, CheckBuildPasses, CheckSuitePasses}
 	case StageIntegrationTesting:
 		return []ExitCheck{CheckArtifactWritten, CheckIntegrationPasses}
-	case StageFixer:
+	case StageStressTesting, StageFixer:
 		return []ExitCheck{CheckArtifactWritten}
 	}
 	return nil
@@ -91,11 +91,13 @@ func (r CheckResult) Passed() bool     { return r.passed }
 func (r CheckResult) Summary() string  { return r.summary }
 
 // AgentClaim is what the stage agent reports about its stage's exit check:
-// passed, or failed with a reason. The fixer's pass also carries its route.
+// passed, or failed with a reason. The fixer's pass also carries its route,
+// and review's its stress choice.
 type AgentClaim struct {
 	passed bool
 	reason Reason
 	route  Route
+	stress StressChoice
 }
 
 func ClaimPassed() AgentClaim { return AgentClaim{passed: true} }
@@ -103,12 +105,20 @@ func ClaimPassed() AgentClaim { return AgentClaim{passed: true} }
 // ClaimRouted is the fixer's pass: the work goes to the route's target.
 func ClaimRouted(route Route) AgentClaim { return AgentClaim{passed: true, route: route} }
 
+// ClaimStressDecided is review's pass: it decides whether stress testing runs.
+func ClaimStressDecided(choice StressChoice) AgentClaim {
+	return AgentClaim{passed: true, stress: choice}
+}
+
 func ClaimFailed(reason Reason) AgentClaim { return AgentClaim{reason: reason} }
 
 func (c AgentClaim) Passed() bool { return c.passed }
 
 // Route is the fixer's route; ok is false for any other claim.
 func (c AgentClaim) Route() (route Route, ok bool) { return c.route, !c.route.isZero() }
+
+// Stress is review's stress choice; ok is false for any other claim.
+func (c AgentClaim) Stress() (choice StressChoice, ok bool) { return c.stress, !c.stress.isZero() }
 
 // Route is where the fixer sends the work, and why.
 type Route struct {

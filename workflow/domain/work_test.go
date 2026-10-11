@@ -16,7 +16,8 @@ func started() []domain.WorkEvent {
 	}
 }
 
-// completed is the history of a work that went through the whole fix-bug path.
+// completed is the history of a work that went through the whole fix-bug
+// path, skipping stress testing.
 func completed() []domain.WorkEvent {
 	h := started()
 	for _, st := range []struct {
@@ -29,6 +30,9 @@ func completed() []domain.WorkEvent {
 		{domain.StageIntegrationTesting, domain.GateAuto},
 	} {
 		h = append(h, domain.StageEntered{WorkID: workID, Stage: st.stage, Visit: visit1, Gate: st.gate, Budget: budget3})
+		if st.stage == domain.StageReview {
+			h = append(h, decided(skipStress))
+		}
 	}
 	return append(h, domain.WorkCompleted{WorkID: workID})
 }
@@ -119,16 +123,18 @@ func TestAdvancePastStage_WalksTheWholeFixBugPathToCompletion(t *testing.T) {
 	for _, next := range want {
 		current := asInProgress(t, givenWork(t, history...))
 
-		events, err := current.AdvancePastStage(current.CurrentStage(), visit1)
+		events, err := current.AdvancePastStage(current.CurrentStage(), visit1, stressFor(current.CurrentStage()))
 
-		thenEvents(t, events, err, domain.WorkEvent(domain.StageEntered{
-			WorkID: workID, Stage: next.stage, Visit: visit1, Gate: next.gate, Budget: budget3,
-		}))
+		wantEvents := []domain.WorkEvent{domain.StageEntered{WorkID: workID, Stage: next.stage, Visit: visit1, Gate: next.gate, Budget: budget3}}
+		if current.CurrentStage() == domain.StageReview {
+			wantEvents = append([]domain.WorkEvent{decided(skipStress)}, wantEvents...)
+		}
+		thenEvents(t, events, err, wantEvents...)
 		history = append(history, events...)
 	}
 
 	last := asInProgress(t, givenWork(t, history...))
-	events, err := last.AdvancePastStage(domain.StageIntegrationTesting, visit1)
+	events, err := last.AdvancePastStage(domain.StageIntegrationTesting, visit1, domain.StressChoice{})
 
 	thenEvents(t, events, err, domain.WorkEvent(domain.WorkCompleted{WorkID: workID}))
 	stateIs[domain.CompletedWork](t, thenWorkState(t, history, events))
@@ -137,7 +143,7 @@ func TestAdvancePastStage_WalksTheWholeFixBugPathToCompletion(t *testing.T) {
 func TestAdvancePastStage_ThatIsNotCurrent_IsRejected(t *testing.T) {
 	w := asInProgress(t, givenWork(t, started()...))
 
-	events, err := w.AdvancePastStage(domain.StageImplement, visit1)
+	events, err := w.AdvancePastStage(domain.StageImplement, visit1, domain.StressChoice{})
 
 	thenRejected(t, events, err, domain.ErrNotCurrentStage)
 	var stageErr *domain.NotCurrentStageError
@@ -148,7 +154,7 @@ func TestAdvancePastStage_ThatIsNotCurrent_IsRejected(t *testing.T) {
 func TestAdvancePastStage_WithAnotherVisit_IsRejected(t *testing.T) {
 	w := asInProgress(t, givenWork(t, started()...))
 
-	events, err := w.AdvancePastStage(domain.StageDiscovery, must(domain.NewVisit(2)))
+	events, err := w.AdvancePastStage(domain.StageDiscovery, must(domain.NewVisit(2)), domain.StressChoice{})
 
 	thenRejected(t, events, err, domain.ErrNotCurrentStage)
 }

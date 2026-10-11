@@ -3,6 +3,7 @@ package submitforacceptance_test
 import (
 	"io"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -82,7 +83,7 @@ func TestGivenTwoFailedAttempts_WhenSubmittingAFailedCheck_ThenTheAssignmentEsca
 
 func TestGivenOpenAssignmentOnAutoGate_WhenSubmittingAPassingCheck_ThenItIsAccepted(t *testing.T) {
 	eventlogtest.Given(t, OpenOn(domain.StageReview)...).
-		When(submitting(passed)).
+		When(submitting(domain.ClaimStressDecided(StressSkipped))).
 		Then(Accepted(domain.StageReview))
 }
 
@@ -231,7 +232,7 @@ func TestGivenAnotherStage_WhenSubmittingARoute_ThenItIsRejectedBeforeAnyCheckRu
 
 func TestGivenReview_WhenTheSuiteFails_ThenTheWorkIsHandedToTheFixer(t *testing.T) {
 	eventlogtest.Given(t, OpenOn(domain.StageReview)...).
-		When(submittingChecked(passed, checksFailing(domain.CheckSuitePasses, "1 test failed"))).
+		When(submittingChecked(domain.ClaimStressDecided(StressSkipped), checksFailing(domain.CheckSuitePasses, "1 test failed"))).
 		Then(HandedToFixer(domain.StageReview, 1, "suite-passes: 1 test failed."))
 }
 
@@ -291,4 +292,78 @@ func TestGivenAReworkBackToSpecify_WhenImplementIsChecked_ThenTheSpecsAreThoseOf
 
 	assert.Equal(t, specify2, got.Specify)
 	assert.Equal(t, implement2, got.SpecifyEnd)
+}
+
+// walletNFR covers server/wallet/.
+var walletNFR = Must(domain.NewNFR(Must(domain.NewNFRID("wallet-latency")), "", []domain.AreaGlob{Must(domain.NewAreaGlob("server/wallet/**"))},
+	Must(domain.NewOperation("POST /wallets/{id}/transactions")), Must(domain.NewLoad(5, time.Second)),
+	Must(domain.NewTargets(domain.TargetValues{MinRPS: ptr(10.0)}))))
+
+func ptr[T any](v T) *T { return &v }
+
+// workChanged reports the NFRs and the files the work changed.
+func workChanged(names ...string) submitforacceptance.StressFacts {
+	return func(domain.ActiveWork) ([]domain.NFR, domain.ChangedFiles, error) {
+		changed, _, _ := changes(names...)(domain.AssignmentID{})
+		return []domain.NFR{walletNFR}, changed, nil
+	}
+}
+
+// decidingStress is review submitting a pass with its stress decision, as
+// the command does: the decision is checked against the NFRs first.
+func decidingStress(decision domain.StressDecision, facts submitforacceptance.StressFacts, checks submitforacceptance.Checks) func(*eventlog.Session) error {
+	return func(log *eventlog.Session) error {
+		target, err := submitforacceptance.Find(log, Branch)
+		if err != nil {
+			return err
+		}
+		claim, err := submitforacceptance.DecideStress(target, decision, Reason("the reason"), facts)
+		if err != nil {
+			return err
+		}
+		if err := submitforacceptance.CheckClaim(target, claim); err != nil {
+			return err
+		}
+		checked, err := submitforacceptance.Check(target, claim, changes(), checks, io.Discard)
+		if err != nil {
+			return err
+		}
+		_, err = submitforacceptance.Submit(log, agent, target, claim, checked)
+		return err
+	}
+}
+
+func TestGivenReview_WhenSubmittingAPassWithoutAStressDecision_ThenItIsRejectedBeforeAnyCheckRuns(t *testing.T) {
+	eventlogtest.Given(t, OpenOn(domain.StageReview)...).
+		When(submittingChecked(passed, checksMustNotRun(t))).
+		ThenRejected(domain.ErrMissingStressDecision)
+}
+
+func TestGivenReviewOfAChangeOutsideEveryNFR_WhenSkippingStressTesting_ThenItIsAccepted(t *testing.T) {
+	eventlogtest.Given(t, OpenOn(domain.StageReview)...).
+		When(decidingStress(domain.StressSkip, workChanged("server/server.go"), checksPassing)).
+		Then(domain.AssignmentAccepted{AssignmentID: AssignmentOn(domain.StageReview), WorkID: WorkID, Stage: domain.StageReview, Visit: Visit1,
+			Stress: Must(domain.NewStressChoice(domain.StressSkip, Reason("the reason"), nil))})
+}
+
+func TestGivenReviewOfAChangeInAnNFRsArea_WhenSkippingStressTesting_ThenItIsRejectedBeforeAnyCheckRuns(t *testing.T) {
+	s := eventlogtest.Given(t, OpenOn(domain.StageReview)...).
+		When(decidingStress(domain.StressSkip, workChanged("server/wallet/post.go"), checksMustNotRun(t))).
+		ThenRejected(domain.ErrStressForced)
+	var forced *domain.StressForcedError
+	require.ErrorAs(t, s.Err(), &forced)
+	assert.Equal(t, "wallet-latency (server/wallet/**)", forced.Describe())
+}
+
+func TestGivenReviewOfAChangeInAnNFRsArea_WhenIncludingStressTesting_ThenTheDecisionIsForcedByTheNFR(t *testing.T) {
+	forced := Must(domain.NewStressChoice(domain.StressInclude, Reason("the reason"), []domain.NFRID{walletNFR.ID()}))
+	eventlogtest.Given(t, OpenOn(domain.StageReview)...).
+		When(decidingStress(domain.StressInclude, workChanged("server/wallet/post.go"), checksPassing)).
+		Then(domain.AssignmentAccepted{AssignmentID: AssignmentOn(domain.StageReview), WorkID: WorkID, Stage: domain.StageReview, Visit: Visit1, Stress: forced})
+}
+
+func TestGivenAnotherStage_WhenDecidingStressTesting_ThenItIsRejected(t *testing.T) {
+	eventlogtest.Given(t, OpenOn(domain.StageImplement)...).
+		When(decidingStress(domain.StressInclude, workChanged(), checksMustNotRun(t))).
+		ThenRejected(domain.ErrStressOutsideReview)
 }

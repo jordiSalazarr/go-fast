@@ -2,16 +2,19 @@ package domain
 
 import "fmt"
 
-// PathStep is one stage of a path with its gate and attempt budget.
+// PathStep is one stage of a path with its gate and attempt budget. An
+// optional step is entered only if the work decided to include it.
 type PathStep struct {
-	stage  Stage
-	gate   Gate
-	budget AttemptBudget
+	stage    Stage
+	gate     Gate
+	budget   AttemptBudget
+	optional bool
 }
 
 func (s PathStep) Stage() Stage          { return s.stage }
 func (s PathStep) Gate() Gate            { return s.gate }
 func (s PathStep) Budget() AttemptBudget { return s.budget }
+func (s PathStep) Optional() bool        { return s.optional }
 
 // Path is the ordered list of stages a work type goes through.
 type Path struct{ steps []PathStep }
@@ -24,6 +27,7 @@ var paths = map[WorkType][]PathStep{
 		{stage: StageImplement, gate: GateAuto, budget: AttemptBudget{n: 3}},
 		{stage: StageReview, gate: GateAuto, budget: AttemptBudget{n: 3}},
 		{stage: StageIntegrationTesting, gate: GateAuto, budget: AttemptBudget{n: 3}},
+		{stage: StageStressTesting, gate: GateAuto, budget: AttemptBudget{n: 3}, optional: true},
 	},
 }
 
@@ -68,4 +72,21 @@ func (p Path) stepOf(stage Stage) (PathStep, bool) {
 	}
 	return p.steps[i], true
 }
-func (p Path) isLast(i int) bool { return i == len(p.steps)-1 }
+
+// StressDecider is the stage whose agent decides whether stress testing
+// runs: no work advances past it without a stress decision.
+func StressDecider() Stage { return StageReview }
+
+// stressDecisionCloses is the last stage during which the owner may still
+// change the stress decision: after it, stress testing runs or the work is
+// done.
+var stressDecisionCloses = StageIntegrationTesting
+
+// includes reports whether a step is entered, given the work's stress
+// decision. Stress testing is the only optional stage.
+func (s PathStep) includedBy(stress *stressDecision) bool {
+	if !s.optional {
+		return true
+	}
+	return s.stage == StageStressTesting && stress != nil && stress.choice.decision == StressInclude
+}

@@ -12,6 +12,7 @@ import (
 	"github.com/jordiSalazarr/go-fast/workflow/eventlog"
 	"github.com/jordiSalazarr/go-fast/workflow/exitchecks"
 	"github.com/jordiSalazarr/go-fast/workflow/gitbranch"
+	"github.com/jordiSalazarr/go-fast/workflow/worktree"
 )
 
 const seeLog = "Details are in .gofast/gf.log."
@@ -28,6 +29,7 @@ func friendly(err error, cmd *cobra.Command, ran bool) string {
 		nfrs      *exitchecks.NFRsError
 		route     *domain.InvalidRouteError
 		noRoute   *domain.RouteMissingError
+		forced    *domain.StressForcedError
 	)
 	switch {
 	case errors.Is(err, gitbranch.ErrDetachedHead):
@@ -62,6 +64,22 @@ func friendly(err error, cmd *cobra.Command, ran bool) string {
 			strings.ReplaceAll(stageNames(noRoute.Allowed), ", ", "|"))
 	case errors.Is(err, domain.ErrRouteOutsideFixer):
 		return "Only the fixer chooses a route. Submit with `gf submit --passed` or `gf submit --failed \"<reason>\"`. No attempt was used."
+	case errors.As(err, &forced) && cmd.Name() == "stress":
+		return fmt.Sprintf("Stress testing is mandatory: the change touches the areas of %s. Run `gf stress include \"<reason>\"` instead, or change the NFRs.",
+			forced.Describe())
+	case errors.As(err, &forced):
+		return fmt.Sprintf("Stress testing is mandatory: the change touches the areas of %s. Submit with `gf submit --passed --stress include \"<reason>\"`. No attempt was used.",
+			forced.Describe())
+	case errors.Is(err, domain.ErrMissingStressDecision):
+		return "Review decides whether stress testing runs: `gf submit --passed --stress <include|skip> \"<reason>\"`. Include it if the change can affect behaviour under load. No attempt was used."
+	case errors.Is(err, domain.ErrStressOutsideReview):
+		return "Only review decides stress testing. Submit with `gf submit --passed` or `gf submit --failed \"<reason>\"`. No attempt was used."
+	case errors.Is(err, domain.ErrUnknownStressDecision):
+		return "Stress testing is either `include` or `skip`."
+	case errors.Is(err, domain.ErrStressDecisionClosed):
+		return "The stress decision can only change while the work is on a stage up to integration testing, outside the fixer. Run `gf status` to see where it is."
+	case errors.Is(err, worktree.ErrNoWorkBaseline):
+		return "gf can't tell what this work changed: the baseline of its first stage is missing (the work was started before this version of gf, or on another machine). The owner should abandon this work with `gf abandon \"<reason>\"` and start it again."
 	case errors.Is(err, domain.ErrUnknownStage):
 		return fmt.Sprintf("Unknown stage. Stages: %s.", stageNames(domain.Stages()))
 	case errors.Is(err, domain.ErrNotAtReworkLimit):

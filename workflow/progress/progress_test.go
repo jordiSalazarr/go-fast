@@ -60,7 +60,7 @@ func TestGivenAFailedAttemptOnImplement_WhenQueryingStatus_ThenTheAgentIsToldToW
 	assert.Equal(t, "login button does nothing", v.Work.Description)
 	assert.Equal(t, map[string]string{
 		"discovery": progress.StageDone, "specify": progress.StageDone, "implement": progress.StageCurrent,
-		"review": progress.StagePending, "integration-testing": progress.StagePending,
+		"review": progress.StagePending, "integration-testing": progress.StagePending, "stress-testing": progress.StagePending,
 	}, stageStatuses(v))
 	assert.Equal(t, &progress.CurrentView{
 		Stage: "implement", Visit: 1, Gate: "auto", Assignment: progress.AssignmentOpen, AttemptsUsed: 1, Budget: 3,
@@ -146,6 +146,7 @@ func TestGivenWorkOnReview_WhenQueryingStatus_ThenItShowsTheArtifactPaths(t *tes
 		"implement":           ".gofast/works/w1/implement-v1.md",
 		"review":              "", // current: see current.artifact
 		"integration-testing": "",
+		"stress-testing":      "",
 	}, artifacts)
 	assert.Equal(t, ".gofast/works/w1/review-v1.md", v.Current.Artifact)
 }
@@ -201,7 +202,7 @@ func TestGivenWorkInTheFixer_WhenQueryingStatus_ThenItShowsWhatHandedItOver(t *t
 	assert.Equal(t, 3, v.Work.ReworkBudget)
 	assert.Equal(t, map[string]string{
 		"discovery": progress.StageDone, "specify": progress.StageDone, "implement": progress.StageDone,
-		"review": progress.StagePending, "integration-testing": progress.StagePending, "fixer": progress.StageCurrent,
+		"review": progress.StagePending, "integration-testing": progress.StagePending, "stress-testing": progress.StagePending, "fixer": progress.StageCurrent,
 	}, stageStatuses(v))
 	assert.Equal(t, progress.NextAgent, v.Next.Actor)
 	assert.Equal(t, []string{`gf submit --passed --route <specify|implement> "<reason>"`, `gf submit --failed "<reason>"`}, v.Next.Commands)

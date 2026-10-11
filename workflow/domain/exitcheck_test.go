@@ -18,6 +18,7 @@ func TestEachStageRequiresItsExitChecks(t *testing.T) {
 			domain.CheckSpecsUntouched, domain.CheckSuitePasses},
 		domain.StageReview:             {domain.CheckArtifactWritten, domain.CheckFormatted, domain.CheckBuildPasses, domain.CheckSuitePasses},
 		domain.StageIntegrationTesting: {domain.CheckArtifactWritten, domain.CheckIntegrationPasses},
+		domain.StageStressTesting:      {domain.CheckArtifactWritten},
 		domain.StageFixer:              {domain.CheckArtifactWritten},
 	}
 	for _, stage := range domain.Stages() {

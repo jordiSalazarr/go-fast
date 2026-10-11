@@ -112,3 +112,38 @@ func TestRun_ReadsTheLogOnceAndAgainOnlyAfterAppending(t *testing.T) {
 		return nil
 	}))
 }
+
+// Review's acceptance carries its stress decision: advancing past review
+// records it, and only then enters integration testing. Running again adds
+// nothing.
+func TestRun_PastReview_RecordsItsStressDecision_AndIsIdempotent(t *testing.T) {
+	include := must(domain.NewStressChoice(domain.StressInclude, must(domain.NewReason("touches the ledger")),
+		[]domain.NFRID{must(domain.NewNFRID("wallet-latency"))}))
+	reviewID := domain.AssignmentIDFor(workID, domain.StageReview, visit1)
+	onReview := append(append([]domain.WorkEvent(nil), started...), specifyEntered,
+		domain.StageEntered{WorkID: workID, Stage: domain.StageImplement, Visit: visit1, Gate: domain.GateAuto, Budget: budget3},
+		domain.StageEntered{WorkID: workID, Stage: domain.StageReview, Visit: visit1, Gate: domain.GateAuto, Budget: budget3})
+	store := must(eventlog.Open(t.TempDir()))
+	agent := eventlog.AgentActor("agent")
+
+	require.NoError(t, store.Exclusive(func(s *eventlog.Session) error {
+		require.NoError(t, s.Append(eventlog.WorkStream(workID), 0, agent, eventlog.Events(onReview)...))
+		require.NoError(t, s.Append(eventlog.AssignmentStream(reviewID), 0, agent,
+			domain.AssignmentOpened{AssignmentID: reviewID, WorkID: workID, Stage: domain.StageReview, Visit: visit1, Gate: domain.GateAuto, Budget: budget3},
+			domain.AssignmentAccepted{AssignmentID: reviewID, WorkID: workID, Stage: domain.StageReview, Visit: visit1, Stress: include}))
+
+		first, err := Run(s)
+		require.NoError(t, err)
+		second, err := Run(s)
+		require.NoError(t, err)
+
+		assert.Equal(t, 2, first)
+		assert.Equal(t, 0, second)
+		records, _ := s.ReadAll()
+		assert.Equal(t, []domain.Event{
+			domain.StressDecided{WorkID: workID, Decision: domain.StressInclude, Reason: include.Reason(), ForcedBy: include.ForcedBy()},
+			domain.StageEntered{WorkID: workID, Stage: domain.StageIntegrationTesting, Visit: visit1, Gate: domain.GateAuto, Budget: budget3},
+		}, []domain.Event{records[len(records)-2].Event, records[len(records)-1].Event})
+		return nil
+	}))
+}

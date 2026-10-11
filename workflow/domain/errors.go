@@ -16,6 +16,7 @@ var (
 	ErrInvalidAttemptBudget  = errors.New("attempt budget must be a positive number")
 	ErrInvalidReworkBudget   = errors.New("rework budget must be a positive number")
 	ErrUnknownFixerMode      = errors.New("unknown fixer mode")
+	ErrUnknownStressDecision = errors.New("unknown stress decision")
 	ErrInvalidAttempt        = errors.New("invalid attempt number")
 	ErrInvalidVisit          = errors.New("visit must be a positive number")
 	ErrEmptyDescription      = errors.New("description must not be empty")
@@ -40,6 +41,12 @@ var (
 	ErrInvalidRoute      = errors.New("the fixer can only return work to an earlier stage on its path that can change code")
 	ErrMissingRoute      = errors.New("the fixer's pass must say which stage the work returns to")
 	ErrRouteOutsideFixer = errors.New("only the fixer chooses a route")
+	// Stress testing.
+	ErrMissingStressDecision = errors.New("review's pass must decide whether stress testing runs")
+	ErrStressOutsideReview   = errors.New("only review decides stress testing when it submits")
+	ErrStressForced          = errors.New("stress testing is mandatory: the change touches an NFR's areas")
+	ErrStressUndecided       = errors.New("the work has no stress decision")
+	ErrStressDecisionClosed  = errors.New("the stress decision can only change while the work is on a stage up to integration testing")
 )
 
 // The current assignment is not in a state that accepts the command.

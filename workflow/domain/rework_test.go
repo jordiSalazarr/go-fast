@@ -66,7 +66,7 @@ func TestEnterFixer_FromAStageThatChecksCode_EntersTheFixer(t *testing.T) {
 		t.Run(from.String(), func(t *testing.T) {
 			given := onReview()
 			if from == domain.StageIntegrationTesting {
-				given = append(given, entered(domain.StageIntegrationTesting, 1))
+				given = append(given, decided(skipStress), entered(domain.StageIntegrationTesting, 1))
 			}
 			w := asInProgress(t, givenWork(t, given...))
 
@@ -120,16 +120,19 @@ func TestReturnToStage_StartsANewVisitAndEveryLaterStageRunsAgain(t *testing.T) 
 	assert.Equal(t, domain.StageImplement, w.CurrentStage())
 	assert.Equal(t, visit(2), w.CurrentVisit())
 
-	// The path continues in order: review again, then integration testing
-	// for the first time, then completion.
-	for _, next := range []domain.WorkEvent{entered(domain.StageReview, 2), entered(domain.StageIntegrationTesting, 1)} {
+	// The path continues in order: review again, which decides stress
+	// testing, then integration testing for the first time, then completion.
+	for _, next := range [][]domain.WorkEvent{
+		{entered(domain.StageReview, 2)},
+		{decided(skipStress), entered(domain.StageIntegrationTesting, 1)},
+	} {
 		w = asInProgress(t, givenWork(t, history...))
-		events, err = w.AdvancePastStage(w.CurrentStage(), w.CurrentVisit())
-		thenEvents(t, events, err, next)
+		events, err = w.AdvancePastStage(w.CurrentStage(), w.CurrentVisit(), stressFor(w.CurrentStage()))
+		thenEvents(t, events, err, next...)
 		history = append(history, events...)
 	}
 	w = asInProgress(t, givenWork(t, history...))
-	events, err = w.AdvancePastStage(domain.StageIntegrationTesting, visit1)
+	events, err = w.AdvancePastStage(domain.StageIntegrationTesting, visit1, domain.StressChoice{})
 	thenEvents(t, events, err, domain.WorkEvent(domain.WorkCompleted{WorkID: workID}))
 }
 
@@ -143,7 +146,7 @@ func TestReturnToStage_Specify_StartsItsSecondVisitOnItsHumanGate(t *testing.T) 
 		domain.WorkEvent(domain.ReworkStarted{WorkID: workID, Target: domain.StageSpecify, Visit: visit(2), Reason: reasonOf("the spec misses negative ports")}),
 		domain.WorkEvent(domain.StageEntered{WorkID: workID, Stage: domain.StageSpecify, Visit: visit(2), Gate: domain.GateHuman, Budget: budget3}))
 	w := asInProgress(t, thenWorkState(t, given, events))
-	next, err := w.AdvancePastStage(domain.StageSpecify, visit(2))
+	next, err := w.AdvancePastStage(domain.StageSpecify, visit(2), domain.StressChoice{})
 	thenEvents(t, next, err, entered(domain.StageImplement, 2))
 }
 

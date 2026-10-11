@@ -150,6 +150,19 @@ func (r *repo) eventTypes() []string {
 
 var asAgent = map[string]string{"GF_ACTOR": "agent"}
 
+// reviewPass is review's pass, which decides to skip stress testing.
+var reviewPass = []string{"--passed", "--stress", "skip", "nothing in this change runs under load"}
+
+// passed is the agent's pass on the current stage: review's decides to skip
+// stress testing too.
+func (r *repo) passed() []string {
+	r.t.Helper()
+	if c := r.status().Current; c != nil && c.Stage == "review" {
+		return reviewPass
+	}
+	return []string{"--passed"}
+}
+
 func TestFixBugPath_EndToEnd(t *testing.T) {
 	r := newRepo(t)
 	r.configureChecks()
@@ -163,7 +176,7 @@ func TestFixBugPath_EndToEnd(t *testing.T) {
 	assert.Equal(t, "fix-bug", v.Work.Type)
 	assert.Equal(t, "login button does nothing", v.Work.Description)
 	assert.Equal(t, progress.NextAgent, v.Next.Actor)
-	assert.Equal(t, []string{"current", "pending", "pending", "pending", "pending"}, stageStatuses(v))
+	assert.Equal(t, []string{"current", "pending", "pending", "pending", "pending", "pending"}, stageStatuses(v))
 
 	// A second start while work is active is rejected, naming the active work.
 	res := r.gfFails(nil, "start", "--type", "fix-bug", "another bug")
@@ -201,7 +214,7 @@ func TestFixBugPath_EndToEnd(t *testing.T) {
 
 	// Specify: straight approval on the second human gate.
 	v = r.expect("specify", progress.AssignmentOpen, 0, 3)
-	assert.Equal(t, []string{"done", "current", "pending", "pending", "pending"}, stageStatuses(v))
+	assert.Equal(t, []string{"done", "current", "pending", "pending", "pending", "pending"}, stageStatuses(v))
 	r.workOnStage()
 	r.gf("submit", "--passed")
 	r.expect("specify", progress.AssignmentAwaitingApproval, 0, 3)
@@ -225,10 +238,11 @@ func TestFixBugPath_EndToEnd(t *testing.T) {
 	r.workOnStage()
 	r.gf("submit", "--passed") // auto gate: accepted, work advances
 
-	// Review and integration testing pass on auto gates.
+	// Review and integration testing pass on auto gates; review decides to
+	// skip stress testing.
 	r.expect("review", progress.AssignmentOpen, 0, 3)
 	r.workOnStage()
-	r.gf("submit", "--passed")
+	r.gf(append([]string{"submit"}, reviewPass...)...)
 	r.expect("integration-testing", progress.AssignmentOpen, 0, 3)
 	r.workOnStage()
 	r.gf("submit", "--passed")

@@ -1,5 +1,6 @@
 // Package advanceworkonacceptance moves work past a stage once the stage
-// visit's assignment is accepted.
+// visit's assignment is accepted. Review's acceptance carries its stress
+// decision, which the work records as it advances.
 package advanceworkonacceptance
 
 import (
@@ -50,7 +51,7 @@ func Run(log Log) (int, error) {
 		if !ok {
 			continue
 		}
-		events, err := w.AdvancePastStage(accepted.Stage, accepted.Visit)
+		events, err := w.AdvancePastStage(accepted.Stage, accepted.Visit, accepted.Stress)
 		if err != nil {
 			return appended, fmt.Errorf("%s: %w", Name, err)
 		}

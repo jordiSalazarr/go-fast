@@ -119,13 +119,36 @@ func (b Baselines) ChangedSince(id domain.AssignmentID) (changed domain.ChangedF
 		started, err := b.Ensure(id)
 		return domain.ChangedFiles{}, started, err
 	}
+	changed, err = b.changedSinceTree(id, base)
+	return changed, false, err
+}
+
+// ErrNoWorkBaseline: gf has no baseline of a work's first stage visit, so
+// it can't tell what the work changed.
+var ErrNoWorkBaseline = errors.New("the baseline of the work's first stage visit is missing")
+
+// WorkChanges returns the files the work changed since its first stage
+// visit began, except the ones gf itself writes.
+func (b Baselines) WorkChanges(work domain.ActiveWork) (domain.ChangedFiles, error) {
+	first := work.FirstAssignment()
+	base, ok, err := b.read(first)
+	if err != nil {
+		return domain.ChangedFiles{}, err
+	}
+	if !ok {
+		return domain.ChangedFiles{}, fmt.Errorf("changes of work %s: %w", work.ID(), ErrNoWorkBaseline)
+	}
+	return b.changedSinceTree(first, base)
+}
+
+func (b Baselines) changedSinceTree(id domain.AssignmentID, base string) (domain.ChangedFiles, error) {
 	current, err := Snapshot(b.root)
 	if err != nil {
-		return domain.ChangedFiles{}, false, fmt.Errorf("changes since baseline of %s: %w", id, err)
+		return domain.ChangedFiles{}, fmt.Errorf("changes since baseline of %s: %w", id, err)
 	}
 	names, err := Diff(b.root, base, current)
 	if err != nil {
-		return domain.ChangedFiles{}, false, fmt.Errorf("changes since baseline of %s: %w", id, err)
+		return domain.ChangedFiles{}, fmt.Errorf("changes since baseline of %s: %w", id, err)
 	}
 	var paths []domain.RepoPath
 	for _, name := range names {
@@ -134,11 +157,11 @@ func (b Baselines) ChangedSince(id domain.AssignmentID) (changed domain.ChangedF
 		}
 		p, err := domain.NewRepoPath(b.root, filepath.FromSlash(name))
 		if err != nil {
-			return domain.ChangedFiles{}, false, fmt.Errorf("changes since baseline of %s: %w", id, err)
+			return domain.ChangedFiles{}, fmt.Errorf("changes since baseline of %s: %w", id, err)
 		}
 		paths = append(paths, p)
 	}
-	return domain.NewChangedFiles(paths...), false, nil
+	return domain.NewChangedFiles(paths...), nil
 }
 
 // Tree returns the baseline tree of a stage visit, if it was recorded on

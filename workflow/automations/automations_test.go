@@ -62,7 +62,8 @@ func TestRun_ReconcilesAHalfFinishedCycle(t *testing.T) {
 		require.NoError(t, s.Append(eventlog.WorkStream(workID), 0, agent, work...))
 		require.NoError(t, s.Append(eventlog.AssignmentStream(reviewID), 0, agent,
 			domain.AssignmentOpened{AssignmentID: reviewID, WorkID: workID, Stage: domain.StageReview, Visit: visit, Gate: domain.GateAuto, Budget: budget},
-			domain.AssignmentAccepted{AssignmentID: reviewID, WorkID: workID, Stage: domain.StageReview, Visit: visit},
+			domain.AssignmentAccepted{AssignmentID: reviewID, WorkID: workID, Stage: domain.StageReview, Visit: visit,
+				Stress: must(domain.NewStressChoice(domain.StressSkip, must(domain.NewReason("docs only")), nil))},
 		))
 		before, _ := s.ReadAll()
 
@@ -72,7 +73,8 @@ func TestRun_ReconcilesAHalfFinishedCycle(t *testing.T) {
 		again, _ := s.ReadAll()
 
 		// Discovery..implement assignments were never opened in this crafted log,
-		// so they are opened too; review's acceptance advances the work.
+		// so they are opened too; review's acceptance records its stress
+		// decision and advances the work.
 		added := eventTypes(after[len(before):])
 		assert.Contains(t, added, "StageEntered")
 		assert.Equal(t, 4, countOf(added, "AssignmentOpened"), "discovery, specify, implement, integration-testing")

@@ -26,6 +26,7 @@ import (
 	extendreworkbudget "github.com/jordiSalazarr/go-fast/workflow/slices/extendReworkBudget"
 	guardagentactions "github.com/jordiSalazarr/go-fast/workflow/slices/guardAgentActions"
 	keepagentonstage "github.com/jordiSalazarr/go-fast/workflow/slices/keepAgentOnStage"
+	overridestressdecision "github.com/jordiSalazarr/go-fast/workflow/slices/overrideStressDecision"
 	"github.com/jordiSalazarr/go-fast/workflow/slices/reject"
 	startwork "github.com/jordiSalazarr/go-fast/workflow/slices/startWork"
 	"github.com/jordiSalazarr/go-fast/workflow/slices/status"
@@ -81,11 +82,12 @@ func (a *app) rootCommand() *cobra.Command {
 	root.PersistentFlags().StringVar(&a.dir, "dir", "", "repository root (default: the git repository containing the working directory)")
 	root.AddCommand(
 		startwork.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch),
-		submitforacceptance.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch, a.changedFiles, a.runChecks),
+		submitforacceptance.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch, a.changedFiles, a.runChecks, a.stressFacts),
 		approve.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch),
 		reject.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch),
 		extendbudget.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch),
 		extendreworkbudget.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch),
+		overridestressdecision.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch, a.stressFacts),
 		abandonwork.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch),
 		status.NewCommand(a.openStore, a.currentBranch),
 		checks.NewCommand(a.repositoryRoot),
@@ -204,6 +206,24 @@ func (a *app) changedFiles(id domain.AssignmentID) (domain.ChangedFiles, bool, e
 		return domain.ChangedFiles{}, false, err
 	}
 	return worktree.OpenBaselines(root).ChangedSince(id)
+}
+
+// stressFacts reads the repository's NFRs and the files the work changed
+// since its first stage visit began.
+func (a *app) stressFacts(work domain.ActiveWork) ([]domain.NFR, domain.ChangedFiles, error) {
+	root, err := a.repositoryRoot()
+	if err != nil {
+		return nil, domain.ChangedFiles{}, err
+	}
+	nfrs, err := exitchecks.LoadNFRs(root)
+	if err != nil {
+		return nil, domain.ChangedFiles{}, err
+	}
+	changed, err := worktree.OpenBaselines(root).WorkChanges(work)
+	if err != nil {
+		return nil, domain.ChangedFiles{}, err
+	}
+	return nfrs, changed, nil
 }
 
 // runChecks runs a stage visit's exit checks in the repository, with the

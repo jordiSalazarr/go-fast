@@ -68,7 +68,7 @@ func TestRework_IntegrationFailsOnACodeBug_TheFixerSendsItToImplement(t *testing
 	v := r.toReview()
 	workID := v.Work.ID
 	r.workOnStage()
-	r.submitAsAgent("--passed")
+	r.submitAsAgent(reviewPass...)
 
 	r.expect("integration-testing", progress.AssignmentOpen, 0, 3)
 	r.workOnStage()
@@ -108,7 +108,7 @@ func TestRework_IntegrationFailsOnACodeBug_TheFixerSendsItToImplement(t *testing
 	assert.Equal(t, 2, v.Current.Visit)
 	assert.NotNil(t, v.Current.ReworkOf)
 	r.workOnStage()
-	r.submitAsAgent("--passed")
+	r.submitAsAgent(reviewPass...)
 	v = r.expect("integration-testing", progress.AssignmentOpen, 0, 3)
 	assert.Equal(t, 2, v.Current.Visit)
 	r.workOnStage()
@@ -171,7 +171,7 @@ func TestRework_ReviewFindsAProblem_TheFixerSendsItToSpecify(t *testing.T) {
 	for _, stage := range []string{"review", "integration-testing"} {
 		v = r.expect(stage, progress.AssignmentOpen, 0, 3)
 		r.workOnStage()
-		r.submitAsAgent("--passed")
+		r.submitAsAgent(r.passed()...)
 	}
 	assert.Nil(t, r.status().Work, "work completed")
 }

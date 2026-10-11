@@ -110,23 +110,33 @@ func (a Open) SubmitForAcceptance(claim AgentClaim, changed ChangedFiles, result
 		return []AssignmentEvent{SubmittedForApproval{AssignmentID: a.id, Attempt: attempt}}, nil
 	default:
 		route, _ := claim.Route()
-		return []AssignmentEvent{a.accepted(route)}, nil
+		stress, _ := claim.Stress()
+		return []AssignmentEvent{a.accepted(route, stress)}, nil
 	}
 }
 
 // CheckClaim rejects a claim the stage can't make: the fixer's pass must
-// carry a route, and no other claim may. Whether the route's target is
-// allowed is the work's to say (InFixerWork.CheckRoute).
+// carry a route, and review's pass a stress choice; no other claim may.
+// Whether the route's target is allowed is the work's to say
+// (InFixerWork.CheckRoute), and whether stress testing is mandatory the
+// NFRs' (ChooseStress).
 func (a Open) CheckClaim(claim AgentClaim) error {
 	if err := requirePresent(required{"agent claim", claim}); err != nil {
 		return err
 	}
 	_, routed := claim.Route()
+	stress, decided := claim.Stress()
 	switch {
 	case a.stage == StageFixer && claim.Passed() && !routed:
 		return ErrMissingRoute
 	case a.stage != StageFixer && routed:
 		return fmt.Errorf("%s stage: %w", a.stage, ErrRouteOutsideFixer)
+	case a.stage == StressDecider() && claim.Passed() && !decided:
+		return ErrMissingStressDecision
+	case a.stage != StressDecider() && decided:
+		return fmt.Errorf("%s stage: %w", a.stage, ErrStressOutsideReview)
+	case decided && !stress.valid():
+		return ErrStressForced
 	}
 	return nil
 }
@@ -138,7 +148,7 @@ func (a AwaitingApproval) Approve(owner Owner) ([]AssignmentEvent, error) {
 	if err := requirePresent(required{"owner", owner}); err != nil {
 		return nil, fmt.Errorf("approve assignment %s: %w", a.id, err)
 	}
-	return []AssignmentEvent{a.accepted(Route{})}, nil
+	return []AssignmentEvent{a.accepted(Route{}, StressChoice{})}, nil
 }
 
 // Reject sends the submission back with feedback; it uses one attempt.
@@ -174,13 +184,15 @@ func (a assignment) withEscalationIfExhausted(used AssignmentEvent) []Assignment
 	return events
 }
 
-func (a assignment) accepted(route Route) AssignmentAccepted {
-	return AssignmentAccepted{AssignmentID: a.id, WorkID: a.work, Stage: a.stage, Visit: a.visit, Route: route}
+func (a assignment) accepted(route Route, stress StressChoice) AssignmentAccepted {
+	return AssignmentAccepted{AssignmentID: a.id, WorkID: a.work, Stage: a.stage, Visit: a.visit, Route: route, Stress: stress}
 }
 
-// acceptable: the fixer is accepted with its route, every other stage without.
+// acceptable: the fixer is accepted with its route and review with its
+// stress choice; every other stage without either.
 func (a assignment) acceptable(e AssignmentAccepted) bool {
-	return (a.stage == StageFixer) == !e.Route.isZero()
+	return (a.stage == StageFixer) == !e.Route.isZero() &&
+		(a.stage == StressDecider()) == !e.Stress.isZero() && (e.Stress.isZero() || e.Stress.valid())
 }
 
 func (a assignment) cancel(reason Reason) ([]AssignmentEvent, error) {

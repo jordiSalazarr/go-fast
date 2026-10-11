@@ -92,8 +92,15 @@ type ActiveWork interface {
 	// CurrentStep is the current stage's gate and attempt budget.
 	CurrentStep() PathStep
 	CurrentAssignment() AssignmentID
+	// FirstAssignment is the work's first stage visit: its baseline is the
+	// working tree before the work changed anything.
+	FirstAssignment() AssignmentID
 	Reworks() ReworkCount
 	ReworkBudget() ReworkBudget
+	// StressDecision is the work's stress decision on its current pass along
+	// the path, and the owner who made it (zero when review did); ok is false
+	// until one is recorded. A rework clears it.
+	StressDecision() (choice StressChoice, owner Owner, ok bool)
 	AbandonWork(owner Owner, reason Reason) ([]WorkEvent, error)
 }
 
@@ -106,6 +113,7 @@ type active struct {
 	visits       visits // the last visit of every stage entered
 	reworks      ReworkCount
 	reworkBudget ReworkBudget
+	stress       *stressDecision // nil until decided on this pass; never mutated
 }
 
 func (w active) Path() Path                 { return w.path }
@@ -116,6 +124,50 @@ func (w active) ReworkBudget() ReworkBudget { return w.reworkBudget }
 func (w active) CurrentStep() PathStep      { s, _ := w.path.stepOf(w.stage); return s }
 func (w active) CurrentAssignment() AssignmentID {
 	return AssignmentIDFor(w.id, w.stage, w.visit)
+}
+func (w active) FirstAssignment() AssignmentID {
+	return AssignmentIDFor(w.id, w.path.step(0).stage, FirstVisit())
+}
+
+func (w active) StressDecision() (StressChoice, Owner, bool) {
+	if w.stress == nil {
+		return StressChoice{}, Owner{}, false
+	}
+	return w.stress.choice, w.stress.owner, true
+}
+
+// next is the stage the work enters after its current one, skipping the
+// optional stages it didn't include; done when there is none. Past the
+// stress decider it needs a stress decision.
+func (w active) next() (next Stage, done bool, err error) {
+	i, _ := w.path.indexOf(w.stage)
+	if decider, ok := w.path.indexOf(StressDecider()); ok && i >= decider && w.stress == nil {
+		return Stage{}, false, ErrStressUndecided
+	}
+	for _, step := range w.path.steps[i+1:] {
+		if step.includedBy(w.stress) {
+			return step.stage, false, nil
+		}
+	}
+	return Stage{}, true, nil
+}
+
+// reviewDecides records review's stress choice, unless the owner already
+// decided on this pass: the owner's decision stands, except a skip that the
+// change now forces to include.
+func (w active) reviewDecides(choice StressChoice) []WorkEvent {
+	if s := w.stress; s != nil && !s.owner.isZero() && !(s.choice.decision == StressSkip && len(choice.forcedBy) > 0) {
+		return nil
+	}
+	return []WorkEvent{StressDecided{WorkID: w.id, Decision: choice.decision, Reason: choice.reason, ForcedBy: choice.forcedBy}}
+}
+
+// stressStillOpen reports whether the owner may still decide stress
+// testing: the work hasn't passed the stage after which it is too late.
+func (w active) stressStillOpen() bool {
+	i, _ := w.path.indexOf(w.stage)
+	closes, ok := w.path.indexOf(stressDecisionCloses)
+	return ok && i <= closes
 }
 
 // LastVisit is the last visit of a stage; ok is false if it was never entered.
@@ -234,19 +286,54 @@ func StartWork(id WorkID, workType WorkType, description Description, branch Bra
 }
 
 // AdvancePastStage moves the work past its current stage visit: onto a new
-// visit of the next stage of the path, or to completion after the last one.
-func (w InProgressWork) AdvancePastStage(stage Stage, visit Visit) ([]WorkEvent, error) {
+// visit of the next stage it includes, or to completion after the last one.
+// Advancing past the stress decider (review) records its stress choice,
+// which is required there and refused anywhere else.
+func (w InProgressWork) AdvancePastStage(stage Stage, visit Visit, stress StressChoice) ([]WorkEvent, error) {
 	if err := requirePresent(required{"stage", stage}, required{"visit", visit}); err != nil {
 		return nil, fmt.Errorf("advance work %s: %w", w.id, err)
 	}
 	if err := w.requireCurrent(stage, visit); err != nil {
 		return nil, fmt.Errorf("advance work %s: %w", w.id, err)
 	}
-	i, _ := w.path.indexOf(w.stage)
-	if w.path.isLast(i) {
-		return []WorkEvent{WorkCompleted{WorkID: w.id}}, nil
+	var events []WorkEvent
+	switch {
+	case stage == StressDecider() && stress.isZero():
+		return nil, fmt.Errorf("advance work %s past %s: %w", w.id, stage, ErrMissingStressDecision)
+	case stage == StressDecider() && !stress.valid():
+		return nil, fmt.Errorf("advance work %s past %s: %w", w.id, stage, ErrStressForced)
+	case stage == StressDecider():
+		events = w.reviewDecides(stress)
+		for _, e := range events {
+			w.stress = decidedBy(e.(StressDecided))
+		}
+	case !stress.isZero():
+		return nil, fmt.Errorf("advance work %s past %s: %w", w.id, stage, ErrStressOutsideReview)
 	}
-	return []WorkEvent{w.entering(w.path.step(i + 1).stage)}, nil
+	next, done, err := w.next()
+	if err != nil {
+		return nil, fmt.Errorf("advance work %s: %w", w.id, err)
+	}
+	if done {
+		return append(events, WorkCompleted{WorkID: w.id}), nil
+	}
+	return append(events, w.entering(next)), nil
+}
+
+// OverrideStressDecision records the owner's stress decision, which stands
+// for the rest of this pass along the path. It is too late once the work has
+// passed integration testing.
+func (w InProgressWork) OverrideStressDecision(owner Owner, choice StressChoice) ([]WorkEvent, error) {
+	if err := requirePresent(required{"owner", owner}, required{"stress choice", choice}); err != nil {
+		return nil, fmt.Errorf("override stress decision of work %s: %w", w.id, err)
+	}
+	if !choice.valid() {
+		return nil, fmt.Errorf("override stress decision of work %s: %w", w.id, ErrStressForced)
+	}
+	if !w.stressStillOpen() {
+		return nil, fmt.Errorf("override stress decision of work %s on %s: %w", w.id, w.stage, ErrStressDecisionClosed)
+	}
+	return []WorkEvent{StressDecided{WorkID: w.id, Decision: choice.decision, Reason: choice.reason, ForcedBy: choice.forcedBy, Owner: owner}}, nil
 }
 
 // EnterFixer takes the work into the fixer because its current stage visit
@@ -309,7 +396,8 @@ func (w InFixerWork) CheckRoute(target Stage) error {
 }
 
 // ReturnToStage ends the fixer by starting a new visit of an earlier stage;
-// from there the path continues in order, so every later stage runs again.
+// from there the path continues in order, so every later stage runs again,
+// and the next review decides stress testing again.
 func (w InFixerWork) ReturnToStage(target Stage, reason Reason) ([]WorkEvent, error) {
 	if err := requirePresent(required{"reason", reason}); err != nil {
 		return nil, fmt.Errorf("return work %s: %w", w.id, err)
@@ -396,18 +484,27 @@ func evolveWork(w work, path Path, state WorkState, e WorkEvent) (next WorkState
 		a := active{work: w, path: path, reworkBudget: DefaultReworkBudget()}
 		return InProgressWork{a.onStage(entered)}, nil, true
 	case InProgressWork:
-		i, _ := path.indexOf(s.stage)
 		switch e := e.(type) {
 		case StageEntered:
-			if path.isLast(i) || e != s.entering(path.step(i+1).stage) {
+			next, done, err := s.next()
+			if err != nil || done || e != s.entering(next) {
 				return nil, nil, false
 			}
 			return InProgressWork{s.onStage(e)}, nil, true
 		case WorkCompleted:
-			if !path.isLast(i) {
+			if _, done, err := s.next(); err != nil || !done {
 				return nil, nil, false
 			}
 			return CompletedWork{work: w}, nil, true
+		case StressDecided:
+			choice := StressChoice{decision: e.Decision, reason: e.Reason, forcedBy: e.ForcedBy}
+			byReview := e.Owner.isZero() && s.stage == StressDecider()
+			byOwner := !e.Owner.isZero() && s.stressStillOpen()
+			if !choice.valid() || !(byReview || byOwner) {
+				return nil, nil, false
+			}
+			s.stress = decidedBy(e)
+			return InProgressWork{s.active}, nil, true
 		case WorkAbandoned:
 			return abandoned(w, e), nil, true
 		case FixerEntered:
@@ -435,7 +532,9 @@ func evolveWork(w work, path Path, state WorkState, e WorkEvent) (next WorkState
 			if e.Visit != entered.Visit {
 				return nil, nil, false
 			}
-			return InProgressWork{s.onStage(entered)}, &entered, true
+			back := s.onStage(entered)
+			back.stress = nil // the next review decides again
+			return InProgressWork{back}, &entered, true
 		case WorkAbandoned:
 			return abandoned(w, e), nil, true
 		}

@@ -38,6 +38,7 @@ func TestFixBugPath(t *testing.T) {
 		{domain.StageImplement, domain.GateAuto, 3},
 		{domain.StageReview, domain.GateAuto, 3},
 		{domain.StageIntegrationTesting, domain.GateAuto, 3},
+		{domain.StageStressTesting, domain.GateAuto, 3},
 	}, got)
 }
 
