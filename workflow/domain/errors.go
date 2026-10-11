@@ -30,6 +30,7 @@ var (
 	ErrPathOutsideRepository = errors.New("path is outside the repository")
 	ErrInvalidNFR            = errors.New("invalid non-functional requirement")
 	ErrInvalidMeasurement    = errors.New("invalid measurement")
+	ErrInvalidDesign         = errors.New("invalid design")
 )
 
 // Rejected commands.

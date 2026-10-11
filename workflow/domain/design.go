@@ -1,0 +1,479 @@
+package domain
+
+import (
+	"fmt"
+	"regexp"
+	"slices"
+	"strings"
+)
+
+// A design is the structured half of the design stage's output: the event
+// model and the domain model of one bounded context, its read models, the
+// slices the change adds or changes, and the contracts other teams see.
+// Parsing it is the boundary's job; the domain receives typed values and
+// says what is wrong with them (Design.Problems).
+
+// Invariant is a rule an aggregate always keeps, in prose.
+type Invariant struct{ text string }
+
+func NewInvariant(s string) (Invariant, error) {
+	t, ok := nonEmpty(s)
+	if !ok {
+		return Invariant{}, fmt.Errorf("invariant: %w", ErrInvalidDesign)
+	}
+	return Invariant{text: t}, nil
+}
+
+func (i Invariant) String() string { return i.text }
+
+// AggregateDesign is an aggregate: what it protects and the states it goes
+// through.
+type AggregateDesign struct {
+	name       string
+	invariants []Invariant
+	states     []string
+}
+
+func NewAggregateDesign(name string, invariants []Invariant, states []string) AggregateDesign {
+	return AggregateDesign{name: strings.TrimSpace(name), invariants: slices.Clone(invariants), states: trimAll(states)}
+}
+
+func (a AggregateDesign) Name() string            { return a.name }
+func (a AggregateDesign) Invariants() []Invariant { return slices.Clone(a.invariants) }
+func (a AggregateDesign) States() []string        { return slices.Clone(a.states) }
+
+// CommandDesign is a command an aggregate handles: the events it produces
+// when accepted and the rejections it may answer with.
+type CommandDesign struct {
+	name       string
+	aggregate  string
+	events     []string
+	rejections []string
+}
+
+func NewCommandDesign(name, aggregate string, events, rejections []string) CommandDesign {
+	return CommandDesign{name: strings.TrimSpace(name), aggregate: strings.TrimSpace(aggregate), events: trimAll(events), rejections: trimAll(rejections)}
+}
+
+func (c CommandDesign) Name() string         { return c.name }
+func (c CommandDesign) Aggregate() string    { return c.aggregate }
+func (c CommandDesign) Events() []string     { return slices.Clone(c.events) }
+func (c CommandDesign) Rejections() []string { return slices.Clone(c.rejections) }
+
+// Visibility says who sees an event: only its bounded context, or other
+// teams too, through a contract.
+type Visibility struct{ name string }
+
+var (
+	VisibilityInternal = Visibility{name: "internal"}
+	VisibilityExternal = Visibility{name: "external"}
+)
+
+func ParseVisibility(s string) (Visibility, error) {
+	for _, v := range []Visibility{VisibilityInternal, VisibilityExternal} {
+		if v.name == s {
+			return v, nil
+		}
+	}
+	return Visibility{}, fmt.Errorf("visibility %q (available: internal, external): %w", s, ErrInvalidDesign)
+}
+
+func (v Visibility) String() string { return v.name }
+func (v Visibility) isZero() bool   { return v.name == "" }
+
+// EventDesign is an event of an aggregate.
+type EventDesign struct {
+	name       string
+	aggregate  string
+	visibility Visibility
+}
+
+func NewEventDesign(name, aggregate string, visibility Visibility) (EventDesign, error) {
+	if err := requirePresent(required{"visibility", visibility}); err != nil {
+		return EventDesign{}, fmt.Errorf("event %s: %w", name, err)
+	}
+	return EventDesign{name: strings.TrimSpace(name), aggregate: strings.TrimSpace(aggregate), visibility: visibility}, nil
+}
+
+func (e EventDesign) Name() string           { return e.name }
+func (e EventDesign) Aggregate() string      { return e.aggregate }
+func (e EventDesign) Visibility() Visibility { return e.visibility }
+
+// ReadModelDesign is a read model and the events it is built from.
+type ReadModelDesign struct {
+	name string
+	from []string
+}
+
+func NewReadModelDesign(name string, from []string) ReadModelDesign {
+	return ReadModelDesign{name: strings.TrimSpace(name), from: trimAll(from)}
+}
+
+func (r ReadModelDesign) Name() string   { return r.name }
+func (r ReadModelDesign) From() []string { return slices.Clone(r.from) }
+
+// SliceKind is what a vertical slice does: handle a command, answer a query
+// from a read model, or react to an event.
+type SliceKind struct{ name string }
+
+var (
+	SliceCommand    = SliceKind{name: "command"}
+	SliceQuery      = SliceKind{name: "query"}
+	SliceAutomation = SliceKind{name: "automation"}
+)
+
+func ParseSliceKind(s string) (SliceKind, error) {
+	for _, k := range []SliceKind{SliceCommand, SliceQuery, SliceAutomation} {
+		if k.name == s {
+			return k, nil
+		}
+	}
+	return SliceKind{}, fmt.Errorf("slice kind %q (available: automation, command, query): %w", s, ErrInvalidDesign)
+}
+
+func (k SliceKind) String() string { return k.name }
+func (k SliceKind) isZero() bool   { return k.name == "" }
+
+// Change is what the design does to a slice.
+type Change struct{ name string }
+
+var (
+	ChangeAdded     = Change{name: "added"}
+	ChangeChanged   = Change{name: "changed"}
+	ChangeRemoved   = Change{name: "removed"}
+	ChangeUnchanged = Change{name: "unchanged"}
+)
+
+// Changes lists every change, in the order status counts them.
+func Changes() []Change { return []Change{ChangeAdded, ChangeChanged, ChangeRemoved, ChangeUnchanged} }
+
+func ParseChange(s string) (Change, error) {
+	for _, c := range Changes() {
+		if c.name == s {
+			return c, nil
+		}
+	}
+	return Change{}, fmt.Errorf("change %q (available: added, changed, removed, unchanged): %w", s, ErrInvalidDesign)
+}
+
+func (c Change) String() string { return c.name }
+func (c Change) isZero() bool   { return c.name == "" }
+
+// SliceValues are a slice's fields. Which references a slice needs depends
+// on its kind; the others stay empty.
+type SliceValues struct {
+	Name string
+	Kind SliceKind
+	// Command is the command a command slice handles, or the command an
+	// automation sends.
+	Command string
+	// ReadModel is the read model a query slice answers from.
+	ReadModel string
+	// On is the event an automation reacts to.
+	On string
+	// Publishes is the external event an automation publishes.
+	Publishes string
+	Change    Change
+}
+
+// SliceDesign is one vertical slice of the change.
+type SliceDesign struct{ v SliceValues }
+
+func NewSliceDesign(v SliceValues) (SliceDesign, error) {
+	if err := requirePresent(required{"slice kind", v.Kind}, required{"slice change", v.Change}); err != nil {
+		return SliceDesign{}, fmt.Errorf("slice %s: %w", v.Name, err)
+	}
+	v.Name, v.Command, v.ReadModel = strings.TrimSpace(v.Name), strings.TrimSpace(v.Command), strings.TrimSpace(v.ReadModel)
+	v.On, v.Publishes = strings.TrimSpace(v.On), strings.TrimSpace(v.Publishes)
+	return SliceDesign{v: v}, nil
+}
+
+func (s SliceDesign) Name() string        { return s.v.Name }
+func (s SliceDesign) Kind() SliceKind     { return s.v.Kind }
+func (s SliceDesign) Change() Change      { return s.v.Change }
+func (s SliceDesign) Values() SliceValues { return s.v }
+
+// NeedsSpecs reports whether specify must write specs for the slice: it
+// handles a command or reacts to an event, and the design adds or changes
+// it. Queries only read, and the owner reviews them with the design.
+func (s SliceDesign) NeedsSpecs() bool {
+	return (s.v.Kind == SliceCommand || s.v.Kind == SliceAutomation) && (s.v.Change == ChangeAdded || s.v.Change == ChangeChanged)
+}
+
+// CoveredBy reports whether a test is a spec of the slice: its name starts
+// with "Test" and the slice's name, e.g. TestPostTransaction_RejectsWhenFrozen.
+func (s SliceDesign) CoveredBy(test string) bool {
+	return s.v.Name != "" && strings.HasPrefix(test, "Test"+s.v.Name)
+}
+
+// ContractKind is how other teams reach the bounded context.
+type ContractKind struct{ name string }
+
+var (
+	ContractHTTP  = ContractKind{name: "http"}
+	ContractEvent = ContractKind{name: "event"}
+)
+
+func ParseContractKind(s string) (ContractKind, error) {
+	for _, k := range []ContractKind{ContractHTTP, ContractEvent} {
+		if k.name == s {
+			return k, nil
+		}
+	}
+	return ContractKind{}, fmt.Errorf("contract kind %q (available: event, http): %w", s, ErrInvalidDesign)
+}
+
+func (k ContractKind) String() string { return k.name }
+func (k ContractKind) isZero() bool   { return k.name == "" }
+
+// ContractDesign is what other teams see: an HTTP endpoint served by a
+// slice, or an external event and its schema.
+type ContractDesign struct {
+	kind   ContractKind
+	name   string
+	slice  string
+	schema string
+}
+
+func NewContractDesign(kind ContractKind, name, slice, schema string) (ContractDesign, error) {
+	if err := requirePresent(required{"contract kind", kind}); err != nil {
+		return ContractDesign{}, fmt.Errorf("contract %s: %w", name, err)
+	}
+	return ContractDesign{kind: kind, name: strings.TrimSpace(name), slice: strings.TrimSpace(slice), schema: strings.TrimSpace(schema)}, nil
+}
+
+func (c ContractDesign) Kind() ContractKind { return c.kind }
+func (c ContractDesign) Name() string       { return c.name }
+func (c ContractDesign) Slice() string      { return c.slice }
+func (c ContractDesign) Schema() string     { return c.schema }
+
+// DesignValues are a design's parts.
+type DesignValues struct {
+	BoundedContext string
+	Aggregates     []AggregateDesign
+	Commands       []CommandDesign
+	Events         []EventDesign
+	ReadModels     []ReadModelDesign
+	Slices         []SliceDesign
+	Contracts      []ContractDesign
+}
+
+// Design is the structured design of a change. Any value can be built;
+// Problems says whether it is a valid design.
+type Design struct{ v DesignValues }
+
+func NewDesign(v DesignValues) Design {
+	return Design{v: DesignValues{
+		BoundedContext: strings.TrimSpace(v.BoundedContext),
+		Aggregates:     slices.Clone(v.Aggregates), Commands: slices.Clone(v.Commands), Events: slices.Clone(v.Events),
+		ReadModels: slices.Clone(v.ReadModels), Slices: slices.Clone(v.Slices), Contracts: slices.Clone(v.Contracts),
+	}}
+}
+
+func (d Design) BoundedContext() string        { return d.v.BoundedContext }
+func (d Design) Aggregates() []AggregateDesign { return slices.Clone(d.v.Aggregates) }
+func (d Design) Commands() []CommandDesign     { return slices.Clone(d.v.Commands) }
+func (d Design) Events() []EventDesign         { return slices.Clone(d.v.Events) }
+func (d Design) ReadModels() []ReadModelDesign { return slices.Clone(d.v.ReadModels) }
+func (d Design) Slices() []SliceDesign         { return slices.Clone(d.v.Slices) }
+func (d Design) Contracts() []ContractDesign   { return slices.Clone(d.v.Contracts) }
+
+// SlicesNeedingSpecs are the slices specify must write specs for, in order.
+func (d Design) SlicesNeedingSpecs() []SliceDesign {
+	var need []SliceDesign
+	for _, s := range d.v.Slices {
+		if s.NeedsSpecs() {
+			need = append(need, s)
+		}
+	}
+	return need
+}
+
+// UncoveredSlices are the slices needing specs that none of the tests
+// covers, in order.
+func (d Design) UncoveredSlices(tests []string) []SliceDesign {
+	var uncovered []SliceDesign
+	for _, s := range d.SlicesNeedingSpecs() {
+		if !slices.ContainsFunc(tests, s.CoveredBy) {
+			uncovered = append(uncovered, s)
+		}
+	}
+	return uncovered
+}
+
+var pascalCase = regexp.MustCompile(`^[A-Z][A-Za-z0-9]*$`)
+
+// Problems lists what makes the design invalid, one sentence each, in a
+// stable order; none means it is valid.
+func (d Design) Problems() []string {
+	var p problems
+	v := d.v
+	if v.BoundedContext == "" {
+		p.add("the bounded context has no name")
+	}
+	aggregates := names(v.Aggregates, AggregateDesign.Name)
+	commands := names(v.Commands, CommandDesign.Name)
+	events := names(v.Events, EventDesign.Name)
+	readModels := names(v.ReadModels, ReadModelDesign.Name)
+	sliceNames := names(v.Slices, SliceDesign.Name)
+
+	p.uniqueNames("aggregate", aggregates, false)
+	p.uniqueNames("command", commands, true)
+	p.uniqueNames("event", events, true)
+	p.uniqueNames("read model", readModels, false)
+	p.uniqueNames("slice", sliceNames, true)
+	p.uniqueNames("contract", names(v.Contracts, ContractDesign.Name), false)
+
+	for _, a := range v.Aggregates {
+		if len(a.invariants) == 0 {
+			p.add("aggregate %s has no invariant", a.name)
+		}
+	}
+
+	for _, c := range v.Commands {
+		if !slices.Contains(aggregates, c.aggregate) {
+			p.add("command %s names aggregate %q, which the design doesn't have", c.name, c.aggregate)
+		}
+		if len(c.events) == 0 {
+			p.add("command %s produces no event", c.name)
+		}
+		for _, e := range c.events {
+			if !slices.Contains(events, e) {
+				p.add("command %s produces event %q, which the design doesn't have", c.name, e)
+			}
+		}
+		if slices.Contains(c.rejections, "") {
+			p.add("command %s has a rejection without a name", c.name)
+		}
+	}
+
+	for _, e := range v.Events {
+		if !slices.Contains(aggregates, e.aggregate) {
+			p.add("event %s names aggregate %q, which the design doesn't have", e.name, e.aggregate)
+		}
+		if !d.produces(e.name) && !d.consumedFromOutside(e.name) {
+			p.add("event %s is produced by no command and published or consumed by no automation", e.name)
+		}
+	}
+
+	for _, r := range v.ReadModels {
+		if len(r.from) == 0 {
+			p.add("read model %s is built from no event", r.name)
+		}
+		for _, e := range r.from {
+			if !slices.Contains(events, e) {
+				p.add("read model %s is built from event %q, which the design doesn't have", r.name, e)
+			}
+		}
+	}
+
+	for _, s := range v.Slices {
+		d.checkSlice(&p, s, commands, events, readModels)
+	}
+
+	for _, e := range v.Events {
+		if e.visibility == VisibilityExternal && !slices.ContainsFunc(v.Contracts, func(c ContractDesign) bool {
+			return c.kind == ContractEvent && c.name == e.name
+		}) {
+			p.add("external event %s has no event contract", e.name)
+		}
+	}
+	for _, c := range v.Contracts {
+		if c.kind == ContractHTTP && !slices.Contains(sliceNames, c.slice) {
+			p.add("http contract %q names slice %q, which the design doesn't have", c.name, c.slice)
+		}
+	}
+
+	if !slices.ContainsFunc(v.Slices, func(s SliceDesign) bool { return s.v.Change != ChangeUnchanged }) {
+		p.add("no slice is added, changed or removed")
+	}
+	return p.list
+}
+
+// checkSlice checks that a slice references what its kind needs.
+func (d Design) checkSlice(p *problems, s SliceDesign, commands, events, readModels []string) {
+	v := s.v
+	switch v.Kind {
+	case SliceCommand:
+		if !slices.Contains(commands, v.Command) {
+			p.add("command slice %s handles command %q, which the design doesn't have", v.Name, v.Command)
+		}
+	case SliceQuery:
+		if !slices.Contains(readModels, v.ReadModel) {
+			p.add("query slice %s reads read model %q, which the design doesn't have", v.Name, v.ReadModel)
+		}
+	case SliceAutomation:
+		if !slices.Contains(events, v.On) {
+			p.add("automation slice %s reacts to event %q, which the design doesn't have", v.Name, v.On)
+		}
+		switch {
+		case v.Command == "" && v.Publishes == "":
+			p.add("automation slice %s neither sends a command nor publishes an external event", v.Name)
+		case v.Command != "" && !slices.Contains(commands, v.Command):
+			p.add("automation slice %s sends command %q, which the design doesn't have", v.Name, v.Command)
+		}
+		if v.Publishes != "" && !slices.ContainsFunc(d.v.Events, func(e EventDesign) bool {
+			return e.name == v.Publishes && e.visibility == VisibilityExternal
+		}) {
+			p.add("automation slice %s publishes %q, which is not an external event of the design", v.Name, v.Publishes)
+		}
+	}
+}
+
+// produces reports whether a command produces the event, or an automation
+// publishes it.
+func (d Design) produces(event string) bool {
+	return slices.ContainsFunc(d.v.Commands, func(c CommandDesign) bool { return slices.Contains(c.events, event) }) ||
+		slices.ContainsFunc(d.v.Slices, func(s SliceDesign) bool { return s.v.Kind == SliceAutomation && s.v.Publishes == event })
+}
+
+// consumedFromOutside reports whether an automation reacts to the event:
+// then it may come from outside the bounded context.
+func (d Design) consumedFromOutside(event string) bool {
+	return slices.ContainsFunc(d.v.Slices, func(s SliceDesign) bool { return s.v.Kind == SliceAutomation && s.v.On == event })
+}
+
+// problems collects a design's problems in order.
+type problems struct{ list []string }
+
+func (p *problems) add(format string, args ...any) {
+	p.list = append(p.list, fmt.Sprintf(format, args...))
+}
+
+// uniqueNames reports empty, repeated and, when pascal is set, non
+// PascalCase names of one kind.
+func (p *problems) uniqueNames(kind string, names []string, pascal bool) {
+	seen := map[string]bool{}
+	for _, n := range names {
+		switch {
+		case n == "":
+			article := "a"
+			if strings.ContainsRune("aeiou", rune(kind[0])) {
+				article = "an"
+			}
+			p.add("%s %s has no name", article, kind)
+			continue
+		case seen[n]:
+			p.add("%s name %s is used more than once", kind, n)
+		case pascal && !pascalCase.MatchString(n):
+			p.add("%s name %q is not PascalCase", kind, n)
+		}
+		seen[n] = true
+	}
+}
+
+func names[T any](items []T, name func(T) string) []string {
+	out := make([]string, len(items))
+	for i, item := range items {
+		out[i] = name(item)
+	}
+	return out
+}
+
+func trimAll(values []string) []string {
+	out := make([]string, len(values))
+	for i, s := range values {
+		out[i] = strings.TrimSpace(s)
+	}
+	return out
+}
