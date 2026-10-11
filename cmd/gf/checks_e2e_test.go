@@ -149,5 +149,7 @@ func TestExitChecks_IntegrationFailsClosedWithoutConfiguration(t *testing.T) {
 	out := r.submitAsAgent("--passed")
 
 	assert.Contains(t, out, "✗ integration-passes: No integration command is configured. The owner adds one to .gofast/checks.json")
-	r.expect("integration-testing", progress.AssignmentOpen, 1, 3)
+	// A failed check other than artifact-written is a code failure in a
+	// stage that can't change code: it goes to the fixer, using no attempt.
+	r.expect("integration-testing", progress.AssignmentHandedToFixer, 0, 3)
 }

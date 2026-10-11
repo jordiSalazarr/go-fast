@@ -16,18 +16,19 @@ var errUnknownEvent = errors.New("unknown event type")
 
 // Stable event names. Never rename: they are stored in committed logs.
 const (
-	typeWorkStarted          = "WorkStarted"
-	typeStageEntered         = "StageEntered"
-	typeWorkCompleted        = "WorkCompleted"
-	typeWorkAbandoned        = "WorkAbandoned"
-	typeAssignmentOpened     = "AssignmentOpened"
-	typeAttemptFailed        = "AttemptFailed"
-	typeSubmittedForApproval = "SubmittedForApproval"
-	typeAssignmentRejected   = "AssignmentRejected"
-	typeAssignmentEscalated  = "AssignmentEscalated"
-	typeBudgetExtended       = "BudgetExtended"
-	typeAssignmentAccepted   = "AssignmentAccepted"
-	typeAssignmentCancelled  = "AssignmentCancelled"
+	typeWorkStarted             = "WorkStarted"
+	typeStageEntered            = "StageEntered"
+	typeWorkCompleted           = "WorkCompleted"
+	typeWorkAbandoned           = "WorkAbandoned"
+	typeAssignmentOpened        = "AssignmentOpened"
+	typeAttemptFailed           = "AttemptFailed"
+	typeSubmittedForApproval    = "SubmittedForApproval"
+	typeAssignmentRejected      = "AssignmentRejected"
+	typeAssignmentEscalated     = "AssignmentEscalated"
+	typeBudgetExtended          = "BudgetExtended"
+	typeAssignmentAccepted      = "AssignmentAccepted"
+	typeAssignmentCancelled     = "AssignmentCancelled"
+	typeAssignmentHandedToFixer = "AssignmentHandedToFixer"
 )
 
 type envelope struct {
@@ -131,6 +132,15 @@ type assignmentCancelledV1 struct {
 	Reason       string `json:"reason"`
 }
 
+type assignmentHandedToFixerV1 struct {
+	AssignmentID string `json:"assignmentId"`
+	WorkID       string `json:"workId"`
+	Stage        string `json:"stage"`
+	Visit        int    `json:"visit"`
+	Attempt      int    `json:"attempt"`
+	Reason       string `json:"reason"`
+}
+
 func encodeLine(r Recorded) ([]byte, error) {
 	eventType, stream, payload, err := encodeEvent(r.Event)
 	if err != nil {
@@ -229,6 +239,11 @@ func encodeEvent(e domain.Event) (eventType string, stream Stream, payload any, 
 		return typeAssignmentCancelled, AssignmentStream(e.AssignmentID), assignmentCancelledV1{
 			AssignmentID: e.AssignmentID.String(), Reason: e.Reason.String(),
 		}, nil
+	case domain.AssignmentHandedToFixer:
+		return typeAssignmentHandedToFixer, AssignmentStream(e.AssignmentID), assignmentHandedToFixerV1{
+			AssignmentID: e.AssignmentID.String(), WorkID: e.WorkID.String(), Stage: e.Stage.String(),
+			Visit: e.Visit.Int(), Attempt: e.Attempt.Int(), Reason: e.Reason.String(),
+		}, nil
 	}
 	return "", "", nil, fmt.Errorf("encode %T: %w", e, errUnknownEvent)
 }
@@ -307,6 +322,13 @@ func decodeEvent(eventType string, payload json.RawMessage) (domain.Event, Strea
 		var p assignmentCancelledV1
 		d.unmarshal(payload, &p)
 		event = domain.AssignmentCancelled{AssignmentID: d.assignmentID(p.AssignmentID), Reason: d.reason(p.Reason)}
+	case typeAssignmentHandedToFixer:
+		var p assignmentHandedToFixerV1
+		d.unmarshal(payload, &p)
+		event = domain.AssignmentHandedToFixer{
+			AssignmentID: d.assignmentID(p.AssignmentID), WorkID: d.workID(p.WorkID), Stage: d.stage(p.Stage),
+			Visit: d.visit(p.Visit), Attempt: d.attempt(p.Attempt), Reason: d.reason(p.Reason),
+		}
 	default:
 		return nil, "", fmt.Errorf("decode %q: %w", eventType, errUnknownEvent)
 	}

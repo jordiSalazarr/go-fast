@@ -194,6 +194,66 @@ func TestSubmitForAcceptance_PassedWithAFailingExitCheck_FailsTheAttempt(t *test
 	}))
 }
 
+var reviewAssignmentID = domain.AssignmentIDFor(workID, domain.StageReview, visit1)
+
+func openedOnReview() []domain.AssignmentEvent {
+	return []domain.AssignmentEvent{domain.AssignmentOpened{
+		AssignmentID: reviewAssignmentID, WorkID: workID, Stage: domain.StageReview,
+		Visit: visit1, Gate: domain.GateAuto, Budget: budget3,
+	}}
+}
+
+func handedToFixer(n int, why string) domain.AssignmentEvent {
+	return domain.AssignmentHandedToFixer{
+		AssignmentID: reviewAssignmentID, WorkID: workID, Stage: domain.StageReview, Visit: visit1,
+		Attempt: attempt(n), Reason: reasonOf(why),
+	}
+}
+
+func TestSubmitForAcceptance_CodeFailureOfAFailingCheck_HandsTheWorkToTheFixer(t *testing.T) {
+	given := history(openedOnReview(), events(failed(reviewAssignmentID, 1)))
+	open := stateIs[domain.Open](t, givenAssignment(t, given...))
+	results := passedChecks(open)
+	results[len(results)-1] = checkFailed(domain.CheckSuitePasses, "1 test failed (TestLogin)")
+
+	got, err := open.SubmitForAcceptance(domain.ClaimPassed(), noChanges, results)
+
+	thenEvents(t, got, err, handedToFixer(2, "suite-passes: 1 test failed (TestLogin)."))
+	handed := stateIs[domain.HandedToFixer](t, thenAssignmentState(t, given, got))
+	assert.Equal(t, attempts(1), handed.AttemptsUsed(), "a handover uses no attempt")
+	assert.Equal(t, attempt(2), handed.Attempt())
+}
+
+func TestSubmitForAcceptance_CodeFailureClaimedByTheAgent_HandsTheWorkToTheFixer(t *testing.T) {
+	open := stateIs[domain.Open](t, givenAssignment(t, openedOnReview()...))
+
+	got, err := open.SubmitForAcceptance(domain.ClaimFailed(reasonOf("the fix ignores negative ports")), noChanges, nil)
+
+	thenEvents(t, got, err, handedToFixer(1, "the fix ignores negative ports"))
+}
+
+func TestSubmitForAcceptance_CodeFailureOnTheLastAttempt_HandsOverWithoutEscalating(t *testing.T) {
+	given := history(openedOnReview(), events(failed(reviewAssignmentID, 1), failed(reviewAssignmentID, 2)))
+	open := stateIs[domain.Open](t, givenAssignment(t, given...))
+
+	got, err := open.SubmitForAcceptance(domain.ClaimFailed(reasonOf("blocking finding")), noChanges, nil)
+
+	thenEvents(t, got, err, handedToFixer(3, "blocking finding"))
+	stateIs[domain.HandedToFixer](t, thenAssignmentState(t, given, got))
+}
+
+func TestSubmitForAcceptance_StageWorkFailureOfAStageThatChecksCode_UsesAnAttempt(t *testing.T) {
+	open := stateIs[domain.Open](t, givenAssignment(t, openedOnReview()...))
+	results := passedChecks(open)
+	results[0] = checkFailed(domain.CheckArtifactWritten, ".gofast/works/w1/review-v1.md is missing")
+
+	got, err := open.SubmitForAcceptance(domain.ClaimPassed(), noChanges, results)
+
+	thenEvents(t, got, err, domain.AssignmentEvent(domain.AttemptFailed{
+		AssignmentID: reviewAssignmentID, Attempt: attempt(1), Reason: reasonOf("artifact-written: .gofast/works/w1/review-v1.md is missing."),
+	}))
+}
+
 func TestSubmitForAcceptance_PassedWithoutAllCheckResults_IsRejected(t *testing.T) {
 	open := stateIs[domain.Open](t, givenAssignment(t, openedOnAutoGate()...))
 
@@ -313,6 +373,14 @@ func TestRebuildAssignment_RejectsInconsistentHistory(t *testing.T) {
 		"event after acceptance":    history(openedOnAutoGate(), events(accepted, failed(autoAssignmentID, 1))),
 		"budget used, not escalated": history(openedOnAutoGate(), events(
 			failed(autoAssignmentID, 1), failed(autoAssignmentID, 2), failed(autoAssignmentID, 3))),
+		"handed over by a stage that changes code": history(openedOnAutoGate(), events(domain.AssignmentHandedToFixer{
+			AssignmentID: autoAssignmentID, WorkID: workID, Stage: domain.StageImplement, Visit: visit1, Attempt: attempt(1), Reason: reason,
+		})),
+		"handed over with the wrong attempt": history(openedOnReview(), events(handedToFixer(2, "x"))),
+		"handed over for another visit": history(openedOnReview(), events(domain.AssignmentHandedToFixer{
+			AssignmentID: reviewAssignmentID, WorkID: workID, Stage: domain.StageReview, Visit: must(domain.NewVisit(2)), Attempt: attempt(1), Reason: reason,
+		})),
+		"event after handover": history(openedOnReview(), events(handedToFixer(1, "x"), failed(reviewAssignmentID, 1))),
 	}
 	for name, h := range cases {
 		t.Run(name, func(t *testing.T) {

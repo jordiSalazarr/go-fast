@@ -46,6 +46,7 @@ func allEvents() []domain.Event {
 		domain.BudgetExtended{AssignmentID: assignmentID, Owner: owner, Additional: must(domain.NewAttemptBudget(2)), NewBudget: must(domain.NewAttemptBudget(5))},
 		domain.AssignmentAccepted{AssignmentID: assignmentID, WorkID: workID, Stage: domain.StageDiscovery, Visit: domain.FirstVisit()},
 		domain.AssignmentCancelled{AssignmentID: assignmentID, Reason: reason},
+		domain.AssignmentHandedToFixer{AssignmentID: assignmentID, WorkID: workID, Stage: domain.StageReview, Visit: domain.FirstVisit(), Attempt: must(domain.NewAttempt(2)), Reason: reason},
 	}
 }
 

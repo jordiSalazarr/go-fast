@@ -43,6 +43,16 @@ type Escalated struct{ assignment }
 // Accepted got its stage visit accepted.
 type Accepted struct{ assignment }
 
+// HandedToFixer failed because the code is wrong; the work went to the fixer.
+type HandedToFixer struct {
+	assignment
+	attempt Attempt
+	reason  Reason
+}
+
+func (a HandedToFixer) Attempt() Attempt { return a.attempt }
+func (a HandedToFixer) Reason() Reason   { return a.reason }
+
 // Cancelled was cancelled because its work was abandoned.
 type Cancelled struct {
 	assignment
@@ -55,6 +65,7 @@ func (Open) isAssignmentState()             {}
 func (AwaitingApproval) isAssignmentState() {}
 func (Escalated) isAssignmentState()        {}
 func (Accepted) isAssignmentState()         {}
+func (HandedToFixer) isAssignmentState()    {}
 func (Cancelled) isAssignmentState()        {}
 
 // OpenAssignment opens the assignment for one stage visit.
@@ -74,8 +85,9 @@ func OpenAssignment(work WorkID, stage Stage, visit Visit, gate Gate, budget Att
 // SubmitForAcceptance interprets the stage's exit: the agent's claim, the
 // files the stage visit changed checked against its write scope, and the
 // results of the exit checks the stage requires (needed only when the claim
-// is a pass). A failed exit uses an attempt; a passing one is accepted on an
-// auto gate and waits for the owner on a human gate.
+// is a pass). A failure of the stage's own work uses an attempt; a failure of
+// the code hands the work to the fixer instead, using none. A passing exit is
+// accepted on an auto gate and waits for the owner on a human gate.
 func (a Open) SubmitForAcceptance(claim AgentClaim, changed ChangedFiles, results []CheckResult) ([]AssignmentEvent, error) {
 	if err := requirePresent(required{"agent claim", claim}); err != nil {
 		return nil, fmt.Errorf("submit assignment %s for acceptance: %w", a.id, err)
@@ -85,8 +97,13 @@ func (a Open) SubmitForAcceptance(claim AgentClaim, changed ChangedFiles, result
 		return nil, fmt.Errorf("submit assignment %s for acceptance: %w", a.id, err)
 	}
 	attempt := a.attemptsUsed.currentAttempt()
+	failure, failed := ClassifyFailure(outcome)
 	switch {
-	case !outcome.Passed():
+	case failed && failure == CodeFailure:
+		return []AssignmentEvent{AssignmentHandedToFixer{
+			AssignmentID: a.id, WorkID: a.work, Stage: a.stage, Visit: a.visit, Attempt: attempt, Reason: outcome.Reason(),
+		}}, nil
+	case failed:
 		failed := AttemptFailed{AssignmentID: a.id, Attempt: attempt, Reason: outcome.Reason()}
 		return a.withEscalationIfExhausted(failed), nil
 	case a.gate == GateHuman:
@@ -209,6 +226,11 @@ func evolveAssignment(state AssignmentState, e AssignmentEvent) (AssignmentState
 				return nil, false
 			}
 			return Escalated{s.assignment}, true
+		case AssignmentHandedToFixer:
+			if e.Attempt != attempt || e.WorkID != s.work || e.Stage != s.stage || e.Visit != s.visit || !s.stage.ChecksCode() {
+				return nil, false
+			}
+			return HandedToFixer{assignment: s.assignment, attempt: e.Attempt, reason: e.Reason}, true
 		case AssignmentCancelled:
 			return Cancelled{assignment: s.assignment, reason: e.Reason}, true
 		}

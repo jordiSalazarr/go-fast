@@ -249,6 +249,9 @@ func describe(out io.Writer, submitted Submission) {
 				e.Attempt.Int(), stage, e.Attempt.Int(), open.Budget().Int(), e.Reason)
 		case domain.AssignmentEscalated:
 			fmt.Fprintf(out, "Escalated: budget exhausted on '%s'. The owner can run `gf extend <attempts>` or `gf abandon \"<reason>\"`.\n", stage)
+		case domain.AssignmentHandedToFixer:
+			fmt.Fprintf(out, "'%s' failed because the code is wrong, which this stage can't change: the work goes to the fixer (no attempt used): %s\n",
+				stage, e.Reason)
 		case domain.SubmittedForApproval:
 			fmt.Fprintf(out, "'%s' passed its exit checks and waits for the owner: `gf approve` or `gf reject \"<feedback>\"`.\n", stage)
 		case domain.AssignmentAccepted:

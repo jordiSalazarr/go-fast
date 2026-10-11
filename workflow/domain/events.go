@@ -94,34 +94,48 @@ type AssignmentAccepted struct {
 	Visit        Visit
 }
 
+// AssignmentHandedToFixer: the stage visit failed because the code is wrong,
+// which the stage can't fix, so the work goes to the fixer. It uses no
+// attempt.
+type AssignmentHandedToFixer struct {
+	AssignmentID AssignmentID
+	WorkID       WorkID
+	Stage        Stage
+	Visit        Visit
+	Attempt      Attempt
+	Reason       Reason
+}
+
 type AssignmentCancelled struct {
 	AssignmentID AssignmentID
 	Reason       Reason
 }
 
-func (WorkStarted) isEvent()          {}
-func (StageEntered) isEvent()         {}
-func (WorkCompleted) isEvent()        {}
-func (WorkAbandoned) isEvent()        {}
-func (AssignmentOpened) isEvent()     {}
-func (AttemptFailed) isEvent()        {}
-func (SubmittedForApproval) isEvent() {}
-func (AssignmentRejected) isEvent()   {}
-func (AssignmentEscalated) isEvent()  {}
-func (BudgetExtended) isEvent()       {}
-func (AssignmentAccepted) isEvent()   {}
-func (AssignmentCancelled) isEvent()  {}
+func (WorkStarted) isEvent()             {}
+func (StageEntered) isEvent()            {}
+func (WorkCompleted) isEvent()           {}
+func (WorkAbandoned) isEvent()           {}
+func (AssignmentOpened) isEvent()        {}
+func (AttemptFailed) isEvent()           {}
+func (SubmittedForApproval) isEvent()    {}
+func (AssignmentRejected) isEvent()      {}
+func (AssignmentEscalated) isEvent()     {}
+func (BudgetExtended) isEvent()          {}
+func (AssignmentAccepted) isEvent()      {}
+func (AssignmentCancelled) isEvent()     {}
+func (AssignmentHandedToFixer) isEvent() {}
 
 func (e WorkStarted) workID() WorkID   { return e.WorkID }
 func (e StageEntered) workID() WorkID  { return e.WorkID }
 func (e WorkCompleted) workID() WorkID { return e.WorkID }
 func (e WorkAbandoned) workID() WorkID { return e.WorkID }
 
-func (e AssignmentOpened) assignmentID() AssignmentID     { return e.AssignmentID }
-func (e AttemptFailed) assignmentID() AssignmentID        { return e.AssignmentID }
-func (e SubmittedForApproval) assignmentID() AssignmentID { return e.AssignmentID }
-func (e AssignmentRejected) assignmentID() AssignmentID   { return e.AssignmentID }
-func (e AssignmentEscalated) assignmentID() AssignmentID  { return e.AssignmentID }
-func (e BudgetExtended) assignmentID() AssignmentID       { return e.AssignmentID }
-func (e AssignmentAccepted) assignmentID() AssignmentID   { return e.AssignmentID }
-func (e AssignmentCancelled) assignmentID() AssignmentID  { return e.AssignmentID }
+func (e AssignmentOpened) assignmentID() AssignmentID        { return e.AssignmentID }
+func (e AttemptFailed) assignmentID() AssignmentID           { return e.AssignmentID }
+func (e SubmittedForApproval) assignmentID() AssignmentID    { return e.AssignmentID }
+func (e AssignmentRejected) assignmentID() AssignmentID      { return e.AssignmentID }
+func (e AssignmentEscalated) assignmentID() AssignmentID     { return e.AssignmentID }
+func (e BudgetExtended) assignmentID() AssignmentID          { return e.AssignmentID }
+func (e AssignmentAccepted) assignmentID() AssignmentID      { return e.AssignmentID }
+func (e AssignmentCancelled) assignmentID() AssignmentID     { return e.AssignmentID }
+func (e AssignmentHandedToFixer) assignmentID() AssignmentID { return e.AssignmentID }

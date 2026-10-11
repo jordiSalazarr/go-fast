@@ -85,6 +85,7 @@ const (
 	AssignmentOpen             = "open"
 	AssignmentAwaitingApproval = "awaiting-approval"
 	AssignmentEscalated        = "escalated"
+	AssignmentHandedToFixer    = "handed-to-fixer"
 )
 
 type CurrentView struct {
@@ -105,6 +106,8 @@ type CurrentView struct {
 const (
 	ProblemFailedCheck = "failed-check"
 	ProblemRejection   = "rejection"
+	// ProblemCodeFailure: the stage failed on the code and was handed to the fixer.
+	ProblemCodeFailure = "code-failure"
 )
 
 type ProblemView struct {
@@ -251,6 +254,8 @@ func describeAssignment(state domain.AssignmentState) (string, int, int) {
 		return AssignmentAwaitingApproval, s.AttemptsUsed().Int(), s.Budget().Int()
 	case domain.Escalated:
 		return AssignmentEscalated, s.AttemptsUsed().Int(), s.Budget().Int()
+	case domain.HandedToFixer:
+		return AssignmentHandedToFixer, s.AttemptsUsed().Int(), s.Budget().Int()
 	case domain.Accepted:
 		return "accepted", s.AttemptsUsed().Int(), s.Budget().Int()
 	case domain.Cancelled:
@@ -267,6 +272,8 @@ func lastProblem(records []eventlog.Recorded) *ProblemView {
 			last = &ProblemView{Kind: ProblemFailedCheck, Attempt: e.Attempt.Int(), Text: e.Reason.String()}
 		case domain.AssignmentRejected:
 			last = &ProblemView{Kind: ProblemRejection, Attempt: e.Attempt.Int(), Text: e.Feedback.String()}
+		case domain.AssignmentHandedToFixer:
+			last = &ProblemView{Kind: ProblemCodeFailure, Attempt: e.Attempt.Int(), Text: e.Reason.String()}
 		}
 	}
 	return last
