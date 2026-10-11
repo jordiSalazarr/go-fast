@@ -25,6 +25,7 @@ func friendly(err error, cmd *cobra.Command, ran bool) string {
 		conflict  *domain.ConflictingActiveWorkError
 		malformed *eventlog.MalformedLogError
 		config    *exitchecks.ConfigError
+		nfrs      *exitchecks.NFRsError
 		route     *domain.InvalidRouteError
 		noRoute   *domain.RouteMissingError
 	)
@@ -93,6 +94,8 @@ func friendly(err error, cmd *cobra.Command, ran bool) string {
 		return fmt.Sprintf("The event log .gofast/events.jsonl is damaged at line %d. Restore it from git. %s", malformed.Line, seeLog)
 	case errors.As(err, &config):
 		return fmt.Sprintf("The exit-check configuration %s is invalid: %s. The owner fixes it; `gf checks` shows the result.", exitchecks.ConfigPath, config.Problem)
+	case errors.As(err, &nfrs):
+		return fmt.Sprintf("The NFRs %s are invalid: %s. The owner fixes them; `gf checks` shows the result.", exitchecks.NFRsPath, nfrs.Problem)
 	case errors.Is(err, eventlog.ErrVersionConflict):
 		return "The workflow changed while this command ran. Run it again."
 	case errors.Is(err, domain.ErrInconsistentHistory):

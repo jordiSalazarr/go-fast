@@ -51,6 +51,34 @@ func TestChecks_WarnsWhileTheConfigurationIsUncommitted(t *testing.T) {
 	assert.True(t, strings.HasPrefix(r.gf("checks"), warning), "modified")
 }
 
+func TestChecks_ShowsTheNFRsAndWarnsWhileTheyAreUncommitted(t *testing.T) {
+	r := newRepo(t)
+	r.git("add", "-A")
+	r.git("commit", "-q", "-m", "initial")
+	assert.Contains(t, r.gf("checks"), "NFRs: none (.gofast/nfrs.json does not exist or lists none): stress testing is never mandatory.")
+
+	r.write(".gofast/nfrs.json", `{"nfrs": [{"id": "wallet-transaction-latency", "description": "Posting a transaction stays fast",
+		"areas": ["internal/wallet/**", "internal/ledger/**"], "operation": "POST /wallets/{id}/transactions",
+		"load": {"vus": 50, "duration": "60s"}, "targets": {"p95": "150ms", "minRps": 200}}]}`)
+	out := r.gf("checks")
+	assert.True(t, strings.HasPrefix(out, "Warning: nfrs.json has uncommitted changes. Commit it before starting work; changing it during a stage fails that attempt's scope check.\n\n"), out)
+	assert.Contains(t, out, "NFRs (.gofast/nfrs.json): stress testing is mandatory when a change touches an NFR's areas.\n"+
+		"  wallet-transaction-latency\n"+
+		"    Posting a transaction stays fast\n"+
+		"    areas      internal/wallet/**, internal/ledger/**\n"+
+		"    operation  POST /wallets/{id}/transactions\n"+
+		"    load       50 vus for 1m0s\n"+
+		"    targets    p95 ≤ 150ms, rps ≥ 200\n")
+
+	r.git("add", "-A")
+	r.git("commit", "-q", "-m", "nfrs")
+	assert.NotContains(t, r.gf("checks"), "Warning")
+
+	r.write(".gofast/nfrs.json", `{"nfrs": [{"id": "x", "areas": ["a/**"], "operation": "GET /a", "load": {"vus": 1, "duration": "1s"}, "targets": {}, "owner": "me"}]}`)
+	res := r.gfFails(nil, "checks")
+	assert.True(t, strings.HasPrefix(res.stderr, "The NFRs .gofast/nfrs.json are invalid: not valid JSON for gf: json: unknown field \"owner\". The owner fixes them; `gf checks` shows the result."), res.stderr)
+}
+
 // A fix-bug run where gf, not the agent, decides whether each stage passes.
 func TestExitChecks_FixBugRun_EndToEnd(t *testing.T) {
 	r := newRepo(t)

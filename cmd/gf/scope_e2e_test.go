@@ -98,6 +98,25 @@ func TestScope_ImplementWritingIntoGofast_FailsTheAttempt(t *testing.T) {
 	r.expect("implement", progress.AssignmentOpen, 1, 3)
 }
 
+// However an agent changes the NFRs (here, as Bash would, behind the guard's
+// back), gf submit finds the change outside the write scope.
+func TestScope_ChangingTheNFRs_FailsTheAttempt(t *testing.T) {
+	r := newRepo(t)
+	r.write(".gofast/nfrs.json", `{"nfrs": [{"id": "port", "areas": ["server/**"], "operation": "GET /", "load": {"vus": 1, "duration": "1s"}, "targets": {"p95": "10ms"}}]}`)
+	r.onSpecify()
+	r.workOnStage()
+	r.submitAsAgent("--passed")
+	r.gf("approve")
+	r.expect("implement", progress.AssignmentOpen, 0, 3)
+
+	r.workOnStage()
+	r.write(".gofast/nfrs.json", `{"nfrs": [{"id": "port", "areas": ["server/**"], "operation": "GET /", "load": {"vus": 1, "duration": "1s"}, "targets": {"p95": "10s"}}]}`)
+	out := r.submitAsAgent("--passed")
+
+	assert.Contains(t, out, "Changed files outside the 'implement' write scope: .gofast/nfrs.json.")
+	r.expect("implement", progress.AssignmentOpen, 1, 3)
+}
+
 func TestScope_WithoutBaseline_TheCheckStartsNow(t *testing.T) {
 	r := newRepo(t)
 	r.onSpecify()

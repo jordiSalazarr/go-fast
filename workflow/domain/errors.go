@@ -27,6 +27,8 @@ var (
 	ErrInvalidBranch         = errors.New("branch name must not be empty or contain whitespace")
 	ErrInvalidRepoPath       = errors.New("invalid repository path")
 	ErrPathOutsideRepository = errors.New("path is outside the repository")
+	ErrInvalidNFR            = errors.New("invalid non-functional requirement")
+	ErrInvalidMeasurement    = errors.New("invalid measurement")
 )
 
 // Rejected commands.

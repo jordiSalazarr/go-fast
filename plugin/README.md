@@ -46,6 +46,33 @@ that attempt's scope check.** While it has uncommitted changes, `gf checks`
 warns: "checks.json has uncommitted changes. Commit it before starting work;
 changing it during a stage fails that attempt's scope check."
 
+Describe how the service must behave under load in `.gofast/nfrs.json`, the
+repository's **non-functional requirements** (NFRs). Without it there are
+none:
+
+```json
+{
+  "nfrs": [
+    {
+      "id": "wallet-transaction-latency",
+      "description": "Posting a transaction to a wallet stays fast under concurrent load",
+      "areas": ["internal/wallet/**", "internal/ledger/**"],
+      "operation": "POST /wallets/{id}/transactions",
+      "load": { "vus": 50, "duration": "60s" },
+      "targets": { "p95": "150ms", "p99": "400ms", "maxErrorRate": 0.001, "minRps": 200 }
+    }
+  ]
+}
+```
+
+`areas` are globs over repository paths (`**` spans directories); a change
+there can affect the NFR. `operation` is the HTTP request it is about
+(`{name}` segments stand for any value). Each target is optional, but set at
+least one. Unknown fields are refused. The NFRs are yours: agents read them,
+but no stage may write them, so an agent can't lower a target. Commit
+nfrs.json before starting work too; `gf checks` lists the NFRs and warns
+while the file has uncommitted changes.
+
 ## Recommended permission rules
 
 The guard hook parses Bash commands on a best-effort basis. Add deny rules as

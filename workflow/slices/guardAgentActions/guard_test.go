@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/jordiSalazarr/go-fast/workflow/claudehooks"
 	"github.com/jordiSalazarr/go-fast/workflow/domain"
@@ -253,6 +254,22 @@ func TestRule4_TheCheckConfigurationIsTheOwners_OnEveryStage(t *testing.T) {
 
 		assert.Equal(t, "deny", out.HookSpecificOutput.PermissionDecision, stage.String())
 	}
+}
+
+// The NFRs are the owner's: no stage agent may change their targets, not even
+// the stress-testing agent, whose scripts live in its artifact directory.
+func TestRule4_TheNFRsAreTheOwners_OnEveryStage(t *testing.T) {
+	for _, stage := range domain.Stages() {
+		for _, path := range []string{"/repo/.gofast/nfrs.json", ".gofast/nfrs.json"} {
+			out := decide(write("gofast:"+stage.String(), path), on(stage), false, root)
+
+			require.NotNil(t, out.HookSpecificOutput, "%s %s", stage, path)
+			assert.Equal(t, "deny", out.HookSpecificOutput.PermissionDecision, "%s %s", stage, path)
+		}
+	}
+	out := decide(write("", "/repo/.gofast/nfrs.json"), on(domain.StageImplement), true, root)
+	require.NotNil(t, out.HookSpecificOutput, "the main session while it drives")
+	assert.Equal(t, "deny", out.HookSpecificOutput.PermissionDecision)
 }
 
 func TestRule4_RelativePathsResolveAgainstCwd(t *testing.T) {
