@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -256,4 +258,353 @@ func TestStatus_OnSpecify_ShowsTheAcceptedDesign_AndTheSlicesNeedingSpecs(t *tes
 	out := r.gf("status")
 	assert.Contains(t, out, "Design (visit 1): "+dir+"design-v1.md, "+dir+"design-v1.json\n  1 aggregates, 1 commands, slices: 3 added\n")
 	assert.Contains(t, out, "Slices needing specs (a new Test<SliceName>… test each): PostTransaction, PublishWalletDebited\n")
+}
+
+// The wallet's posting code: what the design's slices are about. Specify
+// can only write tests, so the stub exists before the work starts.
+const (
+	postingStub = `package server
+
+import "errors"
+
+// ErrInsufficientFunds rejects a debit larger than the balance.
+var ErrInsufficientFunds = errors.New("insufficient funds")
+
+// PostTransaction applies a transaction to a wallet's balance.
+func PostTransaction(balance, amount int) (int, error) { return balance, nil }
+
+// PublishWalletDebited reports whether posting amount publishes WalletDebited.
+func PublishWalletDebited(amount int) bool { return false }
+`
+	// postingV1 applies transactions and publishes debits, but lets the
+	// balance go below zero.
+	postingV1 = `package server
+
+import "errors"
+
+// ErrInsufficientFunds rejects a debit larger than the balance.
+var ErrInsufficientFunds = errors.New("insufficient funds")
+
+// PostTransaction applies a transaction to a wallet's balance.
+func PostTransaction(balance, amount int) (int, error) { return balance + amount, nil }
+
+// PublishWalletDebited reports whether posting amount publishes WalletDebited.
+func PublishWalletDebited(amount int) bool { return amount < 0 }
+`
+	// postingV2 also keeps the balance from going below zero.
+	postingV2 = `package server
+
+import "errors"
+
+// ErrInsufficientFunds rejects a debit larger than the balance.
+var ErrInsufficientFunds = errors.New("insufficient funds")
+
+// PostTransaction applies a transaction to a wallet's balance.
+func PostTransaction(balance, amount int) (int, error) {
+	if balance+amount < 0 {
+		return balance, ErrInsufficientFunds
+	}
+	return balance + amount, nil
+}
+
+// PublishWalletDebited reports whether posting amount publishes WalletDebited.
+func PublishWalletDebited(amount int) bool { return amount < 0 }
+`
+	postSpec = `package server
+
+import "testing"
+
+func TestPostTransaction_AppliesTheAmount(t *testing.T) {
+	if got, err := PostTransaction(10, 5); err != nil || got != 15 {
+		t.Fatalf("PostTransaction(10, 5) = %d, %v; want 15, nil", got, err)
+	}
+}
+`
+	publishSpec = `package server
+
+import "testing"
+
+func TestPublishWalletDebited_OnADebit(t *testing.T) {
+	if !PublishWalletDebited(-5) {
+		t.Fatal("a debit publishes WalletDebited")
+	}
+}
+`
+	overdraftSpec = `package server
+
+import (
+	"errors"
+	"testing"
+)
+
+func TestPostTransaction_RejectsAnOverdraft(t *testing.T) {
+	if _, err := PostTransaction(10, -20); !errors.Is(err, ErrInsufficientFunds) {
+		t.Fatalf("err = %v, want ErrInsufficientFunds", err)
+	}
+}
+`
+	publishNotOnDepositSpec = `package server
+
+import "testing"
+
+func TestPublishWalletDebited_NotOnADeposit(t *testing.T) {
+	if PublishWalletDebited(5) {
+		t.Fatal("a deposit publishes nothing")
+	}
+}
+`
+	// overdraftIntegration is run only by the integration command.
+	overdraftIntegration = "//go:build integration\n\n" + `package server
+
+import (
+	"errors"
+	"testing"
+)
+
+func TestWallet_IntegrationNeverGoesBelowZero(t *testing.T) {
+	if _, err := PostTransaction(10, -20); !errors.Is(err, ErrInsufficientFunds) {
+		t.Fatalf("err = %v, want ErrInsufficientFunds", err)
+	}
+}
+`
+)
+
+// newDesignRepo is newRepo's module with the wallet's posting stub and an
+// integration command that runs the unit tests.
+func newDesignRepo(t *testing.T) *repo {
+	t.Helper()
+	r := newRepo(t)
+	r.write("server/posting.go", postingStub)
+	r.configureChecks()
+	return r
+}
+
+// specifyPasses writes specs and passes specify, waiting for approval.
+func (r *repo) specifyPasses(specs map[string]string) string {
+	r.t.Helper()
+	for name, src := range specs {
+		r.write(name, src)
+	}
+	r.writeArtifact("Specs for the design's slices.")
+	out := r.submitAsAgent("--passed")
+	r.expect("specify", progress.AssignmentAwaitingApproval, r.status().Current.AttemptsUsed, 3)
+	return out
+}
+
+// 1. New feature: design's first structured design is invalid, specify
+// first misses a slice, and the work completes without stress testing.
+func TestNewFeature_EndToEnd(t *testing.T) {
+	r := newDesignRepo(t)
+	v := r.toDesign("new-feature")
+	assert.Equal(t, []string{"discovery", "design", "specify", "implement", "review", "integration-testing", "stress-testing"},
+		stagesOf(v.Work.Stages))
+	assert.Equal(t, "human", v.Current.Gate)
+	assert.Equal(t, []string{"artifact-written", "design-valid", "nfr-proposals-valid"}, v.Current.Checks)
+
+	// Design writes artifacts only.
+	r.write("server/posting.go", postingV1)
+	r.writeArtifact("Wallets.")
+	r.write(r.designFile(), walletDesignJSON(t))
+	out := r.submitAsAgent("--passed")
+	assert.Contains(t, out, "Changed files outside the 'design' write scope: server/posting.go.")
+	r.write("server/posting.go", postingStub)
+
+	// An invalid structured design fails design-valid, using an attempt.
+	r.write(r.designFile(), `{"boundedContext": "wallets", "aggregates": [`)
+	out = r.submitAsAgent("--passed")
+	assert.Contains(t, out, "✗ design-valid: "+r.designFile()+" has 1 problem: not valid JSON for gf")
+	r.expect("design", progress.AssignmentOpen, 2, 3)
+
+	r.designAwaitsApproval("")
+	assert.Nil(t, r.status().Work.NFRProposals)
+	r.gf("approve")
+
+	// Specify must cover both added command and automation slices.
+	v = r.expect("specify", progress.AssignmentOpen, 0, 3)
+	assert.Equal(t, []string{"PostTransaction", "PublishWalletDebited"}, v.Current.SlicesNeedingSpecs)
+	r.write("server/posting_test.go", postSpec)
+	r.writeArtifact("PostTransaction only.")
+	out = r.submitAsAgent("--passed")
+	assert.Contains(t, out, "✗ specs-cover-slices: no spec written in this stage covers 1 slice: PublishWalletDebited (TestPublishWalletDebited…)")
+	r.expect("specify", progress.AssignmentOpen, 1, 3)
+	out = r.specifyPasses(map[string]string{"server/publish_test.go": publishSpec})
+	assert.Contains(t, out, "✓ specs-fail\n✓ specs-cover-slices\n")
+	r.gf("approve")
+
+	r.expect("implement", progress.AssignmentOpen, 0, 3)
+	r.write("server/posting.go", postingV1)
+	r.writeArtifact("PostTransaction and PublishWalletDebited.")
+	assert.Contains(t, r.submitAsAgent("--passed"), "'implement' accepted.")
+
+	for _, stage := range []string{"review", "integration-testing"} {
+		r.expect(stage, progress.AssignmentOpen, 0, 3)
+		r.workOnStage()
+		r.submitAsAgent(r.passed()...)
+	}
+	assert.Nil(t, r.status().Work, "work completed")
+	_, err := os.Stat(filepath.Join(r.dir, ".gofast", "nfrs.json"))
+	assert.ErrorIs(t, err, os.ErrNotExist, "no NFRs touched")
+
+	types := r.eventTypes()
+	assert.Equal(t, "WorkCompleted", types[len(types)-1])
+	assert.Equal(t, 0, count(types, "FixerEntered"))
+}
+
+// 2. Modify behaviour: discovery must state both behaviours; design
+// proposes an NFR the owner adopts, which then makes stress testing
+// mandatory.
+func TestModifyBehaviour_EndToEnd_AnAdoptedNFRForcesStressTesting(t *testing.T) {
+	withFakeK6(t)
+	r := newDesignRepo(t)
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	addr := l.Addr().String()
+	require.NoError(t, l.Close())
+	r.write("server/wallet.go", fmt.Sprintf(walletServer, fastWallet))
+	r.write("cmd/walletd/main.go", walletMain)
+	r.write(".gofast/checks.json", fmt.Sprintf(`{"integration": {"command": ["go", "test", "./..."]}, "timeout": "2m",
+		"stress": {"start": ["go", "run", "./cmd/walletd", "-addr", %q], "ready": "http://%s/healthz", "baseUrl": "http://%s", "startTimeout": "60s", "timeout": "2m"}}`,
+		addr, addr, addr))
+	r.git("add", "-A")
+	r.git("commit", "-q", "-m", "initial")
+
+	// Discovery must state the current and the expected behaviour.
+	r.gf("start", "--type", "modify-behaviour", "A wallet applies debits")
+	v := r.expect("discovery", progress.AssignmentOpen, 0, 3)
+	assert.Equal(t, []string{"artifact-written", "behaviour-delta"}, v.Current.Checks)
+	r.write(v.Current.Artifact, "# discovery\n\n## Current behaviour\n\nPosting ignores the amount.\n")
+	out := r.submitAsAgent("--passed")
+	assert.Contains(t, out, "✗ behaviour-delta: "+v.Current.Artifact+": no '## Expected behaviour' section")
+	r.expect("discovery", progress.AssignmentOpen, 1, 3)
+	r.write(v.Current.Artifact, "# discovery\n\n## Current behaviour\n\nPosting ignores the amount.\n\n## Expected behaviour\n\nPosting applies it, and a debit publishes WalletDebited.\n")
+	assert.Contains(t, r.submitAsAgent("--passed"), "✓ behaviour-delta")
+	r.gf("approve")
+
+	// Design changes the slices and proposes an NFR on posting.
+	r.expect("design", progress.AssignmentOpen, 0, 3)
+	r.writeArtifact("Wallets, changed.\n\n## Decisions for the owner\n\nNone.")
+	r.write(r.designFile(), strings.ReplaceAll(walletDesignJSON(t), `"change": "added"`, `"change": "changed"`))
+	proposal := `{"nfrs": [{"id": "wallet-latency", "areas": ["server/**"], "operation": "POST /wallets/{id}/transactions",
+  "load": {"vus": 2, "duration": "1s"}, "targets": {"p95": "40ms", "maxErrorRate": 0}}]}`
+	r.write(r.proposalsFile(), proposal)
+	assert.Contains(t, r.submitAsAgent("--passed"), "✓ nfr-proposals-valid")
+	v = r.expect("design", progress.AssignmentAwaitingApproval, 0, 3)
+	require.NotNil(t, v.Work.NFRProposals)
+	assert.Equal(t, []string{"wallet-latency"}, v.Work.NFRProposals.Added)
+
+	// The owner adopts the NFR, commits it, and approves.
+	assert.Contains(t, r.gf("nfrs", "adopt", "--yes"), "Adopted 1 NFR change into .gofast/nfrs.json.")
+	r.git("add", ".gofast/nfrs.json")
+	r.git("commit", "-q", "-m", "Adopt the design's NFRs")
+	assert.NotContains(t, r.gf("checks"), "nfrs.json has uncommitted changes")
+	r.gf("approve")
+
+	r.expect("specify", progress.AssignmentOpen, 0, 3)
+	r.specifyPasses(map[string]string{"server/posting_test.go": postSpec, "server/publish_test.go": publishSpec})
+	r.gf("approve")
+	r.expect("implement", progress.AssignmentOpen, 0, 3)
+	r.write("server/posting.go", postingV1)
+	r.writeArtifact("Posting applies the amount.")
+	r.submitAsAgent("--passed")
+
+	// The change touches the adopted NFR's areas: review can't skip stress.
+	v = r.expect("review", progress.AssignmentOpen, 0, 3)
+	require.Len(t, v.Current.Stress.Mandatory, 1)
+	assert.Equal(t, "wallet-latency", v.Current.Stress.Mandatory[0].ID)
+	r.workOnStage()
+	res := r.runWithoutTerminal(asAgent, "submit", "--passed", "--stress", "skip", skipStress)
+	require.Equal(t, 1, res.code)
+	assert.Contains(t, res.stderr, "Stress testing is mandatory: the change touches the areas of wallet-latency (server/**).")
+	assert.Contains(t, r.submitAsAgent("--passed", "--stress", "include", includeStress), "(mandatory: wallet-latency)")
+
+	r.expect("integration-testing", progress.AssignmentOpen, 0, 3)
+	r.workOnStage()
+	r.submitAsAgent("--passed")
+	r.expect("stress-testing", progress.AssignmentOpen, 0, 3)
+	r.workOnStage()
+	r.writeScript(walletScript)
+	assert.Contains(t, r.submitAsAgent("--passed"), "✓ nfrs-met\n'stress-testing' accepted.")
+	assert.Nil(t, r.status().Work, "work completed")
+	assert.NotContains(t, strings.Join(r.eventTypes(), " "), "NFR", "adopting records nothing")
+}
+
+// 3. Integration fails because the model missed an invariant: the fixer
+// sends the work back to design, whose second visit the owner approves,
+// and specify then covers the new design.
+func TestNewFeature_TheModelMissesAnInvariant_TheFixerSendsItToDesign(t *testing.T) {
+	r := newDesignRepo(t)
+	r.write("server/posting_integration_test.go", overdraftIntegration)
+	r.write(".gofast/checks.json", `{"integration": {"command": ["go", "test", "-tags=integration", "./..."]}, "timeout": "2m"}`)
+	r.toDesign("new-feature")
+	workID := r.status().Work.ID
+
+	// Design v1 misses "balance never goes below zero".
+	r.writeArtifact("Wallets.")
+	r.write(r.designFile(), strings.Replace(walletDesignJSON(t), `"balance never goes below zero", `, "", 1))
+	r.submitAsAgent("--passed")
+	r.gf("approve")
+	r.specifyPasses(map[string]string{"server/posting_test.go": postSpec, "server/publish_test.go": publishSpec})
+	r.gf("approve")
+	r.write("server/posting.go", postingV1)
+	r.writeArtifact("Posting.")
+	r.submitAsAgent("--passed")
+	r.expect("review", progress.AssignmentOpen, 0, 3)
+	r.workOnStage()
+	r.submitAsAgent(reviewPass...)
+
+	// Integration finds an overdraft: the fixer may route to design.
+	r.expect("integration-testing", progress.AssignmentOpen, 0, 3)
+	r.workOnStage()
+	assert.Contains(t, r.submitAsAgent("--passed"), "the work goes to the fixer")
+	v := r.expect("fixer", progress.AssignmentOpen, 0, 3)
+	assert.Equal(t, []string{"design", "specify", "implement"}, v.Current.Fixer.Targets)
+	r.writeArtifact("Root cause: the Wallet aggregate has no invariant keeping the balance at or above zero, so nothing rejects an overdraft.")
+	out := r.submitAsAgent("--passed", "--route", "design", "the model misses an invariant")
+	assert.Contains(t, out, "'fixer' accepted: the work returns to 'design' (the model misses an invariant).")
+
+	// Design's second visit, on its human gate.
+	v = r.expect("design", progress.AssignmentOpen, 0, 3)
+	assert.Equal(t, 2, v.Current.Visit)
+	assert.Equal(t, "human", v.Current.Gate)
+	assert.Equal(t, ".gofast/works/"+workID+"/fixer-v1.md", v.Current.ReworkOf.FixerArtifact)
+	assert.Equal(t, 1, v.Work.Design.Visit, "the accepted design is still v1")
+	assert.Equal(t, ".gofast/works/"+workID+"/design-v2.json", r.designFile())
+	r.designAwaitsApproval("")
+	r.gf("approve")
+
+	// Specify's second visit covers design v2's slices with new specs.
+	v = r.expect("specify", progress.AssignmentOpen, 0, 3)
+	assert.Equal(t, 2, v.Current.Visit)
+	assert.Equal(t, 2, v.Work.Design.Visit)
+	r.write("server/overdraft_test.go", overdraftSpec)
+	r.writeArtifact("The overdraft.")
+	out = r.submitAsAgent("--passed")
+	assert.Contains(t, out, "✗ specs-cover-slices: no spec written in this stage covers 1 slice: PublishWalletDebited")
+	out = r.specifyPasses(map[string]string{"server/publish_deposit_test.go": publishNotOnDepositSpec})
+	assert.Contains(t, out, "✓ specs-fail\n✓ specs-cover-slices\n")
+	r.gf("approve")
+
+	r.expect("implement", progress.AssignmentOpen, 0, 3)
+	r.write("server/posting.go", postingV2)
+	r.writeArtifact("Posting rejects overdrafts.")
+	assert.Contains(t, r.submitAsAgent("--passed"), "'implement' accepted.")
+	for _, stage := range []string{"review", "integration-testing"} {
+		v = r.expect(stage, progress.AssignmentOpen, 0, 3)
+		assert.Equal(t, 2, v.Current.Visit)
+		r.workOnStage()
+		r.submitAsAgent(r.passed()...)
+	}
+	assert.Nil(t, r.status().Work, "work completed")
+
+	types := r.eventTypes()
+	assert.Equal(t, 1, count(types, "ReworkStarted"))
+	assert.Equal(t, "WorkCompleted", types[len(types)-1])
+}
+
+func stagesOf(stages []progress.StageView) []string {
+	var names []string
+	for _, s := range stages {
+		names = append(names, s.Stage)
+	}
+	return names
 }
