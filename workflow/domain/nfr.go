@@ -368,3 +368,74 @@ func (r NFRResult) Summary() string {
 	}
 	return r.nfr.value + ": " + strings.Join(r.missed, ", ")
 }
+
+// Equal reports whether two NFRs are the same in every field.
+func (n NFR) Equal(o NFR) bool {
+	return n.id == o.id && n.description == o.description && slices.Equal(n.areas, o.areas) &&
+		n.operation == o.operation && n.load == o.load && n.targets.equal(o.targets)
+}
+
+func (t Targets) equal(o Targets) bool {
+	sameDuration := func(a, b *time.Duration) bool { return (a == nil) == (b == nil) && (a == nil || *a == *b) }
+	sameFloat := func(a, b *float64) bool { return (a == nil) == (b == nil) && (a == nil || *a == *b) }
+	return sameDuration(t.v.P95, o.v.P95) && sameDuration(t.v.P99, o.v.P99) &&
+		sameFloat(t.v.MaxErrorRate, o.v.MaxErrorRate) && sameFloat(t.v.MinRPS, o.v.MinRPS)
+}
+
+// NFRReplacement is a repository NFR and the proposed NFR with its id that
+// replaces it.
+type NFRReplacement struct{ Old, New NFR }
+
+// NFRAdoption is what adopting a design's NFR proposals does to the
+// repository's NFRs: a proposed NFR with an existing id replaces it, one
+// with a new id is added, and one equal to an existing NFR changes nothing.
+// Proposals never remove an NFR.
+type NFRAdoption struct {
+	added    []NFR
+	replaced []NFRReplacement
+	result   []NFR
+}
+
+// AdoptNFRs plans the adoption of proposed NFRs into the current ones.
+func AdoptNFRs(current, proposed []NFR) NFRAdoption {
+	var a NFRAdoption
+	result := slices.Clone(current)
+	for _, p := range proposed {
+		i := slices.IndexFunc(result, func(n NFR) bool { return n.id == p.id })
+		switch {
+		case i < 0:
+			a.added = append(a.added, p)
+			result = append(result, p)
+		case !result[i].Equal(p):
+			a.replaced = append(a.replaced, NFRReplacement{Old: result[i], New: p})
+			result[i] = p
+		}
+	}
+	a.result = result
+	return a
+}
+
+// Added are the proposed NFRs with new ids, in proposal order.
+func (a NFRAdoption) Added() []NFR { return slices.Clone(a.added) }
+
+// Replaced are the NFRs the proposals change, in proposal order.
+func (a NFRAdoption) Replaced() []NFRReplacement { return slices.Clone(a.replaced) }
+
+// Pending reports whether the current NFRs don't contain the proposed ones
+// exactly yet.
+func (a NFRAdoption) Pending() bool { return len(a.added)+len(a.replaced) > 0 }
+
+// Result is the NFRs after adoption: the current ones in their order, with
+// the replacements in place, then the added ones.
+func (a NFRAdoption) Result() []NFR { return slices.Clone(a.result) }
+
+// CanAdoptNFRProposals says whether the owner may adopt NFR proposals now:
+// only while design waits for approval. Then no stage is open, so no
+// stage's scope check sees the NFRs change, and the owner approves the
+// design knowing which NFRs the work will be held to.
+func CanAdoptNFRProposals(state AssignmentState) error {
+	if waiting, ok := state.(AwaitingApproval); ok && waiting.stage == StageDesign {
+		return nil
+	}
+	return ErrNFRAdoptionClosed
+}

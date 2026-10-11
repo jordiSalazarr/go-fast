@@ -24,6 +24,11 @@ const UncommittedWarning = "checks.json has uncommitted changes. Commit it befor
 // NFRsUncommittedWarning is UncommittedWarning for the NFRs.
 const NFRsUncommittedWarning = "nfrs.json has uncommitted changes. Commit it before starting work; changing it during a stage fails that attempt's scope check."
 
+// NoMinRPSWarning is shown for an NFR without a minRps target.
+func NoMinRPSWarning(id domain.NFRID) string {
+	return "NFR '" + id.String() + "' has no minRps target: a script that sleeps between requests can keep latency low by sending little load."
+}
+
 func NewCommand(repositoryRoot func() (string, error)) *cobra.Command {
 	return &cobra.Command{
 		Use:   "checks",
@@ -52,6 +57,11 @@ func NewCommand(repositoryRoot func() (string, error)) *cobra.Command {
 				}
 				if uncommitted {
 					fmt.Fprintf(cmd.OutOrStdout(), "Warning: %s\n\n", owned.warning)
+				}
+			}
+			for _, n := range nfrs {
+				if n.Targets().Values().MinRPS == nil {
+					fmt.Fprintf(cmd.OutOrStdout(), "Warning: %s\n\n", NoMinRPSWarning(n.ID()))
 				}
 			}
 			render(cmd.OutOrStdout(), config)

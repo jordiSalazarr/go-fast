@@ -96,6 +96,7 @@ func TestRule1_EachOwnerOnlyCommandHasItsOwnReason(t *testing.T) {
 		"gf stress skip 'docs only'":      "Only the owner can override the stress-testing decision. Review decides it with `gf submit --passed --stress <include|skip> \"<reason>\"`; otherwise ask the owner to run `gf stress <include|skip> \"<reason>\"` in their own terminal.",
 		"gf abandon 'give up'":            "Only the owner can abandon work. Ask the owner to run `gf abandon \"<reason>\"` in their own terminal.",
 		"gf log accept":                   "Only the owner can accept a changed event log. Ask the owner to run `gf log accept` in their own terminal.",
+		"gf nfrs adopt --yes":             "Only the owner can adopt NFR proposals. Write them in the design's nfrs.proposed-v<visit>.json and ask the owner to run `gf nfrs adopt` in their own terminal.",
 	}
 	for command, reason := range cases {
 		assert.Equal(t, denied(reason), decide(bash(command), on(domain.StageSpecify), true, root), command)

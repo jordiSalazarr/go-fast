@@ -89,7 +89,8 @@ the hard layer, in `~/.claude/settings.json`
       "Bash(gf rework-extend *)",
       "Bash(gf stress *)",
       "Bash(gf abandon *)",
-      "Bash(gf log *)"
+      "Bash(gf log *)",
+      "Bash(gf nfrs *)"
     ]
   }
 }
@@ -303,8 +304,8 @@ any that clears the environment: `env -i`, `env --ignore-environment`,
 ## How the owner approves
 
 **Approve from your own terminal, not from inside Claude Code.** `gf approve`,
-`gf reject`, `gf extend`, `gf rework-extend`, `gf stress`, `gf abandon` and
-`gf log accept` are owner-only, and
+`gf reject`, `gf extend`, `gf rework-extend`, `gf stress`, `gf abandon`,
+`gf nfrs adopt` and `gf log accept` are owner-only, and
 `gf` checks two things before they reach the workflow:
 
 1. **stdin is a terminal** (the isatty check, via the terminal driver).
@@ -324,6 +325,8 @@ gf approve                      # or: gf reject "<feedback>"
 gf extend 2                     # after an escalation; or: gf abandon "<reason>"
 gf rework-extend 1              # at the rework limit; or: gf abandon "<reason>"
 gf stress include "<reason>"    # until integration testing passes; or: skip
+gf nfrs adopt                   # while design waits: adopt its NFR proposals,
+                                # commit .gofast/nfrs.json, then gf approve
 ```
 
 Then go back to Claude Code and run `/gofast:drive` to continue.

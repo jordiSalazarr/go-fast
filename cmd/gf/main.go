@@ -19,6 +19,7 @@ import (
 	"github.com/jordiSalazarr/go-fast/workflow/gitbranch"
 	abandonwork "github.com/jordiSalazarr/go-fast/workflow/slices/abandonWork"
 	accepteventlog "github.com/jordiSalazarr/go-fast/workflow/slices/acceptEventLog"
+	adoptnfrproposals "github.com/jordiSalazarr/go-fast/workflow/slices/adoptNFRProposals"
 	"github.com/jordiSalazarr/go-fast/workflow/slices/approve"
 	briefagentonsessionstart "github.com/jordiSalazarr/go-fast/workflow/slices/briefAgentOnSessionStart"
 	"github.com/jordiSalazarr/go-fast/workflow/slices/checks"
@@ -89,6 +90,7 @@ func (a *app) rootCommand() *cobra.Command {
 		extendreworkbudget.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch),
 		overridestressdecision.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch, a.stressFacts),
 		abandonwork.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch),
+		adoptnfrproposals.NewCommand(a.openStore, a.resolveCaller, a.currentBranch, a.repositoryRoot),
 		status.NewCommand(a.openStore, a.currentBranch, a.repositoryRoot),
 		checks.NewCommand(a.repositoryRoot),
 		accepteventlog.NewCommand(a.openStore, a.resolveCaller),

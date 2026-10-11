@@ -48,6 +48,8 @@ var (
 	ErrStressForced          = errors.New("stress testing is mandatory: the change touches an NFR's areas")
 	ErrStressUndecided       = errors.New("the work has no stress decision")
 	ErrStressDecisionClosed  = errors.New("the stress decision can only change while the work is on a stage up to integration testing")
+	// NFR proposals.
+	ErrNFRAdoptionClosed = errors.New("NFR proposals can only be adopted while design waits for approval")
 )
 
 // The current assignment is not in a state that accepts the command.

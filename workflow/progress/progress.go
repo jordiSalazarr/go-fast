@@ -31,6 +31,9 @@ type Facts struct {
 	// StressResults returns the NFR results of a stage visit's latest
 	// attempt that measured any.
 	StressResults func(id domain.AssignmentID) (attempt int, results []exitchecks.StressResult, ok bool, err error)
+	// NFRProposals returns what adopting a design visit's NFR proposals
+	// would change; ok is false when it proposes none.
+	NFRProposals func(proposals domain.RepoPath) (adoption domain.NFRAdoption, ok bool, err error)
 }
 
 // View is the progress document. Its JSON form is consumed by hooks: field
@@ -81,6 +84,16 @@ type WorkView struct {
 	// Design is the latest accepted design, on a path with design; absent
 	// before one is accepted, and on paths without design.
 	Design *DesignView `json:"design,omitempty"`
+	// NFRProposals are the NFRs the latest design visit proposes that
+	// .gofast/nfrs.json doesn't contain yet; absent when there are none.
+	NFRProposals *NFRProposalsView `json:"nfrProposals,omitempty"`
+}
+
+// NFRProposalsView is NFR proposals pending adoption by the owner.
+type NFRProposalsView struct {
+	File     string   `json:"file"`
+	Added    []string `json:"added"`    // ids of new NFRs; never null
+	Replaced []string `json:"replaced"` // ids of NFRs they change; never null
 }
 
 // DesignView is the work's latest accepted design: its files, relative to
@@ -253,6 +266,13 @@ func FactsAt(root string) Facts {
 		StressResults: func(id domain.AssignmentID) (int, []exitchecks.StressResult, bool, error) {
 			return exitchecks.ReadStressResults(root, id)
 		},
+		NFRProposals: func(proposals domain.RepoPath) (domain.NFRAdoption, bool, error) {
+			plan, err := exitchecks.PlanNFRAdoption(root, proposals)
+			if errors.Is(err, exitchecks.ErrNoNFRProposals) {
+				return domain.NFRAdoption{}, false, nil
+			}
+			return plan.Adoption, err == nil, err
+		},
 	}
 }
 
@@ -314,6 +334,9 @@ func Read(log Reader, branch domain.Branch, facts Facts) (View, error) {
 				Reason:        e.Reason.String(), Target: e.Target.String(), TargetVisit: e.Visit.Int(),
 			}
 		}
+	}
+	if visit, ok := lastVisit[domain.StageDesign]; ok && facts.NFRProposals != nil {
+		view.Work.NFRProposals = nfrProposalsView(domain.NFRProposalsFor(work.ID(), visit), facts)
 	}
 	fixer, inFixer := work.(domain.InFixerWork)
 	// In the fixer, the path is done up to the stage that handed over.
@@ -530,6 +553,23 @@ func fixerView(history eventlog.History, fixer domain.InFixerWork, facts Facts) 
 	return v, nil
 }
 
+// nfrProposalsView is the design visit's NFR proposals, if any are pending
+// adoption. Proposals gf can't read are design-valid's concern, not shown.
+func nfrProposalsView(path domain.RepoPath, facts Facts) *NFRProposalsView {
+	adoption, ok, err := facts.NFRProposals(path)
+	if err != nil || !ok || !adoption.Pending() {
+		return nil
+	}
+	v := &NFRProposalsView{File: path.String(), Added: []string{}, Replaced: []string{}}
+	for _, n := range adoption.Added() {
+		v.Added = append(v.Added, n.ID().String())
+	}
+	for _, r := range adoption.Replaced() {
+		v.Replaced = append(v.Replaced, r.New.ID().String())
+	}
+	return v
+}
+
 func checkNames(stage domain.Stage, workType domain.WorkType) []string {
 	names := []string{}
 	for _, c := range domain.RequiredChecks(stage, workType) {
@@ -635,6 +675,10 @@ func RenderText(w io.Writer, v View) {
 	if st := c.Stress; st != nil {
 		renderStress(w, c.Stage, st)
 	}
+	if p := v.Work.NFRProposals; p != nil {
+		fmt.Fprintf(w, "NFR proposals pending adoption: %s (%s). The owner adopts them with `gf nfrs adopt` while design waits for approval, then commits %s.\n",
+			p.File, describeProposals(p), exitchecks.NFRsPath)
+	}
 	if p := c.LastProblem; p != nil {
 		label := "Last failure"
 		if p.Kind == ProblemRejection {
@@ -643,6 +687,17 @@ func RenderText(w io.Writer, v View) {
 		fmt.Fprintf(w, "%s (attempt %d): %s\n", label, p.Attempt, p.Text)
 	}
 	fmt.Fprintf(w, "\nNext: %s\n", v.Next.Message)
+}
+
+func describeProposals(p *NFRProposalsView) string {
+	var parts []string
+	if len(p.Added) > 0 {
+		parts = append(parts, "adds "+strings.Join(p.Added, ", "))
+	}
+	if len(p.Replaced) > 0 {
+		parts = append(parts, "replaces "+strings.Join(p.Replaced, ", "))
+	}
+	return strings.Join(parts, "; ")
 }
 
 func renderStress(w io.Writer, stage string, st *StressView) {

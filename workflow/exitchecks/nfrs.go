@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/jordiSalazarr/go-fast/workflow/domain"
@@ -180,4 +181,101 @@ func parseDuration(field, s string) (time.Duration, error) {
 		return 0, fmt.Errorf("%q must be a positive Go duration such as \"150ms\" or \"60s\", not %q", field, s)
 	}
 	return d, nil
+}
+
+// ErrNoNFRProposals: the design visit proposes no NFRs.
+var ErrNoNFRProposals = errors.New("the design proposes no NFRs")
+
+// NFRAdoptionPlan is adopting a design's NFR proposals into NFRsPath: what
+// changes, and the file's content after it. NFRs the proposals don't touch
+// keep their JSON as the owner wrote it; adopted ones are taken as the
+// design wrote them.
+type NFRAdoptionPlan struct {
+	Adoption domain.NFRAdoption
+	content  []byte
+}
+
+// PlanNFRAdoption plans adopting the NFRs proposed in a file, by its path
+// relative to root, into the repository's NFRs. A missing proposals file is
+// ErrNoNFRProposals; invalid NFRs on either side are an *NFRsError.
+func PlanNFRAdoption(root string, proposals domain.RepoPath) (NFRAdoptionPlan, error) {
+	read := func(path string) ([]byte, bool, error) {
+		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path)))
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, false, nil
+		}
+		return data, err == nil, err
+	}
+	proposedData, ok, err := read(proposals.String())
+	if err != nil {
+		return NFRAdoptionPlan{}, fmt.Errorf("read NFR proposals: %w", err)
+	}
+	if !ok {
+		return NFRAdoptionPlan{}, fmt.Errorf("%s: %w", proposals, ErrNoNFRProposals)
+	}
+	proposed, proposedRaw, err := parseNFRs(proposedData, proposals.String())
+	if err != nil {
+		return NFRAdoptionPlan{}, err
+	}
+	var current []domain.NFR
+	var currentRaw []json.RawMessage
+	if data, ok, err := read(NFRsPath); err != nil {
+		return NFRAdoptionPlan{}, fmt.Errorf("read NFRs: %w", err)
+	} else if ok {
+		if current, currentRaw, err = parseNFRs(data, NFRsPath); err != nil {
+			return NFRAdoptionPlan{}, err
+		}
+	}
+	adoption := domain.AdoptNFRs(current, proposed)
+	rawOf := func(id domain.NFRID) json.RawMessage {
+		for i, n := range proposed {
+			if n.ID() == id {
+				return proposedRaw[i]
+			}
+		}
+		return nil
+	}
+	merged := slices.Clone(currentRaw)
+	for _, r := range adoption.Replaced() {
+		i := slices.IndexFunc(current, func(n domain.NFR) bool { return n.ID() == r.Old.ID() })
+		merged[i] = rawOf(r.New.ID())
+	}
+	for _, n := range adoption.Added() {
+		merged = append(merged, rawOf(n.ID()))
+	}
+	content, err := json.MarshalIndent(struct {
+		NFRs []json.RawMessage `json:"nfrs"`
+	}{NFRs: merged}, "", "  ")
+	if err != nil {
+		return NFRAdoptionPlan{}, fmt.Errorf("write NFRs: %w", err)
+	}
+	if _, _, err := parseNFRs(content, NFRsPath); err != nil {
+		return NFRAdoptionPlan{}, err
+	}
+	return NFRAdoptionPlan{Adoption: adoption, content: append(content, '\n')}, nil
+}
+
+// Write writes the adopted NFRs to NFRsPath, creating it if missing. A
+// crash leaves the old file or the new one.
+func (p NFRAdoptionPlan) Write(root string) error {
+	path := filepath.Join(root, filepath.FromSlash(NFRsPath))
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".nfrs-*.json")
+	if err != nil {
+		return fmt.Errorf("write NFRs: %w", err)
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(p.content); err != nil {
+		tmp.Close()
+		return fmt.Errorf("write NFRs: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("write NFRs: %w", err)
+	}
+	if err := os.Chmod(tmp.Name(), 0o644); err != nil {
+		return fmt.Errorf("write NFRs: %w", err)
+	}
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		return fmt.Errorf("write NFRs: %w", err)
+	}
+	return nil
 }

@@ -112,8 +112,14 @@ func friendly(err error, cmd *cobra.Command, ran bool) string {
 		return fmt.Sprintf("The event log .gofast/events.jsonl is damaged at line %d. Restore it from git. %s", malformed.Line, seeLog)
 	case errors.As(err, &config):
 		return fmt.Sprintf("The exit-check configuration %s is invalid: %s. The owner fixes it; `gf checks` shows the result.", exitchecks.ConfigPath, config.Problem)
+	case errors.As(err, &nfrs) && nfrs.Path != "":
+		return fmt.Sprintf("The NFR proposals %s are invalid: %s. Reject the design with `gf reject \"<feedback>\"` so it fixes them.", nfrs.Path, nfrs.Problem)
 	case errors.As(err, &nfrs):
 		return fmt.Sprintf("The NFRs %s are invalid: %s. The owner fixes them; `gf checks` shows the result.", exitchecks.NFRsPath, nfrs.Problem)
+	case errors.Is(err, domain.ErrNFRAdoptionClosed):
+		return "NFR proposals can only be adopted while design waits for your approval: after design submits, before `gf approve`. Run `gf status` to see where the work is."
+	case errors.Is(err, exitchecks.ErrNoNFRProposals):
+		return "This design visit proposes no NFRs: its nfrs.proposed-v<visit>.json does not exist. There is nothing to adopt."
 	case errors.Is(err, eventlog.ErrVersionConflict):
 		return "The workflow changed while this command ran. Run it again."
 	case errors.Is(err, domain.ErrInconsistentHistory):
