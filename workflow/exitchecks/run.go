@@ -36,6 +36,12 @@ type Visit struct {
 	// between their baselines. Zero when the work has none.
 	Specify    domain.AssignmentID
 	SpecifyEnd domain.AssignmentID
+	// Design is the work's latest accepted design visit, whose slices
+	// specify must cover, and DesignEnd the stage visit entered when it was
+	// accepted: the design is read as it was then. Zero when the work has
+	// none.
+	Design    domain.Visit
+	DesignEnd domain.AssignmentID
 	// Changed is what the visit changed since its baseline.
 	Changed domain.ChangedFiles
 	// BaselineStarted: the visit had no baseline until this submission, so
@@ -166,6 +172,8 @@ func (c *checkRun) check(check domain.ExitCheck) (finding, error) {
 		return c.nfrProposalsValid()
 	case domain.CheckBehaviourDelta:
 		return c.behaviourDelta()
+	case domain.CheckSpecsCoverSlices:
+		return c.specsCoverSlices()
 	}
 	return finding{}, fmt.Errorf("gf does not know how to run %q", check)
 }
@@ -211,12 +219,14 @@ func missingBaseline(stage domain.Stage) finding {
 	return fail("The baseline for '%s' is missing (the work was started before this version of gf, or on another machine). The owner should abandon this work with `gf abandon \"<reason>\"` and start it again.", stage)
 }
 
-func (c *checkRun) specsFail() (finding, error) {
+// specsWritten are the test files this visit changed and the tests written
+// or changed in them. A problem means there is nothing to check.
+func (c *checkRun) specsWritten() (specs []domain.RepoPath, tests []string, problem *finding, err error) {
 	base, ok, err := c.ownBaseline()
 	if err != nil || !ok {
-		return c.noOwnBaseline(), err
+		f := c.noOwnBaseline()
+		return nil, nil, &f, err
 	}
-	var specs []domain.RepoPath
 	for _, p := range c.visit.Changed.Paths() {
 		if strings.HasSuffix(p.String(), "_test.go") {
 			specs = append(specs, p)
@@ -224,10 +234,19 @@ func (c *checkRun) specsFail() (finding, error) {
 	}
 	tests, broken, err := c.testsChanged(specs, base, "")
 	if err != nil {
-		return finding{}, err
+		return nil, nil, nil, err
 	}
 	if broken != "" {
-		return fail("specs don't compile: %s", broken), nil
+		f := fail("specs don't compile: %s", broken)
+		return nil, nil, &f, nil
+	}
+	return specs, tests, nil, nil
+}
+
+func (c *checkRun) specsFail() (finding, error) {
+	specs, tests, problem, err := c.specsWritten()
+	if err != nil || problem != nil {
+		return deref(problem), err
 	}
 	if len(tests) == 0 {
 		return fail("no test written in this stage"), nil

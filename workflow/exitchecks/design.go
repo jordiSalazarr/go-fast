@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/jordiSalazarr/go-fast/workflow/domain"
+	"github.com/jordiSalazarr/go-fast/workflow/worktree"
 )
 
 // designFile is the structured design's JSON form. Its field names are the
@@ -272,4 +273,63 @@ func headingLevel(line string) int {
 		return 0
 	}
 	return level
+}
+
+// acceptedDesign is the latest accepted design, as it was when design was
+// accepted: later stages can write in the artifact directory too.
+func (c *checkRun) acceptedDesign() (domain.Design, *finding, error) {
+	noDesign := func(format string, args ...any) (domain.Design, *finding, error) {
+		f := fail(format, args...)
+		return domain.Design{}, &f, nil
+	}
+	if c.visit.Design == (domain.Visit{}) {
+		return noDesign("the work has no accepted design")
+	}
+	tree, ok, err := c.ownBaseline()
+	if err != nil {
+		return domain.Design{}, nil, err
+	}
+	if end := c.visit.DesignEnd; end != (domain.AssignmentID{}) && end != c.visit.Assignment {
+		tree, ok, err = c.baselines.Tree(end)
+		if err != nil {
+			return domain.Design{}, nil, err
+		}
+	}
+	if !ok {
+		f := missingBaseline(domain.StageDesign)
+		return domain.Design{}, &f, nil
+	}
+	path := domain.DesignFor(c.visit.Work, c.visit.Design)
+	data, exists, err := worktree.FileAt(c.Root, tree, path)
+	if err != nil {
+		return domain.Design{}, nil, err
+	}
+	if !exists {
+		return noDesign("the accepted design %s is missing", path)
+	}
+	design, problems := parseDesign(data)
+	if len(problems) > 0 {
+		return noDesign("the accepted design %s is invalid: %s", path, strings.Join(problems, "; "))
+	}
+	return design, nil, nil
+}
+
+func (c *checkRun) specsCoverSlices() (finding, error) {
+	design, problem, err := c.acceptedDesign()
+	if err != nil || problem != nil {
+		return deref(problem), err
+	}
+	_, tests, problem, err := c.specsWritten()
+	if err != nil || problem != nil {
+		return deref(problem), err
+	}
+	uncovered := design.UncoveredSlices(tests)
+	if len(uncovered) == 0 {
+		return pass, nil
+	}
+	names := make([]string, len(uncovered))
+	for i, s := range uncovered {
+		names[i] = s.Name() + " (Test" + s.Name() + "…)"
+	}
+	return fail("no spec written in this stage covers %s: %s", plural(len(uncovered), "slice"), strings.Join(names, ", ")), nil
 }

@@ -155,3 +155,83 @@ func TestBehaviourDelta_IsRequiredOnlyOnModifyBehaviour(t *testing.T) {
 	assert.NotContains(t, results, domain.CheckBehaviourDelta)
 	passes(t, results[domain.CheckArtifactWritten])
 }
+
+// Specs cover slices.
+
+const (
+	// postTransactionSpec covers the PostTransaction slice, and fails.
+	postTransactionSpec = "package server\n\nimport \"testing\"\n\nfunc TestPostTransaction_RejectsWhenFrozen(t *testing.T) {\n\tif Port() != 8080 {\n\t\tt.Fatal(\"x\")\n\t}\n}\n"
+	// publishSpec covers the PublishWalletDebited slice.
+	publishSpec = "package server\n\nimport \"testing\"\n\nfunc TestPublishWalletDebited_OnPost(t *testing.T) {}\n"
+)
+
+// onDesignedSpecify accepts the wallet design and begins specify after it.
+func (m *module) onDesignedSpecify(design string) {
+	m.t.Helper()
+	m.write(designPath, design)
+	m.begin(domain.StageSpecify)
+}
+
+func (m *module) checkDesignedSpecify() map[domain.ExitCheck]domain.CheckResult {
+	m.t.Helper()
+	return m.checkOn(domain.WorkTypeNewFeature, domain.StageSpecify, exitchecks.Config{})
+}
+
+func TestSpecsCoverSlices_EveryAddedCommandAndAutomationSliceCovered_Passes(t *testing.T) {
+	m := newModule(t)
+	m.onDesignedSpecify(walletDesign(t))
+	m.write("server/wallet_test.go", postTransactionSpec)
+	m.write("server/publish_test.go", publishSpec)
+
+	results := m.checkDesignedSpecify()
+
+	passes(t, results[domain.CheckSpecsCoverSlices])
+	passes(t, results[domain.CheckSpecsFail])
+}
+
+func TestSpecsCoverSlices_AnUncoveredSlice_FailsNamingIt(t *testing.T) {
+	m := newModule(t)
+	m.onDesignedSpecify(walletDesign(t))
+	m.write("server/wallet_test.go", postTransactionSpec)
+
+	fails(t, m.checkDesignedSpecify()[domain.CheckSpecsCoverSlices],
+		"no spec written in this stage covers 1 slice: PublishWalletDebited (TestPublishWalletDebited…)")
+}
+
+func TestSpecsCoverSlices_UnchangedAndQuerySlices_AreNotRequired(t *testing.T) {
+	m := newModule(t)
+	design := strings.Replace(walletDesign(t), `"publishes": "WalletDebited", "change": "added"`, `"publishes": "WalletDebited", "change": "unchanged"`, 1)
+	m.onDesignedSpecify(design)
+	m.write("server/wallet_test.go", postTransactionSpec)
+
+	passes(t, m.checkDesignedSpecify()[domain.CheckSpecsCoverSlices]) // WalletBalance is a query
+}
+
+func TestSpecsCoverSlices_ACoveringTestThatIsNotNew_DoesNotCount(t *testing.T) {
+	m := newModule(t)
+	m.write("server/publish_test.go", publishSpec) // written before specify began
+	m.onDesignedSpecify(walletDesign(t))
+	m.write("server/wallet_test.go", postTransactionSpec)
+
+	fails(t, m.checkDesignedSpecify()[domain.CheckSpecsCoverSlices], "covers 1 slice: PublishWalletDebited")
+}
+
+func TestSpecsCoverSlices_ReadsTheDesignAsItWasAccepted(t *testing.T) {
+	m := newModule(t)
+	m.onDesignedSpecify(walletDesign(t))
+	m.write("server/wallet_test.go", postTransactionSpec)
+	// Specify drops the uncovered slice from the design: the check doesn't see it.
+	m.write(designPath, strings.Replace(walletDesign(t), `"change": "added" }
+  ],`, `"change": "removed" }
+  ],`, 1))
+
+	fails(t, m.checkDesignedSpecify()[domain.CheckSpecsCoverSlices], "PublishWalletDebited")
+}
+
+func TestSpecsCoverSlices_IsRequiredOnlyOnPathsWithDesign(t *testing.T) {
+	m := newModule(t)
+	m.begin(domain.StageSpecify)
+	m.write("server/server_test.go", failingSpec)
+
+	assert.NotContains(t, m.check(domain.StageSpecify, exitchecks.Config{}), domain.CheckSpecsCoverSlices)
+}

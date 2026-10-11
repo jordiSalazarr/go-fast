@@ -78,6 +78,17 @@ type WorkView struct {
 	// Reworks is how many times the work entered the fixer, of ReworkBudget.
 	Reworks      int `json:"reworks"`
 	ReworkBudget int `json:"reworkBudget"`
+	// Design is the latest accepted design, on a path with design; absent
+	// before one is accepted, and on paths without design.
+	Design *DesignView `json:"design,omitempty"`
+}
+
+// DesignView is the work's latest accepted design: its files, relative to
+// the repository root.
+type DesignView struct {
+	Visit    int    `json:"visit"`
+	Artifact string `json:"artifact"` // the markdown design
+	File     string `json:"file"`     // the structured design
 }
 
 // Stage status values.
@@ -286,6 +297,17 @@ func Read(log Reader, branch domain.Branch, facts Facts) (View, error) {
 		switch e := r.Event.(type) {
 		case domain.StageEntered:
 			lastVisit[e.Stage] = e.Visit
+			if e.Stage != domain.StageDesign {
+				continue
+			}
+			if state, _, err := history.Assignment(domain.AssignmentIDFor(work.ID(), e.Stage, e.Visit)); err == nil {
+				if _, accepted := state.(domain.Accepted); accepted {
+					view.Work.Design = &DesignView{
+						Visit: e.Visit.Int(), Artifact: domain.ArtifactFor(work.ID(), e.Stage, e.Visit).String(),
+						File: domain.DesignFor(work.ID(), e.Visit).String(),
+					}
+				}
+			}
 		case domain.ReworkStarted:
 			reworkOf = &ReworkOfView{
 				FixerArtifact: domain.ArtifactFor(work.ID(), domain.StageFixer, lastVisit[domain.StageFixer]).String(),

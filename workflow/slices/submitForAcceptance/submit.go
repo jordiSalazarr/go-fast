@@ -49,8 +49,11 @@ type Target struct {
 	version int
 	work    domain.ActiveWork
 	// specify is the latest accepted specify visit, and specifyEnd the visit
-	// entered when it was accepted.
+	// entered when it was accepted; designVisit and designEnd the same for
+	// design.
 	specify, specifyEnd domain.AssignmentID
+	designVisit         domain.Visit
+	designEnd           domain.AssignmentID
 }
 
 // Checked is what gf found out about the stage visit before deciding.
@@ -112,26 +115,35 @@ func Find(log Reader, branch domain.Branch) (Target, error) {
 		return Target{}, fmt.Errorf("submit for acceptance on %s: assignment is %T: %w", work.CurrentStage(), state, domain.ErrNotAwaitingSubmission)
 	}
 	target := Target{Open: open, version: version, work: work}
+	target.specify, target.specifyEnd, _ = LatestAccepted(history, work.ID(), domain.StageSpecify)
+	_, target.designEnd, target.designVisit = LatestAccepted(history, work.ID(), domain.StageDesign)
+	return target, nil
+}
+
+// LatestAccepted is a work's latest accepted visit of a stage, and the stage
+// visit entered when it was accepted (zero while that visit is still to be
+// entered); all zero when no visit of the stage was accepted.
+func LatestAccepted(history eventlog.History, work domain.WorkID, stage domain.Stage) (accepted, end domain.AssignmentID, visit domain.Visit) {
 	ending := false
-	for _, r := range history.Records(eventlog.WorkStream(work.ID())) {
+	for _, r := range history.Records(eventlog.WorkStream(work)) {
 		entered, ok := r.Event.(domain.StageEntered)
 		if !ok {
 			continue
 		}
-		id := domain.AssignmentIDFor(work.ID(), entered.Stage, entered.Visit)
+		id := domain.AssignmentIDFor(work, entered.Stage, entered.Visit)
 		if ending {
-			target.specifyEnd, ending = id, false
+			end, ending = id, false
 		}
-		if entered.Stage != domain.StageSpecify {
+		if entered.Stage != stage {
 			continue
 		}
 		if state, _, err := history.Assignment(id); err == nil {
-			if _, accepted := state.(domain.Accepted); accepted {
-				target.specify, target.specifyEnd, ending = id, domain.AssignmentID{}, true
+			if _, ok := state.(domain.Accepted); ok {
+				accepted, end, visit, ending = id, domain.AssignmentID{}, entered.Visit, true
 			}
 		}
 	}
-	return target, nil
+	return accepted, end, visit
 }
 
 // CheckClaim rejects a claim before any check runs, so it uses no attempt:
@@ -187,6 +199,7 @@ func Check(target Target, claim domain.AgentClaim, changes Changes, checks Check
 	checked.Results, err = checks(exitchecks.Visit{
 		Assignment: open.ID(), Work: open.Work(), WorkType: target.work.Type(), Stage: open.Stage(), Visit: open.Visit(),
 		Attempt: currentAttempt(open), Specify: target.specify, SpecifyEnd: target.specifyEnd,
+		Design: target.designVisit, DesignEnd: target.designEnd,
 		Changed: changed, BaselineStarted: started, FirstAssignment: target.work.FirstAssignment(),
 	}, progress)
 	if err != nil {

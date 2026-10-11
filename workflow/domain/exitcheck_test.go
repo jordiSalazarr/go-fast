@@ -25,10 +25,12 @@ func TestEachStageRequiresItsExitChecks(t *testing.T) {
 		domain.StageFixer:              {domain.CheckArtifactWritten},
 	}
 	design := []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckDesignValid, domain.CheckNFRProposalsValid}
+	designed := with(with(fixBug, domain.StageDesign, design),
+		domain.StageSpecify, []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckSpecsFail, domain.CheckSpecsCoverSlices})
 	want := map[domain.WorkType]map[domain.Stage][]domain.ExitCheck{
 		domain.WorkTypeFixBug:     fixBug,
-		domain.WorkTypeNewFeature: with(fixBug, domain.StageDesign, design),
-		domain.WorkTypeModifyBehaviour: with(with(fixBug, domain.StageDesign, design),
+		domain.WorkTypeNewFeature: designed,
+		domain.WorkTypeModifyBehaviour: with(designed,
 			domain.StageDiscovery, []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckBehaviourDelta}),
 	}
 	for _, workType := range domain.WorkTypes() {
@@ -55,7 +57,7 @@ func TestExitChecksHaveStableNames(t *testing.T) {
 	}
 	assert.Equal(t, []string{"artifact-written", "specs-fail", "build-passes", "specs-pass",
 		"specs-untouched", "suite-passes", "formatted", "integration-passes", "stress-scripts-valid", "nfrs-met",
-		"design-valid", "nfr-proposals-valid", "behaviour-delta"}, names)
+		"design-valid", "nfr-proposals-valid", "behaviour-delta", "specs-cover-slices"}, names)
 }
 
 func TestCheckFailed_NeedsASummary(t *testing.T) {

@@ -87,10 +87,15 @@ func (m *module) checkOn(workType domain.WorkType, stage domain.Stage, config ex
 		config.Timeout = time.Minute
 	}
 	runner := exitchecks.Runner{Root: m.root, Config: config, Env: append(os.Environ(), "GF_ACTOR=agent")}
-	results, err := runner.Run(exitchecks.Visit{
+	visit := exitchecks.Visit{
 		Assignment: AssignmentOn(stage), Work: WorkID, WorkType: workType, Stage: stage, Visit: Visit1, Attempt: Attempt(1),
 		Specify: AssignmentOn(domain.StageSpecify), Changed: changed,
-	})
+	}
+	if workType.HasDesign() {
+		// The design's first visit was accepted before specify's first.
+		visit.Design, visit.DesignEnd = Visit1, AssignmentOn(domain.StageSpecify)
+	}
+	results, err := runner.Run(visit)
 	require.NoError(m.t, err)
 	byCheck := map[domain.ExitCheck]domain.CheckResult{}
 	for _, r := range results {

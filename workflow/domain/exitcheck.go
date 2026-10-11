@@ -47,6 +47,10 @@ var (
 	// CheckBehaviourDelta: modify-behaviour's discovery artifact states both
 	// the current and the expected behaviour.
 	CheckBehaviourDelta = ExitCheck{name: "behaviour-delta"}
+	// CheckSpecsCoverSlices: on a path with design, the tests written in
+	// specify cover every slice the latest accepted design adds or changes
+	// that handles a command or reacts to an event (Design.UncoveredSlices).
+	CheckSpecsCoverSlices = ExitCheck{name: "specs-cover-slices"}
 )
 
 // ExitChecks lists every exit check.
@@ -55,6 +59,7 @@ func ExitChecks() []ExitCheck {
 		CheckArtifactWritten, CheckSpecsFail, CheckBuildPasses, CheckSpecsPass,
 		CheckSpecsUntouched, CheckSuitePasses, CheckFormatted, CheckIntegrationPasses,
 		CheckStressScriptsValid, CheckNFRsMet, CheckDesignValid, CheckNFRProposalsValid, CheckBehaviourDelta,
+		CheckSpecsCoverSlices,
 	}
 }
 
@@ -70,6 +75,8 @@ func RequiredChecks(stage Stage, workType WorkType) []ExitCheck {
 	switch {
 	case stage == StageDiscovery && workType == WorkTypeModifyBehaviour:
 		checks = append(checks, CheckBehaviourDelta)
+	case stage == StageSpecify && workType.HasDesign():
+		checks = append(checks, CheckSpecsCoverSlices)
 	}
 	return checks
 }
@@ -319,7 +326,8 @@ func ClassifyFailure(outcome ExitCheckOutcome) (kind FailureKind, ok bool) {
 // writes, not about the code.
 func (c ExitCheck) judgesStageWork() bool {
 	switch c {
-	case CheckArtifactWritten, CheckStressScriptsValid, CheckDesignValid, CheckNFRProposalsValid, CheckBehaviourDelta:
+	case CheckArtifactWritten, CheckStressScriptsValid, CheckDesignValid, CheckNFRProposalsValid, CheckBehaviourDelta,
+		CheckSpecsCoverSlices:
 		return true
 	}
 	return false
