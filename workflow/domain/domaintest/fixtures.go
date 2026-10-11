@@ -132,3 +132,38 @@ func InFixer(from domain.Stage) []domain.Event {
 func Route(target domain.Stage, reason string) domain.Route {
 	return Must(domain.NewRoute(target, Reason(reason)))
 }
+
+func Visit(n int) domain.Visit { return Must(domain.NewVisit(n)) }
+
+// EnteredVisit is the StageEntered of a stage's nth visit.
+func EnteredVisit(stage domain.Stage, n int) domain.StageEntered {
+	e := StageEntered(stage)
+	e.Visit = Visit(n)
+	return e
+}
+
+// HandedToFixerOnVisit is the nth visit of stage handing the work to the
+// fixer on its first attempt.
+func HandedToFixerOnVisit(stage domain.Stage, n int, reason string) domain.AssignmentHandedToFixer {
+	return domain.AssignmentHandedToFixer{
+		AssignmentID: domain.AssignmentIDFor(WorkID, stage, Visit(n)), WorkID: WorkID, Stage: stage, Visit: Visit(n),
+		Attempt: Attempt(1), Reason: Reason(reason),
+	}
+}
+
+// ReworkedOnReview is the work's history (its own stream only) after review
+// handed it over n times and the fixer sent it back to implement each time:
+// it is on review's visit n+1.
+func ReworkedOnReview(n int) []domain.Event {
+	events := WorkOn(domain.StageReview)
+	for i := 1; i <= n; i++ {
+		events = append(events,
+			domain.FixerEntered{WorkID: WorkID, From: domain.StageReview, FromVisit: Visit(i), Visit: Visit(i), Mode: domain.FixerModeCorrectness, Reason: Reason("suite fails")},
+			EnteredVisit(domain.StageFixer, i),
+			domain.ReworkStarted{WorkID: WorkID, Target: domain.StageImplement, Visit: Visit(i + 1), Reason: Reason("the fix misses a case")},
+			EnteredVisit(domain.StageImplement, i+1),
+			EnteredVisit(domain.StageReview, i+1),
+		)
+	}
+	return events
+}

@@ -9,7 +9,9 @@ import (
 	"github.com/jordiSalazarr/go-fast/workflow/eventlog"
 	"github.com/jordiSalazarr/go-fast/workflow/slices/advanceWorkOnAcceptance"
 	"github.com/jordiSalazarr/go-fast/workflow/slices/cancelAssignmentOnAbandon"
+	"github.com/jordiSalazarr/go-fast/workflow/slices/enterFixerOnHandover"
 	"github.com/jordiSalazarr/go-fast/workflow/slices/openAssignmentOnStageEntered"
+	"github.com/jordiSalazarr/go-fast/workflow/slices/returnWorkOnFixerAccepted"
 )
 
 // MaxPasses bounds how many passes Run makes before giving up.
@@ -36,6 +38,8 @@ func (r Runner) all() []automation {
 	return []automation{
 		func(l Log) (int, error) { return openassignmentonstageentered.Run(l, r.AssignmentOpened) },
 		func(l Log) (int, error) { return advanceworkonacceptance.Run(l) },
+		func(l Log) (int, error) { return enterfixeronhandover.Run(l) },
+		func(l Log) (int, error) { return returnworkonfixeraccepted.Run(l) },
 		func(l Log) (int, error) { return cancelassignmentonabandon.Run(l) },
 	}
 }
