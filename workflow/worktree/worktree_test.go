@@ -150,6 +150,29 @@ func TestSnapshot_WorksBeforeTheFirstCommit(t *testing.T) {
 	assert.Len(t, tree, 40)
 }
 
+func TestUncommitted(t *testing.T) {
+	root := newRepo(t)
+	uncommitted := func(path string) bool {
+		t.Helper()
+		got, err := worktree.Uncommitted(root, path)
+		require.NoError(t, err)
+		return got
+	}
+
+	assert.False(t, uncommitted("main.go"), "committed")
+	assert.False(t, uncommitted("absent.json"), "neither committed nor present")
+	writeFile(t, root, "dir/new.json", "{}")
+	assert.True(t, uncommitted("dir/new.json"), "untracked, in an untracked directory")
+	git(t, root, "add", "dir/new.json")
+	assert.True(t, uncommitted("dir/new.json"), "staged")
+	git(t, root, "-c", "user.name=T", "-c", "user.email=t@x", "commit", "-q", "-m", "add")
+	assert.False(t, uncommitted("dir/new.json"), "committed")
+	writeFile(t, root, "dir/new.json", "{\"x\": 1}")
+	assert.True(t, uncommitted("dir/new.json"), "modified")
+	require.NoError(t, os.Remove(filepath.Join(root, "dir", "new.json")))
+	assert.True(t, uncommitted("dir/new.json"), "deleted")
+}
+
 func TestTreeDiffAndFileAt_ReadBaselines(t *testing.T) {
 	root := newRepo(t)
 	baselines := worktree.OpenBaselines(root)

@@ -12,7 +12,12 @@ import (
 
 	"github.com/jordiSalazarr/go-fast/workflow/domain"
 	"github.com/jordiSalazarr/go-fast/workflow/exitchecks"
+	"github.com/jordiSalazarr/go-fast/workflow/worktree"
 )
+
+// UncommittedWarning is shown when the configuration differs from HEAD: a
+// change to it during a stage is a change outside every write scope.
+const UncommittedWarning = "checks.json has uncommitted changes. Commit it before starting work; changing it during a stage fails that attempt's scope check."
 
 func NewCommand(repositoryRoot func() (string, error)) *cobra.Command {
 	return &cobra.Command{
@@ -27,6 +32,13 @@ func NewCommand(repositoryRoot func() (string, error)) *cobra.Command {
 			config, err := exitchecks.LoadConfig(root)
 			if err != nil {
 				return err
+			}
+			uncommitted, err := worktree.Uncommitted(root, exitchecks.ConfigPath)
+			if err != nil {
+				return err
+			}
+			if uncommitted {
+				fmt.Fprintf(cmd.OutOrStdout(), "Warning: %s\n\n", UncommittedWarning)
 			}
 			render(cmd.OutOrStdout(), config)
 			return nil

@@ -174,6 +174,16 @@ func FileAt(root, tree string, path domain.RepoPath) (content []byte, ok bool, e
 	return []byte(out), true, nil
 }
 
+// Uncommitted reports whether a file, relative to root and slash-separated,
+// differs from what HEAD has: modified, staged, deleted or untracked.
+func Uncommitted(root, path string) (bool, error) {
+	out, err := git(root, nil, "status", "--porcelain", "--untracked-files=all", "--", path)
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(out) != "", nil
+}
+
 // gfWrites are the committed files gf itself changes during a stage visit.
 var gfWrites = func() map[string]bool {
 	m := map[string]bool{}

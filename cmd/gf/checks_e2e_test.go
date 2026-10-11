@@ -21,6 +21,8 @@ func TestChecks_ShowsTheConfigurationAndEachStagesChecks(t *testing.T) {
 	assert.Contains(t, out, "  specify              artifact-written, specs-fail\n")
 	assert.Contains(t, out, "  implement            artifact-written, build-passes, specs-pass, specs-untouched, suite-passes\n")
 
+	assert.NotContains(t, out, "Warning")
+
 	r.write(".gofast/checks.json", `{"integration": {"command": ["go", "test", "-tags=integration", "./..."], "timeout": "15m"}, "timeout": "5m"}`)
 	out = r.gf("checks")
 	assert.Contains(t, out, "Exit-check configuration (.gofast/checks.json):")
@@ -30,6 +32,23 @@ func TestChecks_ShowsTheConfigurationAndEachStagesChecks(t *testing.T) {
 	r.write(".gofast/checks.json", `{"timeout": "soon"}`)
 	res := r.gfFails(nil, "checks")
 	assert.Equal(t, "The exit-check configuration .gofast/checks.json is invalid: \"timeout\" must be a positive Go duration such as \"10m\", not \"soon\". The owner fixes it; `gf checks` shows the result.\n", res.stderr)
+}
+
+func TestChecks_WarnsWhileTheConfigurationIsUncommitted(t *testing.T) {
+	r := newRepo(t)
+	warning := "Warning: checks.json has uncommitted changes. Commit it before starting work; changing it during a stage fails that attempt's scope check.\n\n"
+
+	r.configureChecks()
+	assert.True(t, strings.HasPrefix(r.gf("checks"), warning), "new, untracked")
+
+	r.git("add", ".gofast/checks.json")
+	assert.True(t, strings.HasPrefix(r.gf("checks"), warning), "staged")
+
+	r.git("commit", "-q", "-m", "configure checks")
+	assert.NotContains(t, r.gf("checks"), "Warning")
+
+	r.write(".gofast/checks.json", `{"integration": {"command": ["make", "integration"]}}`)
+	assert.True(t, strings.HasPrefix(r.gf("checks"), warning), "modified")
 }
 
 // A fix-bug run where gf, not the agent, decides whether each stage passes.

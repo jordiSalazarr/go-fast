@@ -28,6 +28,22 @@ nothing**: no guard, no briefing, no keep-going. Check with `which gf`.
 The hooks are silent in repositories without a `.gofast/` directory, so the
 plugin is harmless elsewhere. `gf start` creates `.gofast/` in a repository.
 
+Configure the integration suite of the repository you work in, in
+`.gofast/checks.json` (without it, integration testing fails), and check it
+with `gf checks`:
+
+```json
+{
+  "integration": { "command": ["go", "test", "-tags=integration", "./..."], "timeout": "15m" },
+  "timeout": "10m"
+}
+```
+
+**Commit checks.json before starting work; changing it during a stage fails
+that attempt's scope check.** While it has uncommitted changes, `gf checks`
+warns: "checks.json has uncommitted changes. Commit it before starting work;
+changing it during a stage fails that attempt's scope check."
+
 ## Recommended permission rules
 
 The guard hook parses Bash commands on a best-effort basis. Add deny rules as
