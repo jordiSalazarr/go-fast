@@ -29,6 +29,10 @@ const (
 	typeAssignmentAccepted      = "AssignmentAccepted"
 	typeAssignmentCancelled     = "AssignmentCancelled"
 	typeAssignmentHandedToFixer = "AssignmentHandedToFixer"
+	typeFixerEntered            = "FixerEntered"
+	typeReworkLimitReached      = "ReworkLimitReached"
+	typeReworkStarted           = "ReworkStarted"
+	typeReworkBudgetExtended    = "ReworkBudgetExtended"
 )
 
 type envelope struct {
@@ -78,6 +82,34 @@ type workAbandonedV1 struct {
 	WorkID string  `json:"workId"`
 	Owner  ownerV1 `json:"owner"`
 	Reason string  `json:"reason"`
+}
+
+type fixerEnteredV1 struct {
+	WorkID    string `json:"workId"`
+	From      string `json:"from"`
+	FromVisit int    `json:"fromVisit"`
+	Visit     int    `json:"visit"`
+	Mode      string `json:"mode"`
+	Reason    string `json:"reason"`
+}
+
+type reworkLimitReachedV1 struct {
+	WorkID  string `json:"workId"`
+	Reworks int    `json:"reworks"`
+}
+
+type reworkStartedV1 struct {
+	WorkID string `json:"workId"`
+	Target string `json:"target"`
+	Visit  int    `json:"visit"`
+	Reason string `json:"reason"`
+}
+
+type reworkBudgetExtendedV1 struct {
+	WorkID     string  `json:"workId"`
+	Owner      ownerV1 `json:"owner"`
+	Additional int     `json:"additional"`
+	NewBudget  int     `json:"newBudget"`
 }
 
 type assignmentOpenedV1 struct {
@@ -203,6 +235,21 @@ func encodeEvent(e domain.Event) (eventType string, stream Stream, payload any, 
 		return typeWorkAbandoned, WorkStream(e.WorkID), workAbandonedV1{
 			WorkID: e.WorkID.String(), Owner: encodeOwner(e.Owner), Reason: e.Reason.String(),
 		}, nil
+	case domain.FixerEntered:
+		return typeFixerEntered, WorkStream(e.WorkID), fixerEnteredV1{
+			WorkID: e.WorkID.String(), From: e.From.String(), FromVisit: e.FromVisit.Int(), Visit: e.Visit.Int(),
+			Mode: e.Mode.String(), Reason: e.Reason.String(),
+		}, nil
+	case domain.ReworkLimitReached:
+		return typeReworkLimitReached, WorkStream(e.WorkID), reworkLimitReachedV1{WorkID: e.WorkID.String(), Reworks: e.Reworks.Int()}, nil
+	case domain.ReworkStarted:
+		return typeReworkStarted, WorkStream(e.WorkID), reworkStartedV1{
+			WorkID: e.WorkID.String(), Target: e.Target.String(), Visit: e.Visit.Int(), Reason: e.Reason.String(),
+		}, nil
+	case domain.ReworkBudgetExtended:
+		return typeReworkBudgetExtended, WorkStream(e.WorkID), reworkBudgetExtendedV1{
+			WorkID: e.WorkID.String(), Owner: encodeOwner(e.Owner), Additional: e.Additional.Int(), NewBudget: e.NewBudget.Int(),
+		}, nil
 	case domain.AssignmentOpened:
 		return typeAssignmentOpened, AssignmentStream(e.AssignmentID), assignmentOpenedV1{
 			AssignmentID: e.AssignmentID.String(), WorkID: e.WorkID.String(), Stage: e.Stage.String(),
@@ -274,6 +321,28 @@ func decodeEvent(eventType string, payload json.RawMessage) (domain.Event, Strea
 		var p workAbandonedV1
 		d.unmarshal(payload, &p)
 		event = domain.WorkAbandoned{WorkID: d.workID(p.WorkID), Owner: d.owner(p.Owner), Reason: d.reason(p.Reason)}
+	case typeFixerEntered:
+		var p fixerEnteredV1
+		d.unmarshal(payload, &p)
+		event = domain.FixerEntered{
+			WorkID: d.workID(p.WorkID), From: d.stage(p.From), FromVisit: d.visit(p.FromVisit), Visit: d.visit(p.Visit),
+			Mode: d.fixerMode(p.Mode), Reason: d.reason(p.Reason),
+		}
+	case typeReworkLimitReached:
+		var p reworkLimitReachedV1
+		d.unmarshal(payload, &p)
+		event = domain.ReworkLimitReached{WorkID: d.workID(p.WorkID), Reworks: d.reworkCount(p.Reworks)}
+	case typeReworkStarted:
+		var p reworkStartedV1
+		d.unmarshal(payload, &p)
+		event = domain.ReworkStarted{WorkID: d.workID(p.WorkID), Target: d.stage(p.Target), Visit: d.visit(p.Visit), Reason: d.reason(p.Reason)}
+	case typeReworkBudgetExtended:
+		var p reworkBudgetExtendedV1
+		d.unmarshal(payload, &p)
+		event = domain.ReworkBudgetExtended{
+			WorkID: d.workID(p.WorkID), Owner: d.owner(p.Owner),
+			Additional: d.reworkBudget(p.Additional), NewBudget: d.reworkBudget(p.NewBudget),
+		}
 	case typeAssignmentOpened:
 		var p assignmentOpenedV1
 		d.unmarshal(payload, &p)
@@ -396,6 +465,24 @@ func (d *decoder) visit(n int) domain.Visit {
 
 func (d *decoder) budget(n int) domain.AttemptBudget {
 	v, err := domain.NewAttemptBudget(n)
+	d.keep(err)
+	return v
+}
+
+func (d *decoder) fixerMode(s string) domain.FixerMode {
+	v, err := domain.ParseFixerMode(s)
+	d.keep(err)
+	return v
+}
+
+func (d *decoder) reworkCount(n int) domain.ReworkCount {
+	v, err := domain.NewReworkCount(n)
+	d.keep(err)
+	return v
+}
+
+func (d *decoder) reworkBudget(n int) domain.ReworkBudget {
+	v, err := domain.NewReworkBudget(n)
 	d.keep(err)
 	return v
 }

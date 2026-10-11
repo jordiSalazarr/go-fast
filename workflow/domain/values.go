@@ -76,10 +76,13 @@ var (
 	StageImplement          = Stage{name: "implement"}
 	StageReview             = Stage{name: "review"}
 	StageIntegrationTesting = Stage{name: "integration-testing"}
+	// StageFixer is on no path: a work enters it only when a stage that
+	// checks code hands it over, and leaves it for an earlier stage.
+	StageFixer = Stage{name: "fixer"}
 )
 
 func Stages() []Stage {
-	return []Stage{StageDiscovery, StageSpecify, StageImplement, StageReview, StageIntegrationTesting}
+	return []Stage{StageDiscovery, StageSpecify, StageImplement, StageReview, StageIntegrationTesting, StageFixer}
 }
 
 func ParseStage(s string) (Stage, error) {
@@ -133,6 +136,69 @@ func (b AttemptBudget) extendedBy(additional AttemptBudget) AttemptBudget {
 	return AttemptBudget{n: b.n + additional.n}
 }
 
+// ReworkBudget is a positive number of times a work may enter the fixer.
+type ReworkBudget struct{ n int }
+
+// DefaultReworkBudget is every work's rework budget until the owner extends it.
+func DefaultReworkBudget() ReworkBudget { return ReworkBudget{n: 3} }
+
+func NewReworkBudget(n int) (ReworkBudget, error) {
+	if n < 1 {
+		return ReworkBudget{}, fmt.Errorf("rework budget %d: %w", n, ErrInvalidReworkBudget)
+	}
+	return ReworkBudget{n: n}, nil
+}
+
+func (b ReworkBudget) Int() int     { return b.n }
+func (b ReworkBudget) isZero() bool { return b.n == 0 }
+
+func (b ReworkBudget) exhaustedBy(used ReworkCount) bool { return used.n >= b.n }
+
+func (b ReworkBudget) extendedBy(additional ReworkBudget) ReworkBudget {
+	return ReworkBudget{n: b.n + additional.n}
+}
+
+// ReworkCount is how many times a work entered the fixer.
+type ReworkCount struct{ n int }
+
+func NewReworkCount(n int) (ReworkCount, error) {
+	if n < 0 {
+		return ReworkCount{}, fmt.Errorf("rework count %d: %w", n, ErrInvalidReworkBudget)
+	}
+	return ReworkCount{n: n}, nil
+}
+
+func (c ReworkCount) Int() int { return c.n }
+
+func (c ReworkCount) plusOne() ReworkCount { return ReworkCount{n: c.n + 1} }
+
+// FixerMode is what the fixer looks for, given the stage that handed over.
+type FixerMode struct{ name string }
+
+var (
+	// FixerModeCorrectness: the code does the wrong thing (from review or
+	// integration testing).
+	FixerModeCorrectness = FixerMode{name: "correctness"}
+	// FixerModePerformance: the code is too slow (from stress testing, which
+	// doesn't exist yet).
+	FixerModePerformance = FixerMode{name: "performance"}
+)
+
+func ParseFixerMode(s string) (FixerMode, error) {
+	for _, m := range []FixerMode{FixerModeCorrectness, FixerModePerformance} {
+		if m.name == s {
+			return m, nil
+		}
+	}
+	return FixerMode{}, fmt.Errorf("fixer mode %q (available: correctness, performance): %w", s, ErrUnknownFixerMode)
+}
+
+func (m FixerMode) String() string { return m.name }
+
+// fixerModeFor is the mode of the fixer entered from a stage. Every stage
+// that can hand over today judges correctness.
+func fixerModeFor(Stage) FixerMode { return FixerModeCorrectness }
+
 // Attempt is the ordinal of an attempt within an assignment, starting at 1.
 type Attempt struct{ n int }
 
@@ -174,6 +240,8 @@ func NewVisit(n int) (Visit, error) {
 
 func (v Visit) Int() int     { return v.n }
 func (v Visit) isZero() bool { return v.n == 0 }
+
+func (v Visit) next() Visit { return Visit{n: v.n + 1} }
 
 // Description says what a work is about.
 type Description struct{ text string }

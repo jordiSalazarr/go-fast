@@ -16,6 +16,9 @@ import (
 // domain lists them.
 func TestStageAgents_NameTheirExitChecks(t *testing.T) {
 	for _, stage := range domain.Stages() {
+		if stage == domain.StageFixer {
+			continue // its agent comes with gf status' fixer view
+		}
 		body, err := os.ReadFile(filepath.Join("..", "..", "plugin", "agents", stage.String()+".md"))
 		require.NoError(t, err)
 		names := make([]string, 0, len(stage.RequiredChecks()))

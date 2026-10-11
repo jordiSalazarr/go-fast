@@ -19,27 +19,27 @@ type Log interface {
 }
 
 // AbandonWork abandons the active work.
-func AbandonWork(log Log, actor eventlog.Actor, branch domain.Branch, owner domain.Owner, reason domain.Reason) (domain.InProgressWork, error) {
+func AbandonWork(log Log, actor eventlog.Actor, branch domain.Branch, owner domain.Owner, reason domain.Reason) (domain.ActiveWork, error) {
 	records, err := log.ReadAll()
 	if err != nil {
-		return domain.InProgressWork{}, fmt.Errorf("abandon work: %w", err)
+		return nil, fmt.Errorf("abandon work: %w", err)
 	}
 	history := eventlog.NewHistory(records)
 	fact, err := history.ActiveWorkOn(branch)
 	if err != nil {
-		return domain.InProgressWork{}, fmt.Errorf("abandon work: %w", err)
+		return nil, fmt.Errorf("abandon work: %w", err)
 	}
 	work, err := fact.Work()
 	if err != nil {
-		return domain.InProgressWork{}, fmt.Errorf("abandon work: %w", err)
+		return nil, fmt.Errorf("abandon work: %w", err)
 	}
 	version := history.Version(eventlog.WorkStream(work.ID()))
 	events, err := work.AbandonWork(owner, reason)
 	if err != nil {
-		return domain.InProgressWork{}, err
+		return nil, err
 	}
 	if err := log.Append(eventlog.WorkStream(work.ID()), version, actor, eventlog.Events(events)...); err != nil {
-		return domain.InProgressWork{}, fmt.Errorf("abandon work: %w", err)
+		return nil, fmt.Errorf("abandon work: %w", err)
 	}
 	return work, nil
 }
@@ -70,7 +70,7 @@ func NewCommand(openStore func() (*eventlog.Store, error), automate automations.
 			if err != nil {
 				return err
 			}
-			var work domain.InProgressWork
+			var work domain.ActiveWork
 			err = store.Exclusive(func(s *eventlog.Session) error {
 				return automate.AroundCommand(s, func() error {
 					work, err = AbandonWork(s, c.Actor(), branch, owner, reason)

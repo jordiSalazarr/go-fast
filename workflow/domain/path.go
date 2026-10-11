@@ -27,6 +27,12 @@ var paths = map[WorkType][]PathStep{
 	},
 }
 
+// fixerStep is the fixer's gate and budget. The fixer is on no path.
+var fixerStep = PathStep{stage: StageFixer, gate: GateAuto, budget: AttemptBudget{n: 3}}
+
+// FixerStep is the fixer's gate and attempt budget.
+func FixerStep() PathStep { return fixerStep }
+
 // PathFor returns the path of a work type.
 func PathFor(t WorkType) (Path, error) {
 	steps, ok := paths[t]
@@ -40,4 +46,26 @@ func PathFor(t WorkType) (Path, error) {
 func (p Path) Steps() []PathStep { return append([]PathStep(nil), p.steps...) }
 
 func (p Path) step(i int) PathStep { return p.steps[i] }
-func (p Path) isLast(i int) bool   { return i == len(p.steps)-1 }
+
+// indexOf is the position of a stage on the path.
+func (p Path) indexOf(stage Stage) (int, bool) {
+	for i, s := range p.steps {
+		if s.stage == stage {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+// stepOf is the step of a stage: on the path, or the fixer's.
+func (p Path) stepOf(stage Stage) (PathStep, bool) {
+	if stage == StageFixer {
+		return fixerStep, true
+	}
+	i, ok := p.indexOf(stage)
+	if !ok {
+		return PathStep{}, false
+	}
+	return p.steps[i], true
+}
+func (p Path) isLast(i int) bool { return i == len(p.steps)-1 }

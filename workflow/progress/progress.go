@@ -169,11 +169,11 @@ func Read(log Reader, branch domain.Branch) (View, error) {
 		}
 	}
 	stageStatus := StageDone
-	var currentStep domain.PathStep
+	currentStep := work.CurrentStep()
 	for _, step := range work.Path().Steps() {
 		sv := StageView{Stage: step.Stage().String(), Gate: step.Gate().String(), Budget: step.Budget().Int(), Status: stageStatus}
 		if step.Stage() == work.CurrentStage() {
-			sv.Status, stageStatus, currentStep = StageCurrent, StagePending, step
+			sv.Status, stageStatus = StageCurrent, StagePending
 		}
 		if sv.Status == StageDone {
 			sv.Artifact = domain.ArtifactFor(work.ID(), step.Stage(), lastVisit[step.Stage()]).String()
@@ -236,7 +236,7 @@ func checkNames(stage domain.Stage) []string {
 func otherBranches(works []domain.WorkState, branch domain.Branch) []OtherBranchView {
 	others := []OtherBranchView{}
 	for _, w := range works {
-		if p, ok := w.(domain.InProgressWork); ok && p.Branch() != branch {
+		if p, ok := w.(domain.ActiveWork); ok && p.Branch() != branch {
 			others = append(others, OtherBranchView{
 				Branch: p.Branch().String(), WorkID: p.ID().String(), Type: p.Type().String(),
 				Description: p.Description().String(), Stage: p.CurrentStage().String(),

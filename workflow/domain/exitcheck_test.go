@@ -18,6 +18,7 @@ func TestEachStageRequiresItsExitChecks(t *testing.T) {
 			domain.CheckSpecsUntouched, domain.CheckSuitePasses},
 		domain.StageReview:             {domain.CheckArtifactWritten, domain.CheckFormatted, domain.CheckBuildPasses, domain.CheckSuitePasses},
 		domain.StageIntegrationTesting: {domain.CheckArtifactWritten, domain.CheckIntegrationPasses},
+		domain.StageFixer:              {domain.CheckArtifactWritten},
 	}
 	for _, stage := range domain.Stages() {
 		assert.Equal(t, want[stage], stage.RequiredChecks(), stage.String())
@@ -152,7 +153,9 @@ func TestEveryCheckAboutCode_IsRequiredBeforeTheStagesThatCantChangeCode(t *test
 	}
 	for _, workType := range domain.WorkTypes() {
 		var requiredByCodeStages []domain.ExitCheck
-		for _, step := range must(domain.PathFor(workType)).Steps() {
+		// The fixer is on no path, but is entered only after every stage
+		// that can hand over, so it comes last.
+		for _, step := range append(must(domain.PathFor(workType)).Steps(), domain.FixerStep()) {
 			stage := step.Stage()
 			if canChangeCode(stage) {
 				requiredByCodeStages = append(requiredByCodeStages, stage.RequiredChecks()...)
@@ -245,7 +248,7 @@ func TestClassifyFailure_GivenAPassingOutcome_ThenThereIsNoFailure(t *testing.T)
 func TestChecksCode(t *testing.T) {
 	want := map[domain.Stage]bool{
 		domain.StageDiscovery: false, domain.StageSpecify: false, domain.StageImplement: false,
-		domain.StageReview: true, domain.StageIntegrationTesting: true,
+		domain.StageReview: true, domain.StageIntegrationTesting: true, domain.StageFixer: false,
 	}
 	for _, stage := range domain.Stages() {
 		assert.Equal(t, want[stage], stage.ChecksCode(), stage.String())

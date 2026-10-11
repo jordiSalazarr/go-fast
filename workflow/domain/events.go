@@ -35,6 +35,42 @@ type StageEntered struct {
 	Budget AttemptBudget
 }
 
+// FixerEntered: a stage that checks code handed the work over, and the work
+// entered the fixer for the Visit-th time. Followed by the fixer's
+// StageEntered.
+type FixerEntered struct {
+	WorkID    WorkID
+	From      Stage
+	FromVisit Visit
+	Visit     Visit
+	Mode      FixerMode
+	Reason    Reason
+}
+
+// ReworkLimitReached: a stage handed the work over, but it already entered
+// the fixer as often as its rework budget allows.
+type ReworkLimitReached struct {
+	WorkID  WorkID
+	Reworks ReworkCount
+}
+
+// ReworkStarted: the fixer returned the work to an earlier stage, which it
+// enters again on a new visit. Followed by that stage's StageEntered.
+type ReworkStarted struct {
+	WorkID WorkID
+	Target Stage
+	Visit  Visit
+	Reason Reason
+}
+
+// ReworkBudgetExtended: the owner allowed more reworks.
+type ReworkBudgetExtended struct {
+	WorkID     WorkID
+	Owner      Owner
+	Additional ReworkBudget
+	NewBudget  ReworkBudget
+}
+
 type WorkCompleted struct {
 	WorkID WorkID
 }
@@ -115,6 +151,10 @@ func (WorkStarted) isEvent()             {}
 func (StageEntered) isEvent()            {}
 func (WorkCompleted) isEvent()           {}
 func (WorkAbandoned) isEvent()           {}
+func (FixerEntered) isEvent()            {}
+func (ReworkLimitReached) isEvent()      {}
+func (ReworkStarted) isEvent()           {}
+func (ReworkBudgetExtended) isEvent()    {}
 func (AssignmentOpened) isEvent()        {}
 func (AttemptFailed) isEvent()           {}
 func (SubmittedForApproval) isEvent()    {}
@@ -125,10 +165,14 @@ func (AssignmentAccepted) isEvent()      {}
 func (AssignmentCancelled) isEvent()     {}
 func (AssignmentHandedToFixer) isEvent() {}
 
-func (e WorkStarted) workID() WorkID   { return e.WorkID }
-func (e StageEntered) workID() WorkID  { return e.WorkID }
-func (e WorkCompleted) workID() WorkID { return e.WorkID }
-func (e WorkAbandoned) workID() WorkID { return e.WorkID }
+func (e WorkStarted) workID() WorkID          { return e.WorkID }
+func (e StageEntered) workID() WorkID         { return e.WorkID }
+func (e WorkCompleted) workID() WorkID        { return e.WorkID }
+func (e WorkAbandoned) workID() WorkID        { return e.WorkID }
+func (e FixerEntered) workID() WorkID         { return e.WorkID }
+func (e ReworkLimitReached) workID() WorkID   { return e.WorkID }
+func (e ReworkStarted) workID() WorkID        { return e.WorkID }
+func (e ReworkBudgetExtended) workID() WorkID { return e.WorkID }
 
 func (e AssignmentOpened) assignmentID() AssignmentID        { return e.AssignmentID }
 func (e AttemptFailed) assignmentID() AssignmentID           { return e.AssignmentID }

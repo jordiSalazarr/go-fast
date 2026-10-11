@@ -58,6 +58,8 @@ func (s Stage) RequiredChecks() []ExitCheck {
 		return []ExitCheck{CheckArtifactWritten, CheckFormatted, CheckBuildPasses, CheckSuitePasses}
 	case StageIntegrationTesting:
 		return []ExitCheck{CheckArtifactWritten, CheckIntegrationPasses}
+	case StageFixer:
+		return []ExitCheck{CheckArtifactWritten}
 	}
 	return nil
 }

@@ -14,6 +14,8 @@ var (
 	ErrUnknownStage          = errors.New("unknown stage")
 	ErrUnknownGate           = errors.New("unknown gate")
 	ErrInvalidAttemptBudget  = errors.New("attempt budget must be a positive number")
+	ErrInvalidReworkBudget   = errors.New("rework budget must be a positive number")
+	ErrUnknownFixerMode      = errors.New("unknown fixer mode")
 	ErrInvalidAttempt        = errors.New("invalid attempt number")
 	ErrInvalidVisit          = errors.New("visit must be a positive number")
 	ErrEmptyDescription      = errors.New("description must not be empty")
@@ -32,6 +34,8 @@ var (
 	ErrWorkAlreadyActive = errors.New("work is already active on this branch")
 	ErrNotCurrentStage   = errors.New("stage is not the current stage of the work")
 	ErrNoActiveWork      = errors.New("no active work")
+	ErrCannotEnterFixer  = errors.New("only a stage that checks code can hand work to the fixer")
+	ErrInvalidRoute      = errors.New("the fixer can only return work to an earlier stage on its path that can change code")
 )
 
 // The current assignment is not in a state that accepts the command.
@@ -90,3 +94,20 @@ func (e *NotCurrentStageError) Error() string {
 }
 
 func (e *NotCurrentStageError) Unwrap() error { return ErrNotCurrentStage }
+
+// InvalidRouteError names the stage the fixer asked for and the ones it may
+// return the work to.
+type InvalidRouteError struct {
+	Target  Stage
+	Allowed []Stage // in path order
+}
+
+func (e *InvalidRouteError) Error() string {
+	names := make([]string, len(e.Allowed))
+	for i, s := range e.Allowed {
+		names[i] = s.name
+	}
+	return fmt.Sprintf("%s: %s is not one of %s", ErrInvalidRoute, e.Target, strings.Join(names, ", "))
+}
+
+func (e *InvalidRouteError) Unwrap() error { return ErrInvalidRoute }

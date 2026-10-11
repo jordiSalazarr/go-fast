@@ -230,12 +230,7 @@ func loadFacts(repo claudehooks.Repo, branchOf func(root string) (domain.Branch,
 		}
 		facts = assignmentFacts{
 			readable: true, active: true, stage: work.CurrentStage(), assignment: work.CurrentAssignment(),
-			artifact: domain.ArtifactFor(work.ID(), work.CurrentStage(), work.CurrentVisit()),
-		}
-		for _, step := range work.Path().Steps() {
-			if step.Stage() == work.CurrentStage() {
-				facts.budget = step.Budget()
-			}
+			budget: work.CurrentStep().Budget(), artifact: domain.ArtifactFor(work.ID(), work.CurrentStage(), work.CurrentVisit()),
 		}
 		state, version, err := history.Assignment(facts.assignment)
 		switch {
