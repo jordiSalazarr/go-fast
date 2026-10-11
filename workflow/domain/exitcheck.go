@@ -31,6 +31,13 @@ var (
 	CheckFormatted = ExitCheck{name: "formatted"}
 	// CheckIntegrationPasses: the repository's integration command passes.
 	CheckIntegrationPasses = ExitCheck{name: "integration-passes"}
+	// CheckStressScriptsValid: every mandatory NFR has a k6 script, no script
+	// sets the load or judges the run, and every script ran and generated its
+	// NFR's operation. It is about the stage's own work, not the code.
+	CheckStressScriptsValid = ExitCheck{name: "stress-scripts-valid"}
+	// CheckNFRsMet: under each scripted NFR's load, the service meets the
+	// NFR's targets, as gf measured them.
+	CheckNFRsMet = ExitCheck{name: "nfrs-met"}
 )
 
 // ExitChecks lists every exit check.
@@ -38,6 +45,7 @@ func ExitChecks() []ExitCheck {
 	return []ExitCheck{
 		CheckArtifactWritten, CheckSpecsFail, CheckBuildPasses, CheckSpecsPass,
 		CheckSpecsUntouched, CheckSuitePasses, CheckFormatted, CheckIntegrationPasses,
+		CheckStressScriptsValid, CheckNFRsMet,
 	}
 }
 
@@ -58,7 +66,9 @@ func (s Stage) RequiredChecks() []ExitCheck {
 		return []ExitCheck{CheckArtifactWritten, CheckFormatted, CheckBuildPasses, CheckSuitePasses}
 	case StageIntegrationTesting:
 		return []ExitCheck{CheckArtifactWritten, CheckIntegrationPasses}
-	case StageStressTesting, StageFixer:
+	case StageStressTesting:
+		return []ExitCheck{CheckArtifactWritten, CheckStressScriptsValid, CheckNFRsMet}
+	case StageFixer:
 		return []ExitCheck{CheckArtifactWritten}
 	}
 	return nil
@@ -265,28 +275,36 @@ func (k FailureKind) String() string { return k.name }
 // outcome that passed. It depends only on what failed and on the stage the
 // outcome is about: its write scope, and whether it checks code.
 //
-// A missing or unchanged artifact, or a change outside the write scope, is
+// A failed check about the stage's own work (a missing or unchanged
+// artifact, invalid stress scripts), or a change outside the write scope, is
 // always the stage's own work. So is any failure of a stage that can change
 // code: it fixes the code itself on its next attempt. A stage that checks
-// code it can't change (review, integration testing) fails on the code when
-// one of its other checks fails, or when its agent says the code is wrong.
+// code it can't change (review, integration testing, stress testing) fails
+// on the code when one of its other checks fails, or when its agent says the
+// code is wrong.
 func ClassifyFailure(outcome ExitCheckOutcome) (kind FailureKind, ok bool) {
 	if outcome.passed {
 		return FailureKind{}, false
 	}
-	if outcome.scopeViolated || slices.Contains(outcome.failedChecks, CheckArtifactWritten) || !outcome.stage.ChecksCode() {
+	if outcome.scopeViolated || slices.ContainsFunc(outcome.failedChecks, ExitCheck.judgesStageWork) || !outcome.stage.ChecksCode() {
 		return StageWorkFailure, true
 	}
 	return CodeFailure, true
 }
 
+// judgesStageWork reports whether a check is about what the stage itself
+// writes, not about the code.
+func (c ExitCheck) judgesStageWork() bool {
+	return c == CheckArtifactWritten || c == CheckStressScriptsValid
+}
+
 // ChecksCode reports whether the stage judges code it can't change: its
-// write scope can't change code, yet it requires a check other than
-// artifact-written. Discovery and the fixer only write their artifact, so
-// their failures are always their own work.
+// write scope can't change code, yet it requires a check about the code.
+// Discovery and the fixer only write their artifact, so their failures are
+// always their own work.
 func (s Stage) ChecksCode() bool {
 	return !s.WriteScope().CanChangeCode() && slices.ContainsFunc(s.RequiredChecks(), func(c ExitCheck) bool {
-		return c != CheckArtifactWritten
+		return !c.judgesStageWork()
 	})
 }
 

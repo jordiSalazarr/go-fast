@@ -46,6 +46,17 @@ func ArtifactDir(work WorkID) RepoPath {
 	return RepoPath{value: gofastDir.value + "/works/" + work.value}
 }
 
+// StressScriptFor is where the stress-testing agent writes the k6 script
+// for an NFR, in the work's artifact directory.
+func StressScriptFor(work WorkID, nfr NFRID) RepoPath {
+	return RepoPath{value: StressScriptsDir(work).value + "/" + nfr.value + ".js"}
+}
+
+// StressScriptsDir holds the work's k6 scripts, one per NFR.
+func StressScriptsDir(work WorkID) RepoPath {
+	return RepoPath{value: ArtifactDir(work).value + "/stress"}
+}
+
 // ArtifactFor is the artifact every stage visit writes.
 func ArtifactFor(work WorkID, stage Stage, visit Visit) RepoPath {
 	return RepoPath{value: ArtifactDir(work).value + "/" + stage.name + "-v" + strconv.Itoa(visit.n) + ".md"}

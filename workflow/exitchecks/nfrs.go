@@ -108,6 +108,9 @@ func (n nfrJSON) toDomain() (domain.NFR, error) {
 	if err != nil {
 		return domain.NFR{}, err
 	}
+	if duration < time.Second {
+		return domain.NFR{}, fmt.Errorf(`"load.duration" must be at least 1s, k6's shortest run, not %q`, n.Load.Duration)
+	}
 	load, err := domain.NewLoad(n.Load.VUs, duration)
 	if err != nil {
 		return domain.NFR{}, errors.New(`"load.vus" must be a positive whole number`)

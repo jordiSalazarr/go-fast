@@ -40,6 +40,9 @@ type Visit struct {
 	// BaselineStarted: the visit had no baseline until this submission, so
 	// nothing is known about what it changed.
 	BaselineStarted bool
+	// FirstAssignment is the work's first stage visit: what the work changed
+	// is what changed since its baseline.
+	FirstAssignment domain.AssignmentID
 }
 
 // Runner runs exit checks in one repository.
@@ -131,6 +134,7 @@ type checkRun struct {
 	log       io.Writer
 	logPath   string
 	baselines worktree.Baselines
+	stress    *stressRun // run once, by the first stress check
 }
 
 func (c *checkRun) check(check domain.ExitCheck) (finding, error) {
@@ -151,6 +155,10 @@ func (c *checkRun) check(check domain.ExitCheck) (finding, error) {
 		return c.formatted()
 	case domain.CheckIntegrationPasses:
 		return c.integrationPasses()
+	case domain.CheckStressScriptsValid:
+		return c.stressScriptsValid()
+	case domain.CheckNFRsMet:
+		return c.nfrsMet()
 	}
 	return finding{}, fmt.Errorf("gf does not know how to run %q", check)
 }
@@ -508,12 +516,16 @@ func (o output) failure() string {
 // GF_ACTOR, and logs it with its output. A command that times out is killed
 // with the processes it started.
 func (c *checkRun) command(timeout time.Duration, argv ...string) (output, error) {
+	return c.commandWithEnv(timeout, withoutActor(c.Env), argv...)
+}
+
+func (c *checkRun) commandWithEnv(timeout time.Duration, env []string, argv ...string) (output, error) {
 	fmt.Fprintf(c.log, "$ %s\n", strings.Join(argv, " "))
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = c.Root
-	cmd.Env = withoutActor(c.Env)
+	cmd.Env = env
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 	cmd.WaitDelay = 5 * time.Second

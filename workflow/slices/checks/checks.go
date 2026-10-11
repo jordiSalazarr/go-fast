@@ -6,6 +6,7 @@ package checks
 import (
 	"fmt"
 	"io"
+	"os/exec"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -70,6 +71,17 @@ func render(w io.Writer, config exitchecks.Config) {
 		fmt.Fprintf(w, "  integration  %s (timeout %s)\n", c, c.Timeout)
 	} else {
 		fmt.Fprintf(w, "  integration  not configured: integration-passes fails until the owner adds one to %s\n", exitchecks.ConfigPath)
+	}
+	if st := config.Stress; st != nil {
+		fmt.Fprintf(w, "  stress       start %s, ready at %s within %s, k6 sends to %s (timeout %s per run)\n",
+			strings.Join(st.Start, " "), st.Ready, st.StartTimeout, st.BaseURL, st.Timeout)
+	} else {
+		fmt.Fprintf(w, "  stress       not configured: stress testing fails until the owner adds a \"stress\" section to %s\n", exitchecks.ConfigPath)
+	}
+	if k6, err := exec.LookPath("k6"); err == nil {
+		fmt.Fprintf(w, "  k6           %s\n", k6)
+	} else {
+		fmt.Fprintln(w, "  k6           not found on PATH: stress testing fails until it is installed (https://k6.io)")
 	}
 	fmt.Fprintln(w, "\nRequired checks per stage:")
 	for _, stage := range domain.Stages() {

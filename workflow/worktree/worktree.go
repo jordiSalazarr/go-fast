@@ -127,16 +127,15 @@ func (b Baselines) ChangedSince(id domain.AssignmentID) (changed domain.ChangedF
 // it can't tell what the work changed.
 var ErrNoWorkBaseline = errors.New("the baseline of the work's first stage visit is missing")
 
-// WorkChanges returns the files the work changed since its first stage
-// visit began, except the ones gf itself writes.
-func (b Baselines) WorkChanges(work domain.ActiveWork) (domain.ChangedFiles, error) {
-	first := work.FirstAssignment()
+// WorkChanges returns the files a work changed since its first stage visit
+// (first) began, except the ones gf itself writes.
+func (b Baselines) WorkChanges(first domain.AssignmentID) (domain.ChangedFiles, error) {
 	base, ok, err := b.read(first)
 	if err != nil {
 		return domain.ChangedFiles{}, err
 	}
 	if !ok {
-		return domain.ChangedFiles{}, fmt.Errorf("changes of work %s: %w", work.ID(), ErrNoWorkBaseline)
+		return domain.ChangedFiles{}, fmt.Errorf("changes since %s: %w", first, ErrNoWorkBaseline)
 	}
 	return b.changedSinceTree(first, base)
 }

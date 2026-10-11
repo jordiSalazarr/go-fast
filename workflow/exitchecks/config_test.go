@@ -53,16 +53,47 @@ func TestLoadConfig_IntegrationTimeoutDefaultsToTheCheckTimeout(t *testing.T) {
 	assert.Equal(t, 3*time.Minute, config.Integration.Timeout)
 }
 
+func TestLoadConfig_ReadsTheStressSection(t *testing.T) {
+	root := t.TempDir()
+	writeConfig(t, root, `{"stress": {
+		"start": ["go", "run", "./cmd/server"], "ready": "http://localhost:8080/healthz", "baseUrl": "http://localhost:8080",
+		"startTimeout": "30s", "timeout": "20m"}}`)
+
+	config, err := exitchecks.LoadConfig(root)
+
+	require.NoError(t, err)
+	assert.Equal(t, &exitchecks.Stress{
+		Start: []string{"go", "run", "./cmd/server"}, Ready: "http://localhost:8080/healthz", BaseURL: "http://localhost:8080",
+		StartTimeout: 30 * time.Second, Timeout: 20 * time.Minute,
+	}, config.Stress)
+}
+
+func TestLoadConfig_StressTimeoutsHaveDefaults(t *testing.T) {
+	root := t.TempDir()
+	writeConfig(t, root, `{"stress": {"start": ["./server"], "ready": "http://127.0.0.1:9000/", "baseUrl": "http://127.0.0.1:9000"}}`)
+
+	config, err := exitchecks.LoadConfig(root)
+
+	require.NoError(t, err)
+	assert.Equal(t, time.Minute, config.Stress.StartTimeout)
+	assert.Equal(t, 15*time.Minute, config.Stress.Timeout)
+}
+
 func TestLoadConfig_RejectsWhatItCannotUse(t *testing.T) {
 	for name, content := range map[string]string{
-		"not JSON":          `{`,
-		"unknown field":     `{"integartion": {"command": ["x"]}}`,
-		"command as string": `{"integration": {"command": "go test ./..."}}`,
-		"empty command":     `{"integration": {"command": []}}`,
-		"blank program":     `{"integration": {"command": [" "]}}`,
-		"bad timeout":       `{"timeout": "ten minutes"}`,
-		"negative timeout":  `{"timeout": "-1m"}`,
-		"bad integration":   `{"integration": {"command": ["x"], "timeout": "0s"}}`,
+		"not JSON":             `{`,
+		"unknown field":        `{"integartion": {"command": ["x"]}}`,
+		"command as string":    `{"integration": {"command": "go test ./..."}}`,
+		"empty command":        `{"integration": {"command": []}}`,
+		"blank program":        `{"integration": {"command": [" "]}}`,
+		"bad timeout":          `{"timeout": "ten minutes"}`,
+		"negative timeout":     `{"timeout": "-1m"}`,
+		"bad integration":      `{"integration": {"command": ["x"], "timeout": "0s"}}`,
+		"stress without start": `{"stress": {"ready": "http://a/", "baseUrl": "http://a"}}`,
+		"stress ready not URL": `{"stress": {"start": ["x"], "ready": "localhost:8080/healthz", "baseUrl": "http://a"}}`,
+		"stress no base URL":   `{"stress": {"start": ["x"], "ready": "http://a/"}}`,
+		"stress bad timeout":   `{"stress": {"start": ["x"], "ready": "http://a/", "baseUrl": "http://a", "timeout": "long"}}`,
+		"stress unknown field": `{"stress": {"start": ["x"], "ready": "http://a/", "baseUrl": "http://a", "vus": 5}}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			root := t.TempDir()

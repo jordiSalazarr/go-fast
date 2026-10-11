@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,15 +23,36 @@ const ConfigPath = ".gofast/checks.json"
 const DefaultTimeout = 10 * time.Minute
 
 // Config is what a repository configures about its exit checks: what counts
-// as its integration suite, and how long a check's command may take.
+// as its integration suite, how to run its service for stress testing, and
+// how long a check's command may take.
 type Config struct {
 	// Integration is nil when the repository has no integration command;
 	// integration-passes then fails.
 	Integration *Command
-	Timeout     time.Duration
+	// Stress is nil when the repository can't be stress tested; the
+	// stress-testing stage then fails closed.
+	Stress  *Stress
+	Timeout time.Duration
 	// Configured is false when there is no ConfigPath; the defaults apply.
 	Configured bool
 }
+
+// Stress is how gf runs the repository's service for stress testing: the
+// command that starts it, the URL that answers 2xx once it is ready, and the
+// base URL the k6 scripts send their requests to.
+type Stress struct {
+	Start        []string
+	Ready        string
+	BaseURL      string
+	StartTimeout time.Duration // to become ready
+	Timeout      time.Duration // for each k6 run
+}
+
+// Stress defaults.
+const (
+	DefaultStressStartTimeout = time.Minute
+	DefaultStressTimeout      = 15 * time.Minute
+)
 
 // Command is a program and its arguments, run without a shell.
 type Command struct {
@@ -51,6 +73,13 @@ type configFile struct {
 		Command []string `json:"command"`
 		Timeout string   `json:"timeout"`
 	} `json:"integration"`
+	Stress *struct {
+		Start        []string `json:"start"`
+		Ready        string   `json:"ready"`
+		BaseURL      string   `json:"baseUrl"`
+		StartTimeout string   `json:"startTimeout"`
+		Timeout      string   `json:"timeout"`
+	} `json:"stress"`
 	Timeout string `json:"timeout"`
 }
 
@@ -89,7 +118,34 @@ func LoadConfig(root string) (Config, error) {
 		}
 		config.Integration = &command
 	}
+	if st := file.Stress; st != nil {
+		stress := Stress{Start: st.Start, Ready: st.Ready, BaseURL: st.BaseURL, StartTimeout: DefaultStressStartTimeout, Timeout: DefaultStressTimeout}
+		if len(st.Start) == 0 || strings.TrimSpace(st.Start[0]) == "" {
+			return Config{}, &ConfigError{Problem: `"stress.start" must name the program that starts the service, e.g. ["go", "run", "./cmd/server"]`}
+		}
+		for field, u := range map[string]string{"stress.ready": st.Ready, "stress.baseUrl": st.BaseURL} {
+			if !httpURL(u) {
+				return Config{}, &ConfigError{Problem: fmt.Sprintf("%q must be an http:// or https:// URL, not %q", field, u)}
+			}
+		}
+		if st.StartTimeout != "" {
+			if stress.StartTimeout, err = parseTimeout("stress.startTimeout", st.StartTimeout); err != nil {
+				return Config{}, err
+			}
+		}
+		if st.Timeout != "" {
+			if stress.Timeout, err = parseTimeout("stress.timeout", st.Timeout); err != nil {
+				return Config{}, err
+			}
+		}
+		config.Stress = &stress
+	}
 	return config, nil
+}
+
+func httpURL(s string) bool {
+	u, err := url.Parse(s)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
 }
 
 func parseTimeout(field, s string) (time.Duration, error) {

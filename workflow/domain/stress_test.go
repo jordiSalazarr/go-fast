@@ -342,3 +342,38 @@ func TestRebuildAssignment_RejectsAReviewAcceptedWithoutADecision_OrAnotherStage
 		require.ErrorIs(t, err, domain.ErrInconsistentHistory, name)
 	}
 }
+
+// Given stress testing found an NFR missed, when the work enters the fixer,
+// then the fixer looks for a performance problem, and may send the work
+// back to specify or implement.
+func TestEnterFixer_FromStressTesting_IsInPerformanceMode(t *testing.T) {
+	given := append(onIntegration(includeStress), entered(domain.StageStressTesting, 1))
+	w := asInProgress(t, givenWork(t, given...))
+
+	events, err := w.EnterFixer(domain.StageStressTesting, visit1, reasonOf("nfrs-met: wallet: p95 212ms > 150ms."))
+
+	thenEvents(t, events, err,
+		domain.WorkEvent(domain.FixerEntered{WorkID: workID, From: domain.StageStressTesting, FromVisit: visit1, Visit: visit1,
+			Mode: domain.FixerModePerformance, Reason: reasonOf("nfrs-met: wallet: p95 212ms > 150ms.")}),
+		entered(domain.StageFixer, 1))
+	fixer := stateIs[domain.InFixerWork](t, thenWorkState(t, given, events))
+	assert.Equal(t, domain.FixerModePerformance, fixer.Mode())
+	assert.Equal(t, []domain.Stage{domain.StageSpecify, domain.StageImplement}, fixer.RouteTargets())
+}
+
+func TestRebuildWork_RejectsAFixerFromStressTestingInCorrectnessMode(t *testing.T) {
+	history := append(onIntegration(includeStress), entered(domain.StageStressTesting, 1),
+		domain.FixerEntered{WorkID: workID, From: domain.StageStressTesting, FromVisit: visit1, Visit: visit1,
+			Mode: domain.FixerModeCorrectness, Reason: reasonOf("slow")},
+		entered(domain.StageFixer, 1))
+
+	_, err := domain.RebuildWork(history)
+
+	require.ErrorIs(t, err, domain.ErrInconsistentHistory)
+}
+
+func TestStressScripts_LiveInTheWorksArtifactDirectory(t *testing.T) {
+	assert.Equal(t, ".gofast/works/w1/stress", domain.StressScriptsDir(workID).String())
+	assert.Equal(t, ".gofast/works/w1/stress/wallet-transaction-latency.js", domain.StressScriptFor(workID, walletID).String())
+	assert.True(t, domain.StageStressTesting.WriteScope().Allows(domain.StressScriptFor(workID, walletID), workID))
+}

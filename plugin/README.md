@@ -141,25 +141,29 @@ list them.
 | implement | artifact-written, build-passes, formatted, specs-pass, specs-untouched, suite-passes |
 | review | artifact-written, formatted, build-passes, suite-passes |
 | integration-testing | artifact-written, integration-passes |
+| stress-testing | artifact-written, stress-scripts-valid, nfrs-met |
 | fixer | artifact-written |
 
 A stage that may only write its artifact can't fix code, so every check
 about code it requires is also required by implement, which can: unformatted
-code fails implement, not review. The one exception is integration-passes,
-integration testing's own purpose.
+code fails implement, not review. The exceptions are integration-passes and
+nfrs-met, integration and stress testing's own purposes.
 
 ## The fixer and rework
 
 A failed submission doesn't always mean the stage did its own work badly.
 gf tells two kinds apart:
 
-- **Stage-work failure**: the artifact is missing or unchanged, a file
-  outside the write scope changed, or a stage that can change code (specify,
-  implement) failed. The same stage tries again, using an attempt.
+- **Stage-work failure**: the artifact is missing or unchanged, the stress
+  scripts aren't valid, a file outside the write scope changed, or a stage
+  that can change code (specify, implement) failed. The same stage tries
+  again, using an attempt.
 - **Code failure**: in a stage that checks code it can't change (review,
-  integration testing), any other failed check, or the agent's own
-  `--failed` (review found a blocking problem). Retrying that stage can never
-  fix the code, so the work goes to the **fixer** instead, using no attempt.
+  integration testing, stress testing), any other failed check, or the
+  agent's own `--failed` (review found a blocking problem). Retrying that
+  stage can never fix the code, so the work goes to the **fixer** instead,
+  using no attempt. From stress testing, the fixer works in **performance**
+  mode; otherwise in **correctness** mode.
 
 The fixer (`gofast:fixer`) finds the root cause and writes it in its
 artifact, with what the next visit must do. It ends with
@@ -198,6 +202,51 @@ testing; a mandatory stress test still can't be skipped. The owner's
 decision stands over review's, unless the change later touches an NFR's
 areas. A rework clears the decision: the next review decides again, since
 the diff may have changed.
+
+**The agent writes, gf runs and measures.** The stress-testing agent writes
+one k6 script per NFR it exercises, at
+`.gofast/works/<work>/stress/<nfr-id>.js`: every mandatory NFR needs one,
+and it may add others. A script reads the service's address from
+`__ENV.BASE_URL` and sends the NFR's `operation`, with whatever data setup it
+needs. It must not set the load or judge the run: no `thresholds`,
+`handleSummary`, `vus`, `duration`, `iterations`, `stages`, `scenarios`,
+`rps` or `minIterationDuration`, and options only as
+`export const options = {...}`.
+
+Tell gf how to run your service, in the `stress` section of
+`.gofast/checks.json`:
+
+```json
+"stress": {
+  "start": ["go", "run", "./cmd/server"],
+  "ready": "http://localhost:8080/healthz",
+  "baseUrl": "http://localhost:8080",
+  "startTimeout": "60s",
+  "timeout": "15m"
+}
+```
+
+For each script, `gf submit --passed` starts the service (refusing if
+something already answers at `ready`), waits until `ready` answers 2xx, runs
+`k6 run` with the NFR's `vus` and `duration` (at least 1s), stops the
+service's whole process group, and measures the run from k6's raw output
+itself: p95, p99, error rate (no response, or a status of 400 or more) and
+requests per second, counting only the NFR's operation during the load (not
+`setup()`, not other requests, not requests renamed with a `name` tag).
+k6 runs with `--no-thresholds`, no end-of-test summary, an empty config file
+and no `K6_*` variables, so nothing but the NFR sets the load. Everything a
+run leaves is in `.gofast/runtime/checks/<assignment>-attempt<n>/`
+(`<nfr-id>.json.gz`, `<nfr-id>.k6.log`, `<nfr-id>.service.log`).
+
+- **stress-scripts-valid**: every mandatory NFR has a script, every script
+  is for an NFR and passes the static check, and every script ran under k6
+  and sent its NFR's operation. It also fails, closed, without k6 on `PATH`,
+  without a `stress` section, or without NFRs. These are the stage's own
+  work (or yours): the stage tries again, using an attempt.
+- **nfrs-met**: every scripted NFR met its targets, e.g.
+  `wallet-transaction-latency: p95 212ms > 150ms`, or the service never got
+  ready. That is a **code failure**: the work goes to the fixer in
+  **performance** mode, with the measurements in the reason.
 
 ## Write scopes
 

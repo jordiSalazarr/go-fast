@@ -97,6 +97,7 @@ func TestLoadNFRs_RejectsWhatItCannotUse(t *testing.T) {
 			{"id": "x", "areas": ["b/**"], "operation": "GET /b", "load": {"vus": 1, "duration": "1s"}, "targets": {"p95": "1ms"}}]}`,
 		"two JSON values":       `{"nfrs": []} {"nfrs": []}`,
 		"string vus":            `{"nfrs": [{"id": "x", "areas": ["a/**"], "operation": "GET /a", "load": {"vus": "1", "duration": "1s"}, "targets": {"p95": "1ms"}}]}`,
+		"load under a second":   `{"nfrs": [{"id": "x", "areas": ["a/**"], "operation": "GET /a", "load": {"vus": 1, "duration": "500ms"}, "targets": {"p95": "1ms"}}]}`,
 		"load duration missing": `{"nfrs": [{"id": "x", "areas": ["a/**"], "operation": "GET /a", "load": {"vus": 1}, "targets": {"p95": "1ms"}}]}`,
 	} {
 		t.Run(name, func(t *testing.T) {

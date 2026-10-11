@@ -187,7 +187,7 @@ func Check(target Target, claim domain.AgentClaim, changes Changes, checks Check
 	checked.Results, err = checks(exitchecks.Visit{
 		Assignment: open.ID(), Work: open.Work(), Stage: open.Stage(), Visit: open.Visit(),
 		Attempt: currentAttempt(open), Specify: target.specify, SpecifyEnd: target.specifyEnd,
-		Changed: changed, BaselineStarted: started,
+		Changed: changed, BaselineStarted: started, FirstAssignment: target.work.FirstAssignment(),
 	}, progress)
 	if err != nil {
 		return Checked{}, fmt.Errorf("submit for acceptance: %w", err)

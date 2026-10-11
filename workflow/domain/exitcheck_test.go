@@ -18,7 +18,7 @@ func TestEachStageRequiresItsExitChecks(t *testing.T) {
 			domain.CheckSpecsUntouched, domain.CheckSuitePasses},
 		domain.StageReview:             {domain.CheckArtifactWritten, domain.CheckFormatted, domain.CheckBuildPasses, domain.CheckSuitePasses},
 		domain.StageIntegrationTesting: {domain.CheckArtifactWritten, domain.CheckIntegrationPasses},
-		domain.StageStressTesting:      {domain.CheckArtifactWritten},
+		domain.StageStressTesting:      {domain.CheckArtifactWritten, domain.CheckStressScriptsValid, domain.CheckNFRsMet},
 		domain.StageFixer:              {domain.CheckArtifactWritten},
 	}
 	for _, stage := range domain.Stages() {
@@ -32,7 +32,7 @@ func TestExitChecksHaveStableNames(t *testing.T) {
 		names = append(names, c.String())
 	}
 	assert.Equal(t, []string{"artifact-written", "specs-fail", "build-passes", "specs-pass",
-		"specs-untouched", "suite-passes", "formatted", "integration-passes"}, names)
+		"specs-untouched", "suite-passes", "formatted", "integration-passes", "stress-scripts-valid", "nfrs-met"}, names)
 }
 
 func TestCheckFailed_NeedsASummary(t *testing.T) {
@@ -141,12 +141,17 @@ func TestExitCheckOutcome_GivenAFailedClaim_ThenCheckResultsAreIgnored(t *testin
 
 // A stage that can't change code can only fail a check about code until it
 // escalates, so an earlier stage on the path that can change code must
-// require that check too. Two checks are exempt:
-//   - artifact-written is about the artifact, which every stage can write;
-//   - integration-passes is integration testing's own purpose: a failure
-//     there is a finding that needs rework, not a check implement forgot.
+// require that check too. These checks are exempt:
+//   - artifact-written and stress-scripts-valid are about what the stage
+//     itself writes (its artifact, its k6 scripts), not about code;
+//   - integration-passes and nfrs-met are integration and stress testing's
+//     own purposes: a failure there is a finding that needs rework, not a
+//     check implement forgot.
 func TestEveryCheckAboutCode_IsRequiredBeforeTheStagesThatCantChangeCode(t *testing.T) {
-	exempt := map[domain.ExitCheck]bool{domain.CheckArtifactWritten: true, domain.CheckIntegrationPasses: true}
+	exempt := map[domain.ExitCheck]bool{
+		domain.CheckArtifactWritten: true, domain.CheckStressScriptsValid: true,
+		domain.CheckIntegrationPasses: true, domain.CheckNFRsMet: true,
+	}
 	// Code is any Go file, tests included: specify writes test code.
 	code := []domain.RepoPath{must(domain.NewRepoPath("/repo", "server/server.go")), must(domain.NewRepoPath("/repo", "server/server_test.go"))}
 	canChangeCode := func(stage domain.Stage) bool {
@@ -215,6 +220,17 @@ func TestClassifyFailure(t *testing.T) {
 			passedAll(domain.StageIntegrationTesting, checkFailed(domain.CheckIntegrationPasses, "exit status 1")), domain.CodeFailure},
 		{"integration testing: agent claims a failure", domain.StageIntegrationTesting, domain.ClaimFailed(reasonOf("flaky endpoint")),
 			scopeOf(domain.StageIntegrationTesting), nil, domain.CodeFailure},
+		{"stress testing: an NFR missed its targets", domain.StageStressTesting, domain.ClaimPassed(), scopeOf(domain.StageStressTesting),
+			passedAll(domain.StageStressTesting, checkFailed(domain.CheckNFRsMet, "wallet: p95 212ms > 150ms")), domain.CodeFailure},
+		{"stress testing: a script sets thresholds", domain.StageStressTesting, domain.ClaimPassed(), scopeOf(domain.StageStressTesting),
+			passedAll(domain.StageStressTesting, checkFailed(domain.CheckStressScriptsValid, "wallet.js sets options.thresholds")), domain.StageWorkFailure},
+		{"stress testing: invalid scripts and missed targets", domain.StageStressTesting, domain.ClaimPassed(), scopeOf(domain.StageStressTesting),
+			passedAll(domain.StageStressTesting, checkFailed(domain.CheckStressScriptsValid, "no script for wallet"),
+				checkFailed(domain.CheckNFRsMet, "not measured")), domain.StageWorkFailure},
+		{"stress testing: artifact not written", domain.StageStressTesting, domain.ClaimPassed(), scopeOf(domain.StageStressTesting),
+			passedAll(domain.StageStressTesting, artifactMissing), domain.StageWorkFailure},
+		{"stress testing: wrote outside its scope", domain.StageStressTesting, domain.ClaimPassed(), scopeOf(domain.StageStressTesting, "server/server.go"),
+			passedAll(domain.StageStressTesting), domain.StageWorkFailure},
 		{"implement: suite fails", domain.StageImplement, domain.ClaimPassed(), scopeOf(domain.StageImplement),
 			passedAll(domain.StageImplement, checkFailed(domain.CheckSuitePasses, "1 test failed")), domain.StageWorkFailure},
 		{"implement: agent claims a failure", domain.StageImplement, domain.ClaimFailed(reasonOf("can't fix it")),
@@ -249,7 +265,7 @@ func TestClassifyFailure_GivenAPassingOutcome_ThenThereIsNoFailure(t *testing.T)
 func TestChecksCode(t *testing.T) {
 	want := map[domain.Stage]bool{
 		domain.StageDiscovery: false, domain.StageSpecify: false, domain.StageImplement: false,
-		domain.StageReview: true, domain.StageIntegrationTesting: true, domain.StageFixer: false,
+		domain.StageReview: true, domain.StageIntegrationTesting: true, domain.StageStressTesting: true, domain.StageFixer: false,
 	}
 	for _, stage := range domain.Stages() {
 		assert.Equal(t, want[stage], stage.ChecksCode(), stage.String())

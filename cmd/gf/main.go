@@ -219,7 +219,7 @@ func (a *app) stressFacts(work domain.ActiveWork) ([]domain.NFR, domain.ChangedF
 	if err != nil {
 		return nil, domain.ChangedFiles{}, err
 	}
-	changed, err := worktree.OpenBaselines(root).WorkChanges(work)
+	changed, err := worktree.OpenBaselines(root).WorkChanges(work.FirstAssignment())
 	if err != nil {
 		return nil, domain.ChangedFiles{}, err
 	}

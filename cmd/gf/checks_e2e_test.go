@@ -23,11 +23,16 @@ func TestChecks_ShowsTheConfigurationAndEachStagesChecks(t *testing.T) {
 
 	assert.NotContains(t, out, "Warning")
 
-	r.write(".gofast/checks.json", `{"integration": {"command": ["go", "test", "-tags=integration", "./..."], "timeout": "15m"}, "timeout": "5m"}`)
+	assert.Contains(t, out, "stress       not configured: stress testing fails until the owner adds a \"stress\" section to .gofast/checks.json")
+
+	r.write(".gofast/checks.json", `{"integration": {"command": ["go", "test", "-tags=integration", "./..."], "timeout": "15m"}, "timeout": "5m",
+		"stress": {"start": ["go", "run", "./cmd/server"], "ready": "http://localhost:8080/healthz", "baseUrl": "http://localhost:8080"}}`)
 	out = r.gf("checks")
 	assert.Contains(t, out, "Exit-check configuration (.gofast/checks.json):")
 	assert.Contains(t, out, "timeout      5m0s per check command")
 	assert.Contains(t, out, "integration  go test -tags=integration ./... (timeout 15m0s)")
+	assert.Contains(t, out, "stress       start go run ./cmd/server, ready at http://localhost:8080/healthz within 1m0s, k6 sends to http://localhost:8080 (timeout 15m0s per run)")
+	assert.Regexp(t, `  k6           (/.*k6|not found on PATH: stress testing fails until it is installed \(https://k6.io\))\n`, out)
 
 	r.write(".gofast/checks.json", `{"timeout": "soon"}`)
 	res := r.gfFails(nil, "checks")
