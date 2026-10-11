@@ -108,7 +108,14 @@ Scopes are enforced twice:
 
 If a stage has no baseline (it began before this check existed, or on
 another machine), gf takes one when the next stage agent starts or at
-submit, and says that the check starts from then.
+submit, and says that the write-scope check starts from then. The exit
+checks can't work without the baseline the stage began with, so a
+`--passed` then fails with:
+
+> The baseline for '<stage>' is missing (the work was started before this version of gf, or on another machine). The owner should abandon this work with `gf abandon "<reason>"` and start it again.
+
+`gf extend` can't fix this: more attempts don't bring a baseline back.
+Abandon the work and start it again on this machine.
 
 The guard also denies any Bash command that mentions `GF_ACTOR`,
 `events.jsonl`, `events.lock`, `gf.log`, `.gofast/event`, `.gofast/gf` or
@@ -180,8 +187,9 @@ These are known and out of scope:
 - **Changes the owner makes during a stage** count as the stage's changes at
   submit time.
 - **Very old baselines.** Baseline trees aren't referenced by any branch, so
-  `git gc` may prune them after a few weeks; the check then starts again from
-  a new baseline, with a note.
+  `git gc` may prune them after a few weeks. The exit checks then fail with
+  the missing-baseline message above, and the owner abandons and restarts the
+  work.
 - **A crash between an append and its seal** is reported as a change on the
   next command; check the log and run `gf log accept`.
 

@@ -272,8 +272,11 @@ func TestImplement_WithoutTheSpecifyBaseline_FailsWithAClearMessage(t *testing.T
 
 	results := m.check(domain.StageImplement, exitchecks.Config{})
 
-	fails(t, results[domain.CheckSpecsPass], "no baseline of the working tree was recorded for 'specify' on this machine", "`gf extend`")
-	fails(t, results[domain.CheckSpecsUntouched], "no baseline of the working tree was recorded for 'specify'")
+	missing := "The baseline for 'specify' is missing (the work was started before this version of gf, or on another machine). " +
+		"The owner should abandon this work with `gf abandon \"<reason>\"` and start it again."
+	fails(t, results[domain.CheckSpecsPass], missing)
+	fails(t, results[domain.CheckSpecsUntouched], missing)
+	assert.NotContains(t, results[domain.CheckSpecsPass].Summary(), "gf extend")
 }
 
 // Build, suite and formatting.

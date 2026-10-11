@@ -113,8 +113,9 @@ func TestScope_WithoutBaseline_TheCheckStartsNow(t *testing.T) {
 	r.workOnStage()
 	out = r.submitAsAgent("--passed")
 	assert.Contains(t, out, "Note: no baseline of the working tree was recorded when 'specify' began, so its write-scope check starts now.")
-	noBaseline := "no baseline of the working tree was recorded when 'specify' began, so gf can't tell what changed during it"
-	assert.Contains(t, out, "artifact-written: "+noBaseline)
-	assert.Contains(t, out, "specs-fail: "+noBaseline)
+	missing := "The baseline for 'specify' is missing (the work was started before this version of gf, or on another machine). " +
+		"The owner should abandon this work with `gf abandon \"<reason>\"` and start it again"
+	assert.Contains(t, out, "artifact-written: "+missing)
+	assert.Contains(t, out, "specs-fail: "+missing)
 	r.expect("specify", progress.AssignmentOpen, 1, 3)
 }

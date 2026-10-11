@@ -185,8 +185,12 @@ func (c *checkRun) ownBaseline() (string, bool, error) {
 	return c.baselines.Tree(c.visit.Assignment)
 }
 
-func (c *checkRun) noOwnBaseline() finding {
-	return fail("no baseline of the working tree was recorded when '%s' began, so gf can't tell what changed during it; it is recorded now, so change what the stage needs and submit again", c.visit.Stage)
+func (c *checkRun) noOwnBaseline() finding { return missingBaseline(c.visit.Stage) }
+
+// missingBaseline: without a stage's baseline gf can't tell what the stage
+// changed, and nothing the owner can do on this work brings it back.
+func missingBaseline(stage domain.Stage) finding {
+	return fail("The baseline for '%s' is missing (the work was started before this version of gf, or on another machine). The owner should abandon this work with `gf abandon \"<reason>\"` and start it again.", stage)
 }
 
 func (c *checkRun) specsFail() (finding, error) {
@@ -236,7 +240,7 @@ func (c *checkRun) specTests() (files []domain.RepoPath, tests []string, problem
 		}
 	}
 	if !ok {
-		f := fail("no baseline of the working tree was recorded for 'specify' on this machine (was the work started elsewhere?), so gf can't tell which tests it wrote; the owner can check by hand and run `gf extend`")
+		f := missingBaseline(domain.StageSpecify)
 		return nil, nil, &f, nil
 	}
 	ownBase, ok, err := c.ownBaseline()
