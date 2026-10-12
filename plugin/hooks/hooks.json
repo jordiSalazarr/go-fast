@@ -8,8 +8,14 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Bash|Write|Edit|NotebookEdit",
+        "matcher": "Bash|Write|Edit|NotebookEdit|Skill|Read",
         "hooks": [{ "type": "command", "command": "gf", "args": ["hook", "pre-tool-use"] }]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Skill",
+        "hooks": [{ "type": "command", "command": "gf", "args": ["hook", "post-tool-use"] }]
       }
     ],
     "UserPromptExpansion": [

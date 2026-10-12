@@ -76,6 +76,7 @@ func allEvents() []domain.Event {
 		domain.StressDecided{WorkID: workID, Decision: domain.StressSkip, Reason: must(domain.NewReason("only docs changed"))},
 		domain.StressDecided{WorkID: workID, Decision: forcedInclude.Decision(), Reason: forcedInclude.Reason(), ForcedBy: forcedInclude.ForcedBy(), Owner: owner},
 		domain.AssignmentCancelled{AssignmentID: assignmentID, Reason: reason},
+		domain.SkillLoaded{WorkID: workID, Stage: domain.StageOptimize, Visit: domain.FirstVisit(), Skill: "concurrency"},
 		domain.AssignmentHandedToFixer{AssignmentID: assignmentID, WorkID: workID, Stage: domain.StageReview, Visit: domain.FirstVisit(), Attempt: must(domain.NewAttempt(2)), Reason: reason},
 	}
 }

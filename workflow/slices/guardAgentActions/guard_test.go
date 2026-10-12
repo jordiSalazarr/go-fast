@@ -384,3 +384,33 @@ func TestRule4_RefactorImplement_StaysInThePlansAreas(t *testing.T) {
 		decide(write(agent, "/repo/internal/ledger/journal.go"), facts, false, root))
 	assert.Equal(t, "deny", decide(write(agent, "/repo/cmd/server/new.go"), facts, false, root).HookSpecificOutput.PermissionDecision)
 }
+
+func loadSkill(agent, name string) claudehooks.Input {
+	input, _ := json.Marshal(map[string]string{"skill": name, "args": ""})
+	return claudehooks.Input{SessionID: "s1", CWD: "/repo", HookEventName: "PreToolUse", AgentID: "a1", AgentType: agent, ToolName: "Skill", ToolInput: input}
+}
+
+func readFile(agent, path string) claudehooks.Input {
+	input, _ := json.Marshal(map[string]string{"file_path": path})
+	return claudehooks.Input{SessionID: "s1", CWD: "/repo", HookEventName: "PreToolUse", AgentID: "a1", AgentType: agent, ToolName: "Read", ToolInput: input}
+}
+
+// Rule 5: a stage's catalog skill is denied until the work has a diagnosis.
+func TestRule5_CatalogSkillsUnlockAfterTheDiagnosis(t *testing.T) {
+	catalog, problems := domain.NewSkillCatalog(map[string][]string{"optimize": {"concurrency"}})
+	require.Empty(t, problems)
+	agent := "gofast:optimize"
+	locked := on(domain.StageOptimize).withSkills(catalog, domain.Diagnosis{Stage: domain.StageOptimize})
+	unlocked := on(domain.StageOptimize).withSkills(catalog, domain.Diagnosis{Stage: domain.StageOptimize, Baseline: true, MeasureAccepted: true})
+	reason := "'concurrency' unlocks after the diagnosis: write `## Bottleneck` with evidence first."
+
+	assert.Equal(t, denied(reason), decide(loadSkill(agent, "gofast:concurrency"), locked, false, root))
+	assert.Equal(t, denied(reason), decide(loadSkill(agent, "concurrency"), locked, false, root))
+	assert.Equal(t, allowed, decide(loadSkill(agent, "gofast:concurrency"), unlocked, false, root))
+	assert.Equal(t, allowed, decide(loadSkill(agent, "gofast:grill"), locked, false, root), "not in the catalog")
+	assert.Equal(t, allowed, decide(loadSkill(agent, "other:concurrency"), locked, false, root), "another plugin's skill")
+
+	assert.Equal(t, denied(reason), decide(readFile(agent, "/home/u/.claude/plugins/gofast/skills/concurrency/SKILL.md"), locked, false, root))
+	assert.Equal(t, allowed, decide(readFile(agent, "/home/u/.claude/plugins/gofast/skills/concurrency/SKILL.md"), unlocked, false, root))
+	assert.Equal(t, allowed, decide(readFile(agent, "/repo/internal/wallet/service.go"), locked, false, root))
+}

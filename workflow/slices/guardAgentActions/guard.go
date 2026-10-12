@@ -1,6 +1,6 @@
 // Package guardagentactions is the PreToolUse hook: it denies agents the
-// owner's commands, access to gofast's own files, and writes outside the
-// current stage's write scope.
+// owner's commands, access to gofast's own files, writes outside the
+// current stage's write scope, and catalog skills before the diagnosis.
 package guardagentactions
 
 import (
@@ -18,6 +18,7 @@ import (
 	"github.com/jordiSalazarr/go-fast/workflow/domain"
 	"github.com/jordiSalazarr/go-fast/workflow/eventlog"
 	"github.com/jordiSalazarr/go-fast/workflow/exitchecks"
+	"github.com/jordiSalazarr/go-fast/workflow/skillcatalog"
 )
 
 // stageFacts is what the guard knows about the workflow.
@@ -34,6 +35,16 @@ type stageFacts struct {
 	// exists reports whether a file exists now: writing one that doesn't
 	// adds it. Nil means every file exists.
 	exists func(domain.RepoPath) bool
+	// catalog and diagnosis decide which catalog skills the stage may load.
+	catalog   domain.SkillCatalog
+	diagnosis domain.Diagnosis
+}
+
+// withSkills sets the plugin's skill catalog and what the work has
+// diagnosed.
+func (f stageFacts) withSkills(catalog domain.SkillCatalog, diagnosis domain.Diagnosis) stageFacts {
+	f.catalog, f.diagnosis = catalog, diagnosis
+	return f
 }
 
 func unreadable() stageFacts   { return stageFacts{} }
@@ -53,12 +64,16 @@ func (f stageFacts) withWrites(writes domain.Writes, exists func(domain.RepoPath
 func (f stageFacts) added(p domain.RepoPath) bool { return f.exists != nil && !f.exists(p) }
 
 // Tool input fields, per https://code.claude.com/docs/en/hooks "PreToolUse
-// input": Bash has command; Write and Edit have file_path; NotebookEdit has
-// notebook_path.
+// input": Bash has command; Write, Edit and Read have file_path;
+// NotebookEdit has notebook_path. Skill has skill, the skill's name, with
+// a plugin's skills as "<plugin>:<name>" (e.g. "gofast:concurrency"); the
+// hooks reference doesn't list Skill's fields, so this is pinned to the
+// Skill tool's input schema (Claude Code 2.1.286: skill, args).
 type toolInput struct {
 	Command      string `json:"command"`
 	FilePath     string `json:"file_path"`
 	NotebookPath string `json:"notebook_path"`
+	Skill        string `json:"skill"`
 }
 
 // protectedNames are what a Bash command may not mention: text, then how the
@@ -96,6 +111,9 @@ var ownerOnlyReasons = map[string]string{
 //  4. Write, Edit or NotebookEdit outside the stage's write scope: deny, for
 //     gofast stage agents and for the main session while it drives. gf submit
 //     checks the scope again with git, however the files were written.
+//  5. Skill loading a skill of the stage's catalog before the work has a
+//     diagnosis (SkillCatalog.MayLoad): deny, for the same callers as rule 4;
+//     so is a Read of that skill's SKILL.md, on a best-effort basis.
 //
 // Rules 1 to 3 need no workflow state, so they hold even when it cannot be
 // read (fail closed); a Bash call whose input cannot be read is denied too.
@@ -147,6 +165,32 @@ func decide(in claudehooks.Input, facts stageFacts, driving bool, root string) c
 			return claudehooks.Nothing()
 		}
 		return claudehooks.Deny(scopeReason(facts, p))
+
+	case "Skill":
+		if inputErr != nil || !scopeApplies(in, driving) || !facts.active {
+			return claudehooks.Nothing()
+		}
+		if name, ok := domain.CatalogSkill(tool.Skill); ok {
+			if err := facts.catalog.MayLoad(name, facts.diagnosis); err != nil {
+				return claudehooks.Deny(err.Error())
+			}
+		}
+		return claudehooks.Nothing()
+
+	case "Read":
+		if inputErr != nil || !scopeApplies(in, driving) || !facts.active {
+			return claudehooks.Nothing()
+		}
+		target := filepath.ToSlash(tool.FilePath)
+		for _, name := range facts.catalog.Skills(facts.diagnosis.Stage) {
+			file := skillcatalog.SkillFile(name)
+			if target == file || strings.HasSuffix(target, "/"+file) {
+				if err := facts.catalog.MayLoad(name, facts.diagnosis); err != nil {
+					return claudehooks.Deny(err.Error())
+				}
+			}
+		}
+		return claudehooks.Nothing()
 	}
 	return claudehooks.Nothing()
 }
@@ -263,6 +307,17 @@ func loadFacts(repo claudehooks.Repo, branchOf func(root string) (domain.Branch,
 			_, err := os.Stat(filepath.Join(repo.Root, filepath.FromSlash(p.String())))
 			return err == nil
 		})
+		catalog := loadCatalog(repo)
+		if len(catalog.Skills(work.CurrentStage())) == 0 {
+			return nil
+		}
+		measured, _, _ := history.LatestAccepted(work.ID(), domain.StageMeasure)
+		bottleneck := false
+		if _, inFixer := work.(domain.InFixerWork); inFixer {
+			content, err := os.ReadFile(filepath.Join(repo.Root, filepath.FromSlash(facts.artifact.String())))
+			bottleneck = err == nil && exitchecks.HasBottleneck(string(content))
+		}
+		facts = facts.withSkills(catalog, domain.DiagnosisOf(work, measured != (domain.AssignmentID{}), bottleneck))
 		return nil
 	})
 	if err != nil {
@@ -270,4 +325,27 @@ func loadFacts(repo claudehooks.Repo, branchOf func(root string) (domain.Branch,
 		return unreadable()
 	}
 	return facts
+}
+
+// loadCatalog reads the plugin's skill catalog. Without a plugin root, or
+// with a catalog gf can't read, no skill is locked; problems are logged and
+// `gf checks` reports them.
+func loadCatalog(repo claudehooks.Repo) domain.SkillCatalog {
+	empty, _ := domain.NewSkillCatalog(nil)
+	root := ""
+	if repo.Getenv != nil {
+		root = repo.Getenv(skillcatalog.PluginRootEnv)
+	}
+	if root == "" {
+		return empty
+	}
+	catalog, problems, err := skillcatalog.Load(root)
+	if err != nil {
+		repo.Logger.Error("guard could not read the skill catalog", "error", err.Error())
+		return empty
+	}
+	for _, p := range problems {
+		repo.Logger.Warn("skill catalog", "problem", p)
+	}
+	return catalog
 }

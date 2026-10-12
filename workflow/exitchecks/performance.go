@@ -19,6 +19,13 @@ import (
 // fixer's in performance mode, that diagnoses what dominates the cost.
 const BottleneckHeading = "Bottleneck"
 
+// HasBottleneck reports whether an artifact's `## Bottleneck` section says
+// something.
+func HasBottleneck(content string) bool {
+	body, found := markdownSection(content, BottleneckHeading)
+	return found && body != ""
+}
+
 // BaselinePath is where gf keeps a work's baseline, relative to the
 // repository root: one result per target NFR, as measure measured them
 // before the work changed the code.

@@ -37,7 +37,15 @@ const (
 	typeWorkReturned              = "WorkReturned"
 	typeBaselineMeasured          = "BaselineMeasured"
 	typeWorkFoundNothingToImprove = "WorkFoundNothingToImprove"
+	typeSkillLoaded               = "SkillLoaded"
 )
+
+type skillLoadedV1 struct {
+	WorkID string `json:"workId"`
+	Stage  string `json:"stage"`
+	Visit  int    `json:"visit"`
+	Skill  string `json:"skill"`
+}
 
 type envelope struct {
 	ID         string          `json:"id"`
@@ -344,6 +352,10 @@ func encodeEvent(e domain.Event) (eventType string, stream Stream, payload any, 
 			p.Owner = &owner
 		}
 		return typeStressDecided, WorkStream(e.WorkID), p, nil
+	case domain.SkillLoaded:
+		return typeSkillLoaded, ObservationsStream(e.WorkID), skillLoadedV1{
+			WorkID: e.WorkID.String(), Stage: e.Stage.String(), Visit: e.Visit.Int(), Skill: e.Skill,
+		}, nil
 	case domain.AssignmentOpened:
 		return typeAssignmentOpened, AssignmentStream(e.AssignmentID), assignmentOpenedV1{
 			AssignmentID: e.AssignmentID.String(), WorkID: e.WorkID.String(), Stage: e.Stage.String(),
@@ -470,6 +482,13 @@ func decodeEvent(eventType string, payload json.RawMessage) (domain.Event, Strea
 			decided.Owner = d.owner(*p.Owner)
 		}
 		event = decided
+	case typeSkillLoaded:
+		var p skillLoadedV1
+		d.unmarshal(payload, &p)
+		if p.Skill == "" {
+			d.keep(errors.New("skill must not be empty"))
+		}
+		event = domain.SkillLoaded{WorkID: d.workID(p.WorkID), Stage: d.stage(p.Stage), Visit: d.visit(p.Visit), Skill: p.Skill}
 	case typeAssignmentOpened:
 		var p assignmentOpenedV1
 		d.unmarshal(payload, &p)

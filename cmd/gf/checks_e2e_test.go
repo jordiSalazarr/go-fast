@@ -27,6 +27,10 @@ func TestChecks_ShowsTheConfigurationAndEachStagesChecks(t *testing.T) {
 
 	assert.NotContains(t, out, "uncommitted changes")
 	assert.Contains(t, out, "  refactor     coverage of a plan's areas is reported only (refactor.minCoverage is 0 or unset)\n")
+	assert.Contains(t, out, "Skill catalogs: not checked (pass --plugin-dir")
+	plugin, err := filepath.Abs(filepath.Join("..", "..", "plugin"))
+	require.NoError(t, err)
+	assert.Contains(t, r.gf("checks", "--plugin-dir", plugin), "Skill catalogs: empty: no stage has skills that unlock after a diagnosis.\n")
 
 	assert.Contains(t, out, "stress       not configured: stress testing fails until the owner adds a \"stress\" section to .gofast/checks.json")
 

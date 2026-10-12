@@ -6,6 +6,20 @@
 //   - "Common input fields": session_id, cwd, hook_event_name, agent_id and
 //     agent_type (the last two only inside a subagent or with --agent).
 //   - "PreToolUse input": tool_name, tool_input.
+//   - Skill loads: a PreToolUse hook with matcher "Skill" fires when Claude
+//     calls the Skill tool (the "UserPromptExpansion" section: "a PreToolUse
+//     hook matching the Skill tool fires only when Claude calls the tool";
+//     the owner typing /<skill> bypasses it), and PostToolUse fires after
+//     every successful tool call, Skill included ("Hook lifecycle"). Its
+//     tool_input holds the skill's name in "skill", a plugin's skills as
+//     "<plugin>:<name>", e.g. "gofast:concurrency": the hooks reference
+//     doesn't list the Skill tool's fields, so this is pinned to the Skill
+//     tool's input schema (skill, args). Skills preloaded through a
+//     subagent's `skills` frontmatter are injected at startup, not loaded
+//     through the Skill tool (https://code.claude.com/docs/en/sub-agents,
+//     "Preload skills into subagents"), so no hook sees them; core skills
+//     aren't locked anyway.
+//   - "PostToolUse input": tool_name, tool_input, tool_response.
 //   - "Stop input" / "SubagentStop input": stop_hook_active.
 //   - "UserPromptExpansion input": command_name, command_source.
 //   - "SessionStart input": source.
@@ -63,6 +77,7 @@ type HookSpecificOutput struct {
 // Event names, as in hook_event_name.
 const (
 	EventPreToolUse          = "PreToolUse"
+	EventPostToolUse         = "PostToolUse"
 	EventSessionStart        = "SessionStart"
 	EventUserPromptExpansion = "UserPromptExpansion"
 	EventSubagentStart       = "SubagentStart"

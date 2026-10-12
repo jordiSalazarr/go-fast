@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/jordiSalazarr/go-fast/workflow/domain"
+	"github.com/jordiSalazarr/go-fast/workflow/skillcatalog"
 )
 
 // instructions is where a stage's instructions live: its agent's file, or
@@ -142,4 +143,17 @@ func TestAgentsAndDrive_NeverRunOwnerCommands(t *testing.T) {
 			assert.Contains(t, string(body), owner, "%s must say never to run %s", p, owner)
 		}
 	}
+}
+
+// The plugin ships its skill catalogs empty: the owner's skills slot in
+// later. Every stage it names is a stage, and every skill has a directory.
+func TestPlugin_SkillCatalogIsValid(t *testing.T) {
+	catalog, problems, err := skillcatalog.Load(filepath.Join("..", "..", "plugin"))
+	require.NoError(t, err)
+	assert.Empty(t, problems)
+	assert.Empty(t, catalog.Stages(), "the catalogs ship empty")
+	body, err := os.ReadFile(filepath.Join("..", "..", "plugin", "skills", "catalog.json"))
+	require.NoError(t, err)
+	assert.Contains(t, string(body), `"optimize": []`)
+	assert.Contains(t, string(body), `"fixer": []`)
 }

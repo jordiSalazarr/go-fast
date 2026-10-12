@@ -26,6 +26,10 @@ type Stream string
 func WorkStream(id domain.WorkID) Stream             { return Stream("work-" + id.String()) }
 func AssignmentStream(id domain.AssignmentID) Stream { return Stream("assignment-" + id.String()) }
 
+// ObservationsStream holds what was observed during a work, such as the
+// skills its stages loaded. It is no aggregate's stream.
+func ObservationsStream(id domain.WorkID) Stream { return Stream("observations-" + id.String()) }
+
 // ActorKind says who caused an event.
 type ActorKind string
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -14,6 +15,7 @@ import (
 
 	"github.com/jordiSalazarr/go-fast/workflow/domain"
 	"github.com/jordiSalazarr/go-fast/workflow/exitchecks"
+	"github.com/jordiSalazarr/go-fast/workflow/skillcatalog"
 	"github.com/jordiSalazarr/go-fast/workflow/worktree"
 )
 
@@ -34,10 +36,11 @@ func NoMinRPSWarning(id domain.NFRID) string {
 	return "NFR '" + id.String() + "' has no minRps target: a script that sleeps between requests can keep latency low by sending little load."
 }
 
-func NewCommand(repositoryRoot func() (string, error)) *cobra.Command {
-	return &cobra.Command{
-		Use:   "checks",
-		Short: "Show the exit-check configuration, the NFRs and the checks each stage requires",
+func NewCommand(repositoryRoot func() (string, error), getenv func(string) string) *cobra.Command {
+	var pluginDir string
+	cmd := &cobra.Command{
+		Use:   "checks [--plugin-dir <dir>]",
+		Short: "Show the exit-check configuration, the NFRs, the checks each stage requires and the skill catalogs",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root, err := repositoryRoot()
@@ -72,10 +75,45 @@ func NewCommand(repositoryRoot func() (string, error)) *cobra.Command {
 					fmt.Fprintf(cmd.OutOrStdout(), "Warning: %s\n\n", NoMinRPSWarning(n.ID()))
 				}
 			}
+			if pluginDir == "" {
+				pluginDir = getenv(skillcatalog.PluginRootEnv)
+			}
+			var catalog *domain.SkillCatalog
+			if pluginDir != "" {
+				c, problems, err := skillcatalog.Load(pluginDir)
+				if err != nil {
+					return err
+				}
+				for _, p := range problems {
+					fmt.Fprintf(cmd.OutOrStdout(), "Warning: skill catalog %s: %s\n\n", filepath.Join(pluginDir, filepath.FromSlash(skillcatalog.Path)), p)
+				}
+				catalog = &c
+			}
 			render(cmd.OutOrStdout(), config)
 			renderNFRs(cmd.OutOrStdout(), nfrs)
+			renderCatalog(cmd.OutOrStdout(), catalog)
 			return nil
 		},
+	}
+	cmd.Flags().StringVar(&pluginDir, "plugin-dir", "", "the gofast plugin's directory, whose skill catalog to check (default: $"+skillcatalog.PluginRootEnv+")")
+	return cmd
+}
+
+// renderCatalog lists the catalog skills each stage may load only after a
+// diagnosis; nil when gf doesn't know where the plugin is.
+func renderCatalog(w io.Writer, catalog *domain.SkillCatalog) {
+	if catalog == nil {
+		fmt.Fprintf(w, "\nSkill catalogs: not checked (pass --plugin-dir <the gofast plugin's directory>, or set $%s).\n", skillcatalog.PluginRootEnv)
+		return
+	}
+	stages := catalog.Stages()
+	if len(stages) == 0 {
+		fmt.Fprintln(w, "\nSkill catalogs: empty: no stage has skills that unlock after a diagnosis.")
+		return
+	}
+	fmt.Fprintln(w, "\nSkill catalogs (each unlocks after the diagnosis: `## Bottleneck` with evidence):")
+	for _, s := range stages {
+		fmt.Fprintf(w, "  %-20s %s\n", s, strings.Join(catalog.Skills(s), ", "))
 	}
 }
 

@@ -5,7 +5,7 @@
 # removing tools, so the agent can still write its artifact.
 name: fixer
 description: Handles the 'fixer' stage of gofast work, entered when review, integration testing or stress testing finds the code wrong. Used by /gofast:drive.
-tools: Read, Grep, Glob, Bash, Write, Edit
+tools: Read, Grep, Glob, Bash, Write, Edit, Skill
 model: inherit
 ---
 

@@ -28,6 +28,7 @@ import (
 	extendreworkbudget "github.com/jordiSalazarr/go-fast/workflow/slices/extendReworkBudget"
 	guardagentactions "github.com/jordiSalazarr/go-fast/workflow/slices/guardAgentActions"
 	keepagentonstage "github.com/jordiSalazarr/go-fast/workflow/slices/keepAgentOnStage"
+	observeskillloads "github.com/jordiSalazarr/go-fast/workflow/slices/observeSkillLoads"
 	overridestressdecision "github.com/jordiSalazarr/go-fast/workflow/slices/overrideStressDecision"
 	"github.com/jordiSalazarr/go-fast/workflow/slices/reject"
 	returnwork "github.com/jordiSalazarr/go-fast/workflow/slices/returnWork"
@@ -95,7 +96,7 @@ func (a *app) rootCommand() *cobra.Command {
 		returnwork.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch),
 		adoptnfrproposals.NewCommand(a.openStore, a.resolveCaller, a.currentBranch, a.repositoryRoot),
 		status.NewCommand(a.openStore, a.currentBranch, a.repositoryRoot),
-		checks.NewCommand(a.repositoryRoot),
+		checks.NewCommand(a.repositoryRoot, a.getenv),
 		accepteventlog.NewCommand(a.openStore, a.resolveCaller),
 		a.hookCommand(),
 	)
@@ -112,6 +113,7 @@ func (a *app) hookCommand() *cobra.Command {
 	dir := func() string { return a.dir }
 	hook.AddCommand(
 		guardagentactions.NewCommand(dir, a.getenv, gitbranch.Current),
+		observeskillloads.NewCommand(dir, a.getenv, gitbranch.Current),
 		briefagentonsessionstart.NewCommand(dir, a.getenv, gitbranch.Current),
 	)
 	ensureBaseline := func(root string, id domain.AssignmentID) (bool, error) {
