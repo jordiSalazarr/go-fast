@@ -54,6 +54,11 @@ type Visit struct {
 	// stage visit entered when it was accepted. Zero when the work has none.
 	Grill    domain.Visit
 	GrillEnd domain.AssignmentID
+	// Plan is the work's latest accepted refactor plan visit, and PlanEnd
+	// the stage visit entered when it was accepted. Zero when the work has
+	// none.
+	Plan    domain.Visit
+	PlanEnd domain.AssignmentID
 	// Changed is what the visit changed since its baseline.
 	Changed domain.ChangedFiles
 	// BaselineStarted: the visit had no baseline until this submission, so
@@ -108,6 +113,12 @@ func (r Runner) Run(v Visit) ([]domain.CheckResult, error) {
 		if err != nil {
 			return nil, fmt.Errorf("exit check %s: %w", check, err)
 		}
+		if f.passed && f.note != "" {
+			fmt.Fprintf(log, "=== %s passed: %s\n\n", check, f.note)
+			fmt.Fprintf(progress, "✓ %s: %s\n", check, f.note)
+			results = append(results, domain.CheckPassed(check))
+			continue
+		}
 		if f.passed {
 			fmt.Fprintf(log, "=== %s passed\n\n", check)
 			fmt.Fprintf(progress, "✓ %s\n", check)
@@ -139,7 +150,8 @@ func (r Runner) Run(v Visit) ([]domain.CheckResult, error) {
 type finding struct {
 	passed     bool
 	summary    string
-	ranCommand bool // its full output is in the log
+	note       string // what a passing check reports, if anything
+	ranCommand bool   // its full output is in the log
 }
 
 var pass = finding{passed: true}
@@ -194,6 +206,14 @@ func (c *checkRun) check(check domain.ExitCheck) (finding, error) {
 		return c.grillValid()
 	case domain.CheckSpecsCoverScenarios:
 		return c.specsCoverScenarios()
+	case domain.CheckPlanValid:
+		return c.planValid()
+	case domain.CheckCharacterizationPasses:
+		return c.characterizationPasses()
+	case domain.CheckCoverageSufficient:
+		return c.coverageSufficient()
+	case domain.CheckTestsUntouched:
+		return c.testsUntouched()
 	}
 	return finding{}, fmt.Errorf("gf does not know how to run %q", check)
 }

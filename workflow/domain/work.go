@@ -404,12 +404,9 @@ func (w InProgressWork) requireCurrent(stage Stage, visit Visit) error {
 
 // RouteTargets are the stages the fixer may return the work to: on the
 // work's path, earlier than the stage that handed over, and able to change
-// code, or design, or event modelling when the work entered it. Neither can
-// change code, but a wrong design (a missing invariant, a wrong aggregate
-// boundary, a missing slice) is fixed by redesigning, and a wrong event
-// model (a missing scenario, rejection or event) by remodelling. Grill is
-// never a route: it needs the owner live; the owner sends work back to it
-// with `gf return grill`. In path order.
+// code, or a stage whose model the code follows (fixerRedoes) when the work
+// entered it. Grill is never a route: it needs the owner live; the owner
+// sends work back to it with `gf return grill`. In path order.
 func (w InFixerWork) RouteTargets() []Stage {
 	var targets []Stage
 	end, _ := w.path.indexOf(w.from)
@@ -417,11 +414,25 @@ func (w InFixerWork) RouteTargets() []Stage {
 		if !w.includes(step) {
 			continue
 		}
-		if step.stage.WriteScope().CanChangeCode() || step.stage == StageDesign || step.stage == StageEventModelling {
+		if step.stage.WriteScope().CanChangeCode() || step.stage.fixerRedoes() {
 			targets = append(targets, step.stage)
 		}
 	}
 	return targets
+}
+
+// fixerRedoes reports whether the fixer may send work back to a stage that
+// writes artifacts only, because the code follows what it wrote: a wrong
+// design (a missing invariant, a wrong aggregate boundary, a missing slice)
+// is fixed by redesigning, a wrong event model (a missing scenario,
+// rejection or event) by remodelling, and a wrong refactor plan by
+// replanning.
+func (s Stage) fixerRedoes() bool {
+	switch s {
+	case StageDesign, StageEventModelling, StagePlan:
+		return true
+	}
+	return false
 }
 
 // CheckRoute rejects a target the fixer may not return the work to, naming

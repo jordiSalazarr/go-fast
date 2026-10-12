@@ -29,6 +29,9 @@ type module struct {
 	// grill: the work's first grill visit was accepted, as specify's
 	// baseline has it.
 	grill bool
+	// refactor: the work's first grill visit was accepted, as plan's
+	// baseline has it, and its first plan visit, as characterize's has it.
+	refactor bool
 }
 
 func newModule(t *testing.T) *module {
@@ -109,6 +112,10 @@ func (m *module) checkOn(path domain.Path, stage domain.Stage, config exitchecks
 	}
 	if m.grill {
 		visit.Grill, visit.GrillEnd = Visit1, AssignmentOn(domain.StageSpecify)
+	}
+	if m.refactor {
+		visit.Grill, visit.GrillEnd = Visit1, AssignmentOn(domain.StagePlan)
+		visit.Plan, visit.PlanEnd = Visit1, AssignmentOn(domain.StageCharacterize)
 	}
 	results, err := runner.Run(visit)
 	require.NoError(m.t, err)

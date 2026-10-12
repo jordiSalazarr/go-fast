@@ -149,6 +149,23 @@ func (b Baselines) changedSinceTree(id domain.AssignmentID, base string) (domain
 	if err != nil {
 		return domain.ChangedFiles{}, fmt.Errorf("changes since baseline of %s: %w", id, err)
 	}
+	added, err := Added(b.root, base, current)
+	if err != nil {
+		return domain.ChangedFiles{}, fmt.Errorf("changes since baseline of %s: %w", id, err)
+	}
+	paths, err := b.repoPaths(id, names)
+	if err != nil {
+		return domain.ChangedFiles{}, err
+	}
+	addedPaths, err := b.repoPaths(id, added)
+	if err != nil {
+		return domain.ChangedFiles{}, err
+	}
+	return domain.NewChangedFiles(paths...).WithAdded(addedPaths...), nil
+}
+
+// repoPaths are names as repository paths, except the files gf writes.
+func (b Baselines) repoPaths(id domain.AssignmentID, names []string) ([]domain.RepoPath, error) {
 	var paths []domain.RepoPath
 	for _, name := range names {
 		if gfWrites[name] {
@@ -156,11 +173,11 @@ func (b Baselines) changedSinceTree(id domain.AssignmentID, base string) (domain
 		}
 		p, err := domain.NewRepoPath(b.root, filepath.FromSlash(name))
 		if err != nil {
-			return domain.ChangedFiles{}, fmt.Errorf("changes since baseline of %s: %w", id, err)
+			return nil, fmt.Errorf("changes since baseline of %s: %w", id, err)
 		}
 		paths = append(paths, p)
 	}
-	return domain.NewChangedFiles(paths...), nil
+	return paths, nil
 }
 
 // Tree returns the baseline tree of a stage visit, if it was recorded on
@@ -169,7 +186,17 @@ func (b Baselines) Tree(id domain.AssignmentID) (tree string, ok bool, err error
 
 // Diff returns the slash-separated paths that differ between two trees.
 func Diff(root, from, to string) ([]string, error) {
-	out, err := git(root, nil, "diff", "--name-only", "-z", "--no-renames", from, to)
+	return diff(root, from, to)
+}
+
+// Added returns the slash-separated paths in to that aren't in from.
+func Added(root, from, to string) ([]string, error) {
+	return diff(root, from, to, "--diff-filter=A")
+}
+
+func diff(root, from, to string, options ...string) ([]string, error) {
+	args := append([]string{"diff", "--name-only", "-z", "--no-renames"}, options...)
+	out, err := git(root, nil, append(args, from, to)...)
 	if err != nil {
 		return nil, err
 	}

@@ -26,8 +26,9 @@ const DefaultTimeout = 10 * time.Minute
 
 // Config is what a repository configures about its exit checks: what counts
 // as its integration suite, how to run its service for stress testing, how
-// long a check's command may take, and where grill's decision documents go
-// (docs.decisionsDir).
+// long a check's command may take, where grill's decision documents go
+// (docs.decisionsDir), and the coverage a refactor needs before its code
+// moves (refactor.minCoverage).
 type Config struct {
 	// Integration is nil when the repository has no integration command;
 	// integration-passes then fails.
@@ -39,8 +40,20 @@ type Config struct {
 	// Decisions is where grill writes its decision documents and gf their
 	// index.
 	Decisions domain.DecisionsDir
+	// Refactor is how refactors are checked.
+	Refactor Refactor
 	// Configured is false when there is no ConfigPath; the defaults apply.
 	Configured bool
+}
+
+// Refactor is the owner's settings for refactor work.
+type Refactor struct {
+	// MinCoverage is the statement coverage, in percent, each package in a
+	// refactor plan's areas must reach before its code moves. 0, the
+	// default, only reports the coverage.
+	MinCoverage float64
+	// MinCoverageSet is false when the owner didn't set it.
+	MinCoverageSet bool
 }
 
 // Stress is how gf runs the repository's service for stress testing: the
@@ -90,6 +103,9 @@ type configFile struct {
 	Docs    *struct {
 		DecisionsDir string `json:"decisionsDir"`
 	} `json:"docs"`
+	Refactor *struct {
+		MinCoverage *float64 `json:"minCoverage"`
+	} `json:"refactor"`
 }
 
 // LoadConfig reads the check configuration of the repository at root. A
@@ -123,6 +139,12 @@ func LoadConfig(root string) (Config, error) {
 		if err != nil {
 			return Config{}, &ConfigError{Problem: fmt.Sprintf(`"docs.decisionsDir" must be a directory of the repository outside .gofast/, relative to its root, such as "docs/decisions", not %q`, d.DecisionsDir)}
 		}
+	}
+	if r := file.Refactor; r != nil && r.MinCoverage != nil {
+		if *r.MinCoverage < 0 || *r.MinCoverage > 100 {
+			return Config{}, &ConfigError{Problem: fmt.Sprintf(`"refactor.minCoverage" must be a percentage from 0 to 100, not %v`, *r.MinCoverage)}
+		}
+		config.Refactor = Refactor{MinCoverage: *r.MinCoverage, MinCoverageSet: true}
 	}
 	if i := file.Integration; i != nil {
 		if len(i.Command) == 0 || strings.TrimSpace(i.Command[0]) == "" {

@@ -31,7 +31,12 @@ func TestEachStageRequiresItsExitChecks(t *testing.T) {
 		domain.StageGrill, []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckGrillValid})
 	feature = with(feature, domain.StageSpecify, []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckSpecsFail, domain.CheckSpecsCoverScenarios})
 	behaviourDelta := []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckBehaviourDelta}
+	refactor := with(with(with(with(fixBug, domain.StageGrill, []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckGrillValid}),
+		domain.StagePlan, []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckPlanValid}),
+		domain.StageCharacterize, []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckCharacterizationPasses, domain.CheckCoverageSufficient}),
+		domain.StageImplement, []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckBuildPasses, domain.CheckFormatted, domain.CheckTestsUntouched, domain.CheckSuitePasses})
 	want := map[domain.WorkType]map[domain.PathVersion]map[domain.Stage][]domain.ExitCheck{
+		domain.WorkTypeRefactor:        {domain.PathV1: refactor},
 		domain.WorkTypeFixBug:          {domain.PathV1: fixBug},
 		domain.WorkTypeNewFeature:      {domain.PathV1: designed, domain.PathV2: feature},
 		domain.WorkTypeModifyBehaviour: {domain.PathV1: with(designed, domain.StageDiscovery, behaviourDelta), domain.PathV2: with(feature, domain.StageDiscovery, behaviourDelta)},
@@ -60,7 +65,8 @@ func TestExitChecksHaveStableNames(t *testing.T) {
 	}
 	assert.Equal(t, []string{"artifact-written", "specs-fail", "build-passes", "specs-pass",
 		"specs-untouched", "suite-passes", "formatted", "integration-passes", "stress-scripts-valid", "nfrs-met",
-		"design-valid", "nfr-proposals-valid", "behaviour-delta", "specs-cover-slices", "event-model-valid", "grill-valid", "specs-cover-scenarios"}, names)
+		"design-valid", "nfr-proposals-valid", "behaviour-delta", "specs-cover-slices", "event-model-valid", "grill-valid", "specs-cover-scenarios",
+		"plan-valid", "characterization-passes", "coverage-sufficient", "tests-untouched"}, names)
 }
 
 func TestCheckFailed_NeedsASummary(t *testing.T) {
@@ -181,7 +187,7 @@ func TestEveryCheckAboutCode_IsRequiredBeforeTheStagesThatCantChangeCode(t *test
 	exempt := map[domain.ExitCheck]bool{
 		domain.CheckArtifactWritten: true, domain.CheckStressScriptsValid: true,
 		domain.CheckDesignValid: true, domain.CheckNFRProposalsValid: true, domain.CheckBehaviourDelta: true, domain.CheckEventModelValid: true,
-		domain.CheckGrillValid:        true,
+		domain.CheckGrillValid: true, domain.CheckPlanValid: true,
 		domain.CheckIntegrationPasses: true, domain.CheckNFRsMet: true,
 	}
 	// Code is any Go file, tests included: specify writes test code.

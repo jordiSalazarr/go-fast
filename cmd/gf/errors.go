@@ -78,6 +78,9 @@ func friendly(err error, cmd *cobra.Command, ran bool) string {
 			stageNames(back.Allowed), back.Target)
 	case errors.Is(err, domain.ErrNotReturnable):
 		return "The work can only be sent back while it is on a stage of its path, not while it is in the fixer or at its rework limit. Run `gf status` to see where it is."
+	case errors.Is(err, domain.ErrNoAcceptedPlan):
+		return "A refactor's implement may change only the accepted plan's areas, and gf can't read that plan as the owner accepted it. " +
+			"The owner can send the work back with `gf return plan \"<reason>\"`. " + seeLog
 	case errors.Is(err, domain.ErrRouteOutsideFixer):
 		return "Only the fixer chooses a route. Submit with `gf submit --passed` or `gf submit --failed \"<reason>\"`. No attempt was used."
 	case errors.As(err, &forced) && cmd.Name() == "stress":

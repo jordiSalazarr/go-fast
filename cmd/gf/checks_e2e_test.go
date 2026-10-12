@@ -21,9 +21,12 @@ func TestChecks_ShowsTheConfigurationAndEachStagesChecks(t *testing.T) {
 	assert.Contains(t, out, "  specify              artifact-written, specs-fail\n")
 	assert.Contains(t, out, "  discovery            artifact-written\n                       modify-behaviour also: behaviour-delta\n")
 	assert.Contains(t, out, "  design               artifact-written, design-valid, nfr-proposals-valid\n")
-	assert.Contains(t, out, "  implement            artifact-written, build-passes, formatted, specs-pass, specs-untouched, suite-passes\n")
+	assert.Contains(t, out, "  implement            artifact-written, build-passes, formatted, suite-passes\n"+
+		"                       fix-bug, new-feature, modify-behaviour also: specs-pass, specs-untouched\n"+
+		"                       refactor also: tests-untouched\n")
 
-	assert.NotContains(t, out, "Warning")
+	assert.NotContains(t, out, "uncommitted changes")
+	assert.Contains(t, out, "  refactor     coverage of a plan's areas is reported only (refactor.minCoverage is 0 or unset)\n")
 
 	assert.Contains(t, out, "stress       not configured: stress testing fails until the owner adds a \"stress\" section to .gofast/checks.json")
 
@@ -52,7 +55,9 @@ func TestChecks_WarnsWhileTheConfigurationIsUncommitted(t *testing.T) {
 	assert.True(t, strings.HasPrefix(r.gf("checks"), warning), "staged")
 
 	r.git("commit", "-q", "-m", "configure checks")
-	assert.NotContains(t, r.gf("checks"), "Warning")
+	out := r.gf("checks")
+	assert.NotContains(t, out, "uncommitted changes")
+	assert.True(t, strings.HasPrefix(out, "Warning: No \"refactor\": {\"minCoverage\": <percent>} in .gofast/checks.json: "), out)
 
 	r.write(".gofast/checks.json", `{"integration": {"command": ["make", "integration"]}}`)
 	assert.True(t, strings.HasPrefix(r.gf("checks"), warning), "modified")
@@ -79,7 +84,9 @@ func TestChecks_ShowsTheNFRsAndWarnsWhileTheyAreUncommitted(t *testing.T) {
 
 	r.git("add", "-A")
 	r.git("commit", "-q", "-m", "nfrs")
-	assert.NotContains(t, r.gf("checks"), "Warning")
+	out = r.gf("checks")
+	assert.NotContains(t, out, "uncommitted changes")
+	assert.True(t, strings.HasPrefix(out, "Warning: No \"refactor\": {\"minCoverage\": <percent>} in .gofast/checks.json: "), out)
 
 	r.write(".gofast/nfrs.json", `{"nfrs": [{"id": "x", "areas": ["a/**"], "operation": "GET /a", "load": {"vus": 1, "duration": "1s"}, "targets": {}, "owner": "me"}]}`)
 	res := r.gfFails(nil, "checks")

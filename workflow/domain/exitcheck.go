@@ -65,6 +65,22 @@ var (
 	// no problems (Grill.Problems), and its decision document has the
 	// required sections.
 	CheckGrillValid = ExitCheck{name: "grill-valid"}
+	// CheckPlanValid: the plan visit's structured refactor plan parses and
+	// has no problems (RefactorPlan.Problems): at least one area, no
+	// behaviour change, and a markdown plan that links the accepted grill's
+	// decision document.
+	CheckPlanValid = ExitCheck{name: "plan-valid"}
+	// CheckCharacterizationPasses: every test written in this stage visit
+	// compiles and passes against the current code. Writing none passes:
+	// coverage may already suffice.
+	CheckCharacterizationPasses = ExitCheck{name: "characterization-passes"}
+	// CheckCoverageSufficient: the statement coverage of the packages in the
+	// accepted plan's areas is at least the owner's refactor.minCoverage;
+	// with none set, it only reports the coverage.
+	CheckCoverageSufficient = ExitCheck{name: "coverage-sufficient"}
+	// CheckTestsUntouched: no test file that existed when the stage visit
+	// began was modified or deleted. New test files are allowed.
+	CheckTestsUntouched = ExitCheck{name: "tests-untouched"}
 )
 
 // ExitChecks lists every exit check.
@@ -74,6 +90,7 @@ func ExitChecks() []ExitCheck {
 		CheckSpecsUntouched, CheckSuitePasses, CheckFormatted, CheckIntegrationPasses,
 		CheckStressScriptsValid, CheckNFRsMet, CheckDesignValid, CheckNFRProposalsValid, CheckBehaviourDelta,
 		CheckSpecsCoverSlices, CheckEventModelValid, CheckGrillValid, CheckSpecsCoverScenarios,
+		CheckPlanValid, CheckCharacterizationPasses, CheckCoverageSufficient, CheckTestsUntouched,
 	}
 }
 
@@ -82,11 +99,15 @@ func (c ExitCheck) isZero() bool   { return c.name == "" }
 
 // RequiredChecks are the exit checks a stage visit must pass on a path, in
 // the order their failures are reported: the stage's own, and those the
-// path adds. Everything a path adds is about the stage's own work, never
-// about code.
+// path adds or replaces. Everything a path adds to a stage that can't change
+// code is about the stage's own work, never about code.
 func RequiredChecks(stage Stage, path Path) []ExitCheck {
 	checks := stage.checks()
 	switch {
+	case stage == StageImplement && path.Includes(StagePlan):
+		// A refactor has no specs: implement keeps every existing test
+		// instead of making specify's pass.
+		return []ExitCheck{CheckArtifactWritten, CheckBuildPasses, CheckFormatted, CheckTestsUntouched, CheckSuitePasses}
 	case stage == StageDiscovery && path.workType == WorkTypeModifyBehaviour:
 		checks = append(checks, CheckBehaviourDelta)
 	case stage == StageSpecify && path.Includes(StageGrill):
@@ -108,6 +129,10 @@ func (s Stage) checks() []ExitCheck {
 		return []ExitCheck{CheckArtifactWritten}
 	case StageDesign:
 		return []ExitCheck{CheckArtifactWritten, CheckDesignValid, CheckNFRProposalsValid}
+	case StagePlan:
+		return []ExitCheck{CheckArtifactWritten, CheckPlanValid}
+	case StageCharacterize:
+		return []ExitCheck{CheckArtifactWritten, CheckCharacterizationPasses, CheckCoverageSufficient}
 	case StageSpecify:
 		return []ExitCheck{CheckArtifactWritten, CheckSpecsFail}
 	case StageImplement:
@@ -201,16 +226,24 @@ func (r Route) isZero() bool   { return r.target.isZero() }
 
 func (c AgentClaim) isZero() bool { return !c.passed && c.reason.isZero() }
 
-// ScopeCheck is the files a stage visit changed, checked against its stage's
-// write scope.
+// ScopeCheck is the files a stage visit changed, checked against what it
+// may write.
 type ScopeCheck struct {
 	stage      Stage
+	areas      []AreaGlob // the plan's areas the scope was narrowed to
 	violations []RepoPath
 }
 
-// CheckWriteScope checks the files changed during a stage visit of work.
+// CheckWriteScope checks the files changed during a stage visit of work
+// against its stage's write scope.
 func CheckWriteScope(stage Stage, work WorkID, decisions DecisionsDir, changed ChangedFiles) ScopeCheck {
-	return ScopeCheck{stage: stage, violations: stage.WriteScope().Violations(changed, work, decisions)}
+	return CheckWrites(Writes{stage: stage, work: work, decisions: decisions}, changed)
+}
+
+// CheckWrites checks the files changed during a stage visit against what
+// it may write.
+func CheckWrites(w Writes, changed ChangedFiles) ScopeCheck {
+	return ScopeCheck{stage: w.stage, areas: w.areas, violations: w.Violations(changed)}
 }
 
 func (c ScopeCheck) Violations() []RepoPath { return append([]RepoPath(nil), c.violations...) }
@@ -222,7 +255,19 @@ func (c ScopeCheck) reason() string {
 	for i, p := range c.violations {
 		names[i] = p.value
 	}
+	if len(c.areas) > 0 {
+		return "Changed files outside the '" + c.stage.name + "' write scope, the plan's areas (" + joinAreas(c.areas) +
+			") and new files under their directories: " + strings.Join(names, ", ") + "."
+	}
 	return "Changed files outside the '" + c.stage.name + "' write scope: " + strings.Join(names, ", ") + "."
+}
+
+func joinAreas(areas []AreaGlob) string {
+	names := make([]string, len(areas))
+	for i, a := range areas {
+		names[i] = a.pattern
+	}
+	return strings.Join(names, ", ")
 }
 
 // ExitCheckOutcome is the result of a stage's exit: the agent's claim, the
@@ -347,7 +392,7 @@ func ClassifyFailure(outcome ExitCheckOutcome) (kind FailureKind, ok bool) {
 func (c ExitCheck) judgesStageWork() bool {
 	switch c {
 	case CheckArtifactWritten, CheckStressScriptsValid, CheckDesignValid, CheckNFRProposalsValid, CheckBehaviourDelta,
-		CheckSpecsCoverSlices, CheckEventModelValid, CheckGrillValid, CheckSpecsCoverScenarios:
+		CheckSpecsCoverSlices, CheckEventModelValid, CheckGrillValid, CheckSpecsCoverScenarios, CheckPlanValid:
 		return true
 	}
 	return false

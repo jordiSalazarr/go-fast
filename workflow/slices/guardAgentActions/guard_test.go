@@ -364,3 +364,23 @@ func TestOtherToolsAreNotGuarded(t *testing.T) {
 
 	assert.Equal(t, allowed, decide(read, on(domain.StageReview), true, root))
 }
+
+// On a refactor, implement may change only the accepted plan's areas, and
+// add new files under the directories they name.
+func TestRule4_RefactorImplement_StaysInThePlansAreas(t *testing.T) {
+	plan := domain.NewRefactorPlan(domain.RefactorPlanValues{Areas: []string{"internal/wallet/**", "internal/ledger/posting.go"}})
+	writes, err := domain.WritesOf(domain.StageImplement, Must(domain.PathFor(domain.WorkTypeRefactor)), WorkID,
+		domain.ScopeFacts{Decisions: domain.DefaultDecisionsDir(), Plan: &plan})
+	require.NoError(t, err)
+	existing := map[string]bool{"internal/wallet/service.go": true, "internal/ledger/posting.go": true, "internal/ledger/journal.go": true, "cmd/server/main.go": true}
+	facts := on(domain.StageImplement).withWrites(writes, func(p domain.RepoPath) bool { return existing[p.String()] })
+	agent := "gofast:implement"
+
+	assert.Equal(t, allowed, decide(write(agent, "/repo/internal/wallet/service.go"), facts, false, root))
+	assert.Equal(t, allowed, decide(write(agent, "/repo/internal/wallet/slices/post/handler.go"), facts, false, root))
+	assert.Equal(t, allowed, decide(write(agent, "/repo/internal/ledger/posting_split.go"), facts, false, root), "a new file under a named directory")
+	assert.Equal(t, allowed, decide(write(agent, "/repo/.gofast/works/w1/implement-v1.md"), facts, false, root))
+	assert.Equal(t, denied("During 'implement' of a refactor you may only change the accepted plan's areas (internal/wallet/**, internal/ledger/posting.go) and add new files under their directories; internal/ledger/journal.go is outside them. If the plan is wrong, say so in your artifact and submit --failed."),
+		decide(write(agent, "/repo/internal/ledger/journal.go"), facts, false, root))
+	assert.Equal(t, "deny", decide(write(agent, "/repo/cmd/server/new.go"), facts, false, root).HookSpecificOutput.PermissionDecision)
+}

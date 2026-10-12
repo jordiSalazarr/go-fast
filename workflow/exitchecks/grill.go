@@ -27,6 +27,7 @@ type grillFile struct {
 		When  string `json:"when"`
 		Then  string `json:"then"`
 	} `json:"acceptanceScenarios"`
+	MustNotChange []string `json:"mustNotChange"`
 	OpenQuestions []string `json:"openQuestions"`
 	DocPath       string   `json:"docPath"`
 }
@@ -38,6 +39,7 @@ const (
 	DecisionsHeading           = "Decisions"
 	GlossaryHeading            = "Glossary"
 	AcceptanceScenariosHeading = "Acceptance scenarios"
+	MustNotChangeHeading       = "Must not change"
 	OpenQuestionsHeading       = "Open questions"
 )
 
@@ -78,7 +80,7 @@ func parseGrill(data []byte) (domain.Grill, string) {
 	if problem := decodeStrict(data, &file); problem != "" {
 		return domain.Grill{}, problem
 	}
-	v := domain.GrillValues{OpenQuestions: file.OpenQuestions}
+	v := domain.GrillValues{OpenQuestions: file.OpenQuestions, MustNotChange: file.MustNotChange}
 	if file.DocPath != "" {
 		doc, err := domain.ParseRepoPath(file.DocPath)
 		if err != nil {
@@ -107,7 +109,7 @@ func (c *checkRun) grillValid() (finding, error) {
 	case err != nil:
 		return finding{}, err
 	}
-	facts := domain.GrillFacts{Work: c.visit.Work, Decisions: c.Config.Decisions, HasEventModel: c.visit.HasEventModel}
+	facts := domain.GrillFacts{Work: c.visit.Work, WorkType: c.visit.Path.WorkType(), Decisions: c.Config.Decisions, HasEventModel: c.visit.HasEventModel}
 	if facts.HasEventModel {
 		assumptions, problem, err := c.acceptedAssumptions()
 		if err != nil || problem != nil {
@@ -120,7 +122,7 @@ func (c *checkRun) grillValid() (finding, error) {
 		problems = append(problems, path.String()+": "+p)
 	}
 	if doc := grill.DocPath(); facts.Decisions.IsDecisionOf(doc, c.visit.Work) {
-		docProblems, err := c.decisionDocProblems(grill, path, doc, facts.HasEventModel)
+		docProblems, err := c.decisionDocProblems(grill, path, doc, facts)
 		if err != nil {
 			return finding{}, err
 		}
@@ -137,11 +139,14 @@ func (c *checkRun) grillValid() (finding, error) {
 }
 
 // decisionDocProblems checks that the decision document exists and has its
-// sections: intent, scope, decisions, glossary, acceptance scenarios
-// (without an event model), and open questions saying "None"; and that it
-// lists the same decisions and acceptance scenarios as grill's structured
-// outcome, at path.
-func (c *checkRun) decisionDocProblems(grill domain.Grill, path, doc domain.RepoPath, hasEventModel bool) ([]string, error) {
+// sections: intent, scope, decisions, glossary, what the work type requires
+// (acceptance scenarios on feature work without an event model, what must
+// not change on a refactor), and open questions saying "None"; and that it
+// lists the same decisions, acceptance scenarios and must-not-change items
+// as grill's structured outcome, at path.
+func (c *checkRun) decisionDocProblems(grill domain.Grill, path, doc domain.RepoPath, facts domain.GrillFacts) ([]string, error) {
+	hasEventModel := facts.HasEventModel
+	acceptance, mustNotChange := domain.GrillRequires(facts.WorkType, hasEventModel)
 	content, err := os.ReadFile(filepath.Join(c.Root, filepath.FromSlash(doc.String())))
 	if errors.Is(err, os.ErrNotExist) {
 		return []string{doc.String() + " is missing"}, nil
@@ -151,8 +156,11 @@ func (c *checkRun) decisionDocProblems(grill domain.Grill, path, doc domain.Repo
 	}
 	var problems []string
 	required := []string{IntentHeading, ScopeHeading, DecisionsHeading}
-	if !hasEventModel {
+	if acceptance {
 		required = append(required, AcceptanceScenariosHeading)
+	}
+	if mustNotChange {
+		required = append(required, MustNotChangeHeading)
 	}
 	for _, heading := range required {
 		body, found := markdownSection(string(content), heading)
@@ -174,8 +182,14 @@ func (c *checkRun) decisionDocProblems(grill domain.Grill, path, doc domain.Repo
 		problems = append(problems, doc.String()+": the '## "+OpenQuestionsHeading+"' section must say None")
 	}
 	decisions, _ := markdownBlock(string(content), DecisionsHeading)
-	acceptance, _ := markdownBlock(string(content), AcceptanceScenariosHeading)
-	parsed := domain.ParseDecisionDocument(decisions, acceptance)
+	acceptanceBlock, _ := markdownBlock(string(content), AcceptanceScenariosHeading)
+	parsed := domain.ParseDecisionDocument(decisions, acceptanceBlock)
+	if block, found := markdownBlock(string(content), MustNotChangeHeading); found {
+		parsed.MustNotChange = domain.ListItems(block)
+		if mustNotChange && strings.TrimSpace(block) != "" && len(parsed.MustNotChange) == 0 {
+			problems = append(problems, doc.String()+": the '## "+MustNotChangeHeading+"' section has no list item: list each thing that must not change as `- …`")
+		}
+	}
 	for _, p := range grill.DocumentProblems(parsed, filepath.Base(path.String()), hasEventModel) {
 		problems = append(problems, doc.String()+": "+p)
 	}

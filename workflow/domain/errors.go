@@ -45,10 +45,11 @@ var (
 	ErrNotCurrentStage     = errors.New("stage is not the current stage of the work")
 	ErrNoActiveWork        = errors.New("no active work")
 	ErrCannotEnterFixer    = errors.New("only a stage that checks code can hand work to the fixer")
-	ErrInvalidRoute        = errors.New("the fixer can only return work to an earlier stage on its path that can change code, or design")
+	ErrInvalidRoute        = errors.New("the fixer can only return work to an earlier stage on its path that can change code, or whose model the code follows: event modelling, design or plan")
 	ErrMissingRoute        = errors.New("the fixer's pass must say which stage the work returns to")
 	ErrRouteOutsideFixer   = errors.New("only the fixer chooses a route")
 	ErrInvalidReturn       = errors.New("work can only be returned to an earlier stage of its path that it entered")
+	ErrNoAcceptedPlan      = errors.New("a refactor's implement needs an accepted plan with areas")
 	ErrNotReturnable       = errors.New("work can only be returned while it is on a stage of its path, not in the fixer or at its rework limit")
 	// Stress testing.
 	ErrMissingStressDecision = errors.New("review's pass must decide whether stress testing runs")

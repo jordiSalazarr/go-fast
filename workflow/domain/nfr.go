@@ -64,6 +64,21 @@ func (g AreaGlob) Matches(p RepoPath) bool {
 	return matchSegments(strings.Split(g.pattern, "/"), strings.Split(p.value, "/"))
 }
 
+// dir is the directory the area names: its leading segments up to the first
+// one with a wildcard, or, for a single file, the file's directory. ok is
+// false when that is the repository root.
+func (g AreaGlob) dir() (RepoPath, bool) {
+	segments := strings.Split(g.pattern, "/")
+	i := slices.IndexFunc(segments, func(seg string) bool { return strings.ContainsAny(seg, "*?[") })
+	if i < 0 {
+		i = len(segments) - 1
+	}
+	if i == 0 {
+		return RepoPath{}, false
+	}
+	return RepoPath{value: strings.Join(segments[:i], "/")}, true
+}
+
 func matchSegments(pattern, name []string) bool {
 	if len(pattern) == 0 {
 		return len(name) == 0

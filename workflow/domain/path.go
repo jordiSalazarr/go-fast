@@ -69,6 +69,7 @@ var paths = map[WorkType]map[PathVersion][]PathStep{
 	}},
 	WorkTypeNewFeature:      {PathV1: designedPath, PathV2: featurePath},
 	WorkTypeModifyBehaviour: {PathV1: designedPath, PathV2: featurePath},
+	WorkTypeRefactor:        {PathV1: refactorPath},
 }
 
 // currentVersions are the versions new works start on.
@@ -76,6 +77,7 @@ var currentVersions = map[WorkType]PathVersion{
 	WorkTypeFixBug:          PathV1,
 	WorkTypeNewFeature:      PathV2,
 	WorkTypeModifyBehaviour: PathV2,
+	WorkTypeRefactor:        PathV1,
 }
 
 // designedPath (v1) is fix-bug's path with design between discovery and
@@ -100,6 +102,22 @@ var featurePath = []PathStep{
 	{stage: StageDiscovery, gate: GateAuto, budget: AttemptBudget{n: 3}},
 	{stage: StageDesign, gate: GateHuman, budget: AttemptBudget{n: 3}},
 	{stage: StageSpecify, gate: GateHuman, budget: AttemptBudget{n: 3}},
+	{stage: StageImplement, gate: GateAuto, budget: AttemptBudget{n: 3}},
+	{stage: StageReview, gate: GateAuto, budget: AttemptBudget{n: 3}},
+	{stage: StageIntegrationTesting, gate: GateAuto, budget: AttemptBudget{n: 3}},
+	{stage: StageStressTesting, gate: GateAuto, budget: AttemptBudget{n: 3}, optional: true},
+}
+
+// refactorPath maps the code about to move first, then settles with the
+// owner, live, why it moves and what must not change; the owner approves a
+// plan that follows those decisions; characterize pins the behaviour of the
+// planned areas with passing tests; only then does the code move, within the
+// plan's areas and without touching any existing test.
+var refactorPath = []PathStep{
+	{stage: StageDiscovery, gate: GateAuto, budget: AttemptBudget{n: 3}},
+	{stage: StageGrill, gate: GateHuman, budget: AttemptBudget{n: 3}},
+	{stage: StagePlan, gate: GateHuman, budget: AttemptBudget{n: 3}},
+	{stage: StageCharacterize, gate: GateAuto, budget: AttemptBudget{n: 3}},
 	{stage: StageImplement, gate: GateAuto, budget: AttemptBudget{n: 3}},
 	{stage: StageReview, gate: GateAuto, budget: AttemptBudget{n: 3}},
 	{stage: StageIntegrationTesting, gate: GateAuto, budget: AttemptBudget{n: 3}},

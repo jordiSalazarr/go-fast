@@ -57,11 +57,15 @@ var (
 	// WorkTypeModifyBehaviour changes what existing code does, designed
 	// first, from its current behaviour to the expected one.
 	WorkTypeModifyBehaviour = WorkType{name: "modify-behaviour"}
+	// WorkTypeRefactor changes how code is built without changing what it
+	// does: the owner settles what must not change, approves a plan, and the
+	// code moves only once its behaviour is pinned by tests.
+	WorkTypeRefactor = WorkType{name: "refactor"}
 )
 
 // WorkTypes lists every known work type.
 func WorkTypes() []WorkType {
-	return []WorkType{WorkTypeFixBug, WorkTypeNewFeature, WorkTypeModifyBehaviour}
+	return []WorkType{WorkTypeFixBug, WorkTypeNewFeature, WorkTypeModifyBehaviour, WorkTypeRefactor}
 }
 
 func ParseWorkType(s string) (WorkType, error) {
@@ -90,7 +94,13 @@ var (
 	StageDiscovery = Stage{name: "discovery"}
 	// StageDesign models the change before any spec is written: event and
 	// domain model, contracts and read models. It writes artifacts only.
-	StageDesign             = Stage{name: "design"}
+	StageDesign = Stage{name: "design"}
+	// StagePlan is refactor's plan, following grill's decisions: the areas
+	// the refactor may change, and how. It writes artifacts only.
+	StagePlan = Stage{name: "plan"}
+	// StageCharacterize pins the current behaviour of the code about to move
+	// with passing tests, before any of it moves.
+	StageCharacterize       = Stage{name: "characterize"}
 	StageSpecify            = Stage{name: "specify"}
 	StageImplement          = Stage{name: "implement"}
 	StageReview             = Stage{name: "review"}
@@ -104,7 +114,8 @@ var (
 )
 
 func Stages() []Stage {
-	return []Stage{StageEventModelling, StageGrill, StageDiscovery, StageDesign, StageSpecify, StageImplement, StageReview, StageIntegrationTesting, StageStressTesting, StageFixer}
+	return []Stage{StageEventModelling, StageGrill, StageDiscovery, StageDesign, StagePlan, StageCharacterize,
+		StageSpecify, StageImplement, StageReview, StageIntegrationTesting, StageStressTesting, StageFixer}
 }
 
 func ParseStage(s string) (Stage, error) {

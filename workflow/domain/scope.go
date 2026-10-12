@@ -69,6 +69,12 @@ func EventModelFor(work WorkID, visit Visit) RepoPath {
 	return RepoPath{value: ArtifactDir(work).value + "/event-model-v" + strconv.Itoa(visit.n) + ".json"}
 }
 
+// RefactorPlanFor is the structured refactor plan a plan visit writes next
+// to its artifact.
+func RefactorPlanFor(work WorkID, visit Visit) RepoPath {
+	return RepoPath{value: ArtifactDir(work).value + "/refactor-plan-v" + strconv.Itoa(visit.n) + ".json"}
+}
+
 // GrillFor is the structured outcome a grill visit writes next to its
 // artifact.
 func GrillFor(work WorkID, visit Visit) RepoPath {
@@ -111,13 +117,13 @@ func (s WriteScope) CanChangeCode() bool {
 // WriteScope is what may be written while the work is on this stage.
 func (s Stage) WriteScope() WriteScope {
 	switch s {
-	case StageSpecify:
+	case StageSpecify, StageCharacterize:
 		return WriteScopeTestsAndArtifacts
 	case StageImplement:
 		return WriteScopeAnything
 	case StageGrill:
 		return WriteScopeArtifactsAndDecision
-	case StageEventModelling, StageDiscovery, StageDesign, StageReview, StageIntegrationTesting, StageStressTesting, StageFixer:
+	case StageEventModelling, StageDiscovery, StageDesign, StagePlan, StageReview, StageIntegrationTesting, StageStressTesting, StageFixer:
 		return WriteScopeArtifacts
 	}
 	return WriteScope{}
@@ -159,22 +165,110 @@ func (s WriteScope) Violations(changed ChangedFiles, work WorkID, decisions Deci
 }
 
 // ChangedFiles is the set of files a stage visit changed, however they were
-// written. The zero value is the empty set.
-type ChangedFiles struct{ paths []RepoPath } // sorted, unique
+// written, and which of them it added. The zero value is the empty set.
+type ChangedFiles struct {
+	paths []RepoPath // sorted, unique
+	added []RepoPath // sorted, unique, a subset of paths
+}
 
 func NewChangedFiles(paths ...RepoPath) ChangedFiles {
-	var c ChangedFiles
+	return ChangedFiles{paths: sortedSet(paths)}
+}
+
+// WithAdded marks paths as added: they didn't exist when the visit began.
+// They are changed files too.
+func (c ChangedFiles) WithAdded(added ...RepoPath) ChangedFiles {
+	return ChangedFiles{paths: sortedSet(append(slices.Clone(c.paths), added...)), added: sortedSet(append(slices.Clone(c.added), added...))}
+}
+
+func sortedSet(paths []RepoPath) []RepoPath {
+	var set []RepoPath
 	for _, p := range paths {
 		if !p.isZero() {
-			c.paths = append(c.paths, p)
+			set = append(set, p)
 		}
 	}
-	slices.SortFunc(c.paths, func(a, b RepoPath) int { return strings.Compare(a.value, b.value) })
-	c.paths = slices.Compact(c.paths)
-	return c
+	slices.SortFunc(set, func(a, b RepoPath) int { return strings.Compare(a.value, b.value) })
+	return slices.Compact(set)
 }
 
 func (c ChangedFiles) Paths() []RepoPath { return slices.Clone(c.paths) }
+
+// Added reports whether the visit added the path.
+func (c ChangedFiles) Added(p RepoPath) bool { return slices.Contains(c.added, p) }
+
+// ScopeFacts are what a stage visit's write scope depends on beyond its
+// stage: the repository's decisions directory and, for implement on a path
+// with a refactor plan, the latest accepted plan.
+type ScopeFacts struct {
+	Decisions DecisionsDir
+	Plan      *RefactorPlan
+}
+
+// Writes is what one stage visit of a work may write: its stage's write
+// scope, narrowed on a refactor's implement to the accepted plan's areas.
+type Writes struct {
+	stage     Stage
+	work      WorkID
+	decisions DecisionsDir
+	areas     []AreaGlob // set only when narrowed to a plan
+}
+
+// WritesOf is what a stage visit of work on a path may write. Implement on
+// a path with a plan may write only the plan's areas, and new files under
+// the directories they name: without an accepted plan it may write nothing.
+func WritesOf(stage Stage, path Path, work WorkID, facts ScopeFacts) (Writes, error) {
+	w := Writes{stage: stage, work: work, decisions: facts.Decisions}
+	if stage != StageImplement || !path.Includes(StagePlan) {
+		return w, nil
+	}
+	if facts.Plan == nil || len(facts.Plan.Areas()) == 0 {
+		return Writes{}, fmt.Errorf("%s on %s work: %w", stage, path.workType, ErrNoAcceptedPlan)
+	}
+	w.areas = facts.Plan.Areas()
+	return w, nil
+}
+
+func (w Writes) Stage() Stage { return w.stage }
+
+// Areas are the plan's areas the scope is narrowed to; none when it isn't.
+func (w Writes) Areas() []AreaGlob { return slices.Clone(w.areas) }
+
+// Allows reports whether the visit may write path; added says the path
+// didn't exist when the visit began.
+func (w Writes) Allows(path RepoPath, added bool) bool {
+	if !w.stage.WriteScope().Allows(path, w.work, w.decisions) {
+		return false
+	}
+	if w.areas == nil || path.within(ArtifactDir(w.work)) {
+		return true
+	}
+	for _, a := range w.areas {
+		if a.Matches(path) {
+			return true
+		}
+		if dir, ok := a.dir(); ok && added && path.within(dir) {
+			return true
+		}
+	}
+	return false
+}
+
+// Violations returns the changed paths the visit may not write, in path
+// order.
+func (w Writes) Violations(changed ChangedFiles) []RepoPath {
+	var violations []RepoPath
+	for _, p := range changed.paths {
+		if !w.Allows(p, changed.Added(p)) {
+			violations = append(violations, p)
+		}
+	}
+	return violations
+}
+
+// IsTestFile reports whether a path is test code: a *_test.go file, or a
+// file under a testdata directory.
+func IsTestFile(p RepoPath) bool { return isTestFile(p) }
 
 func isTestFile(p RepoPath) bool {
 	segments := strings.Split(p.value, "/")

@@ -73,7 +73,10 @@ type AcceptanceScenario struct {
 type GrillValues struct {
 	Decisions           []GrillDecision
 	AcceptanceScenarios []AcceptanceScenario
-	OpenQuestions       []string
+	// MustNotChange is what a refactor preserves: public APIs, behaviour,
+	// event names, wire formats.
+	MustNotChange []string
+	OpenQuestions []string
 	// DocPath is the work's decision document.
 	DocPath RepoPath
 }
@@ -83,7 +86,7 @@ type GrillValues struct {
 type Grill struct{ v GrillValues }
 
 func NewGrill(v GrillValues) Grill {
-	g := GrillValues{DocPath: v.DocPath, OpenQuestions: trimAll(v.OpenQuestions)}
+	g := GrillValues{DocPath: v.DocPath, OpenQuestions: trimAll(v.OpenQuestions), MustNotChange: trimAll(v.MustNotChange)}
 	for _, d := range v.Decisions {
 		g.Decisions = append(g.Decisions, GrillDecision{ID: strings.TrimSpace(d.ID), Question: strings.TrimSpace(d.Question),
 			Answer: strings.TrimSpace(d.Answer), Rationale: strings.TrimSpace(d.Rationale), Addresses: trimAll(d.Addresses)})
@@ -99,18 +102,31 @@ func (g Grill) Decisions() []GrillDecision { return slices.Clone(g.v.Decisions) 
 func (g Grill) AcceptanceScenarios() []AcceptanceScenario {
 	return slices.Clone(g.v.AcceptanceScenarios)
 }
-func (g Grill) DocPath() RepoPath { return g.v.DocPath }
+func (g Grill) DocPath() RepoPath       { return g.v.DocPath }
+func (g Grill) MustNotChange() []string { return slices.Clone(g.v.MustNotChange) }
+
+// GrillRequires is what grill's outcome must hold on work of a type:
+// acceptance scenarios on feature work without an event model, which
+// specify covers; on a refactor, which changes no behaviour, none, but
+// what must not change.
+func GrillRequires(workType WorkType, hasEventModel bool) (acceptanceScenarios, mustNotChange bool) {
+	if workType == WorkTypeRefactor {
+		return false, true
+	}
+	return !hasEventModel, false
+}
 
 var (
 	decisionID   = regexp.MustCompile(`^D[0-9]+$`)
 	acceptanceID = regexp.MustCompile(`^A[0-9]+$`)
 )
 
-// GrillFacts are what grill's outcome is checked against: the work, the
-// repository's decisions directory, and, when the work has an event model,
-// the assumptions event modelling made.
+// GrillFacts are what grill's outcome is checked against: the work and its
+// type, the repository's decisions directory, and, when the work has an
+// event model, the assumptions event modelling made.
 type GrillFacts struct {
 	Work          WorkID
+	WorkType      WorkType
 	Decisions     DecisionsDir
 	HasEventModel bool
 	Assumptions   []Assumption
@@ -120,8 +136,9 @@ type GrillFacts struct {
 // in a stable order; none means grill is done: no question is open, every
 // decision has a unique id, a question and an answer, the decision document
 // is the work's, every assumption of the event model is settled by a
-// decision that addresses it by id, and, without an event model, the agreed
-// behaviour has acceptance scenarios.
+// decision that addresses it by id, and what the work type requires
+// (GrillRequires): acceptance scenarios for the agreed behaviour, or what
+// must not change, never empty and never just "None".
 func (g Grill) Problems(f GrillFacts) []string {
 	var p problems
 	v := g.v
@@ -156,8 +173,23 @@ func (g Grill) Problems(f GrillFacts) []string {
 				p.add("assumption %s of the event model is addressed by no decision (%s)", a.id, a.text)
 			}
 		}
-	} else if len(v.AcceptanceScenarios) == 0 {
+	}
+	acceptance, mustNotChange := GrillRequires(f.WorkType, f.HasEventModel)
+	if acceptance && len(v.AcceptanceScenarios) == 0 {
 		p.add("without an event model, grill needs acceptance scenarios (A1, A2, …)")
+	}
+	if mustNotChange {
+		switch {
+		case len(v.MustNotChange) == 0:
+			p.add("a refactor's grill needs mustNotChange: what the refactor preserves (public APIs, behaviour, event names, wire formats)")
+		case len(v.MustNotChange) == 1 && isNone(v.MustNotChange[0]):
+			p.add("mustNotChange says None: every refactor preserves something, so name it")
+		}
+		for i, item := range v.MustNotChange {
+			if item == "" {
+				p.add("mustNotChange item %d is empty", i+1)
+			}
+		}
 	}
 	seen = map[string]bool{}
 	for _, a := range v.AcceptanceScenarios {
@@ -190,10 +222,60 @@ type DocumentEntry struct {
 }
 
 // DecisionDocument is what the owner approves: the entries of its
-// `## Decisions` and `## Acceptance scenarios` sections.
+// `## Decisions` and `## Acceptance scenarios` sections, and the items of
+// its `## Must not change` list.
 type DecisionDocument struct {
 	Decisions           []DocumentEntry
 	AcceptanceScenarios []DocumentEntry
+	MustNotChange       []string
+}
+
+// ListItems are the top-level items of a markdown list: lines starting with
+// "- ", "* " or "1. ", each joined with its indented continuation lines.
+func ListItems(section string) []string {
+	var items []string
+	for _, line := range strings.Split(section, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if item, ok := listItem(line); ok {
+			items = append(items, item)
+			continue
+		}
+		if len(items) > 0 && line != strings.TrimLeft(line, " \t") {
+			items[len(items)-1] += " " + trimmed
+		}
+	}
+	return items
+}
+
+var numberedItem = regexp.MustCompile(`^[0-9]+[.)]\s+`)
+
+func listItem(line string) (string, bool) {
+	for _, bullet := range []string{"- ", "* ", "+ "} {
+		if rest, ok := strings.CutPrefix(line, bullet); ok {
+			return strings.TrimSpace(rest), true
+		}
+	}
+	if m := numberedItem.FindString(line); m != "" {
+		return strings.TrimSpace(line[len(m):]), true
+	}
+	return "", false
+}
+
+// isNone reports whether an item only says "None".
+func isNone(item string) bool {
+	return strings.EqualFold(strings.TrimSuffix(strings.TrimSpace(item), "."), "none")
+}
+
+// sameItem compares a document's list item with the structured file's,
+// ignoring markdown emphasis and code marks and spacing.
+func sameItem(doc, file string) bool {
+	norm := func(s string) string {
+		return strings.Join(strings.Fields(strings.NewReplacer("`", "", "*", "", "_", "").Replace(s)), " ")
+	}
+	return norm(doc) == norm(file)
 }
 
 var (
@@ -230,7 +312,8 @@ func entries(section string, prefix byte) []DocumentEntry {
 
 // DocumentProblems lists where the decision document the owner approves
 // and grill's structured outcome, file, disagree: a decision or acceptance
-// scenario in one but not the other, and, with an event model, an
+// scenario in one but not the other, must-not-change lists that differ in
+// length or in an item, in order, and, with an event model, an
 // assumption a decision addresses that its entry in the document doesn't
 // name.
 func (g Grill) DocumentProblems(doc DecisionDocument, file string, hasEventModel bool) []string {
@@ -241,6 +324,15 @@ func (g Grill) DocumentProblems(doc DecisionDocument, file string, hasEventModel
 	decisionIDs := names(g.v.Decisions, func(d GrillDecision) string { return d.ID })
 	p.sameIDs("decision", decisionIDs, ids(doc.Decisions), file)
 	p.sameIDs("acceptance scenario", g.AcceptanceIDs(), ids(doc.AcceptanceScenarios), file)
+	if want, got := g.v.MustNotChange, doc.MustNotChange; len(want) != len(got) {
+		p.add("the '## Must not change' list has %d items, but mustNotChange in %s has %d", len(got), file, len(want))
+	} else {
+		for i := range want {
+			if !sameItem(got[i], want[i]) {
+				p.add("must-not-change item %d differs: the decision document says %q, %s says %q", i+1, got[i], file, want[i])
+			}
+		}
+	}
 	if !hasEventModel {
 		return p.list
 	}

@@ -85,7 +85,7 @@ func (a *app) rootCommand() *cobra.Command {
 	root.PersistentFlags().StringVar(&a.dir, "dir", "", "repository root (default: the git repository containing the working directory)")
 	root.AddCommand(
 		startwork.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch, a.repositoryRoot),
-		submitforacceptance.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch, a.changedFiles, a.decisionsDir, a.runChecks, a.stressFacts),
+		submitforacceptance.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch, a.changedFiles, a.scopeFacts, a.runChecks, a.stressFacts),
 		approve.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch),
 		reject.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch),
 		extendbudget.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch),
@@ -251,6 +251,19 @@ func (a *app) decisionsDir() (domain.DecisionsDir, error) {
 		return domain.DecisionsDir{}, err
 	}
 	return config.Decisions, nil
+}
+
+// scopeFacts is what a submission's write scope depends on: the decisions
+// directory and, on a refactor's implement, the plan as the owner accepted
+// it.
+func (a *app) scopeFacts(target submitforacceptance.Target) (domain.ScopeFacts, error) {
+	dir, err := a.decisionsDir()
+	if err != nil {
+		return domain.ScopeFacts{}, err
+	}
+	return submitforacceptance.PlanFacts(target, dir, func(work domain.WorkID, visit domain.Visit, end domain.AssignmentID) (domain.RefactorPlan, error) {
+		return exitchecks.AcceptedRefactorPlan(a.root, work, visit, end)
+	})
 }
 
 // stressFacts reads the repository's NFRs and the files the work changed

@@ -24,6 +24,11 @@ const UncommittedWarning = "checks.json has uncommitted changes. Commit it befor
 // NFRsUncommittedWarning is UncommittedWarning for the NFRs.
 const NFRsUncommittedWarning = "nfrs.json has uncommitted changes. Commit it before starting work; changing it during a stage fails that attempt's scope check."
 
+// NoMinCoverageWarning is shown while the owner hasn't set
+// refactor.minCoverage: a refactor's coverage-sufficient then only reports
+// the coverage of the code about to move.
+const NoMinCoverageWarning = "No \"refactor\": {\"minCoverage\": <percent>} in " + exitchecks.ConfigPath + ": a refactor's coverage-sufficient only reports the coverage of the code about to move, and never fails."
+
 // NoMinRPSWarning is shown for an NFR without a minRps target.
 func NoMinRPSWarning(id domain.NFRID) string {
 	return "NFR '" + id.String() + "' has no minRps target: a script that sleeps between requests can keep latency low by sending little load."
@@ -59,6 +64,9 @@ func NewCommand(repositoryRoot func() (string, error)) *cobra.Command {
 					fmt.Fprintf(cmd.OutOrStdout(), "Warning: %s\n\n", owned.warning)
 				}
 			}
+			if !config.Refactor.MinCoverageSet {
+				fmt.Fprintf(cmd.OutOrStdout(), "Warning: %s\n\n", NoMinCoverageWarning)
+			}
 			for _, n := range nfrs {
 				if n.Targets().Values().MinRPS == nil {
 					fmt.Fprintf(cmd.OutOrStdout(), "Warning: %s\n\n", NoMinRPSWarning(n.ID()))
@@ -90,6 +98,11 @@ func render(w io.Writer, config exitchecks.Config) {
 		fmt.Fprintf(w, "  stress       not configured: stress testing fails until the owner adds a \"stress\" section to %s\n", exitchecks.ConfigPath)
 	}
 	fmt.Fprintf(w, "  decisions    %s/ (grill's decision documents; gf generates its README.md)\n", config.Decisions.Path())
+	if r := config.Refactor; r.MinCoverageSet && r.MinCoverage > 0 {
+		fmt.Fprintf(w, "  refactor     each package in a plan's areas needs %v%% statement coverage before its code moves\n", r.MinCoverage)
+	} else {
+		fmt.Fprintln(w, "  refactor     coverage of a plan's areas is reported only (refactor.minCoverage is 0 or unset)")
+	}
 	if k6, err := exec.LookPath("k6"); err == nil {
 		fmt.Fprintf(w, "  k6           %s\n", k6)
 	} else {
