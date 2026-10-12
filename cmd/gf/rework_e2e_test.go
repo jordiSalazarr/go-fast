@@ -204,7 +204,7 @@ func TestRework_TheFourthHandover_ReachesTheReworkLimit(t *testing.T) {
 	assert.Equal(t, 3, v.Work.Reworks)
 	assert.Equal(t, 3, v.Work.ReworkBudget)
 	assert.Equal(t, progress.NextOwner, v.Next.Actor)
-	assert.Equal(t, []string{"gf rework-extend <n>", `gf abandon "<reason>"`}, v.Next.Commands)
+	assert.Equal(t, []string{"gf rework-extend <n>", `gf return <stage> "<reason>"`, `gf abandon "<reason>"`}, v.Next.Commands)
 	assert.Equal(t, 1, count(r.eventTypes(), "ReworkLimitReached"))
 
 	// Nothing proceeds until the owner acts.

@@ -196,7 +196,7 @@ func TestHookStageAgentLifecycle_EndToEnd(t *testing.T) {
 	r.run(asAgent, "submit", "--failed", "still failing")
 	r.run(asAgent, "submit", "--failed", "still failing")
 	assert.Equal(t,
-		tell("Budget exhausted on 'implement'. Review `"+artifact+"`, then run `gf extend <n>` or `gf abandon \"<reason>\"` in your own terminal. After you act, run /gofast:drive to continue."),
+		tell("Budget exhausted on 'implement'. Review `"+artifact+"`, then run `gf extend <n>`, `gf return <stage> \"<reason>\"` or `gf abandon \"<reason>\"` in your own terminal. After you act, run /gofast:drive to continue."),
 		r.hook(nil, "stop", stop(false)))
 	r.gf("extend", "1")
 	assert.Empty(t, r.hook(nil, "stop", stop(false)), "drive mode ended when the owner was needed")

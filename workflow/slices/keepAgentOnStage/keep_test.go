@@ -206,7 +206,7 @@ func TestStop_DrivingAndEscalated_IsAllowedTellingTheOwnerTheOptions_AndStopsDri
 
 	out, clear := sessionStop(mainStops(false), facts, true)
 
-	assert.Equal(t, claudehooks.Tell("Budget exhausted on 'implement'. Review `.gofast/works/w1/implement-v1.md`, then run `gf extend <n>` or `gf abandon \"<reason>\"` in your own terminal. After you act, run /gofast:drive to continue."), out)
+	assert.Equal(t, claudehooks.Tell("Budget exhausted on 'implement'. Review `.gofast/works/w1/implement-v1.md`, then run `gf extend <n>`, `gf return <stage> \"<reason>\"` or `gf abandon \"<reason>\"` in your own terminal. After you act, run /gofast:drive to continue."), out)
 	assert.True(t, clear)
 }
 
@@ -215,7 +215,7 @@ func TestStop_DrivingAtTheReworkLimit_IsAllowedTellingTheOwnerTheOptions_AndStop
 
 	out, clear := sessionStop(mainStops(false), facts, true)
 
-	assert.Equal(t, claudehooks.Tell("Rework limit reached: 'review' found a problem in the code again, and the work has used its whole rework budget. Review `.gofast/works/w1/review-v1.md`, then run `gf rework-extend <n>` or `gf abandon \"<reason>\"` in your own terminal. After you act, run /gofast:drive to continue."), out)
+	assert.Equal(t, claudehooks.Tell("Rework limit reached: 'review' found a problem in the code again, and the work has used its whole rework budget. Review `.gofast/works/w1/review-v1.md`, then run `gf rework-extend <n>`, `gf return <stage> \"<reason>\"` or `gf abandon \"<reason>\"` in your own terminal. After you act, run /gofast:drive to continue."), out)
 	assert.True(t, clear)
 }
 

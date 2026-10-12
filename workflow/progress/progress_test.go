@@ -105,7 +105,7 @@ func TestGivenAnEscalation_WhenQueryingStatus_ThenTheOwnerIsAskedToExtendOrAband
 	assert.Equal(t, 3, v.Current.AttemptsUsed)
 	assert.Equal(t, 3, v.Current.Budget)
 	assert.Equal(t, progress.NextOwner, v.Next.Actor)
-	assert.Equal(t, "Escalated: budget exhausted on 'review'; the owner can run `gf extend <n>` or `gf abandon \"<reason>\"`.", v.Next.Message)
+	assert.Equal(t, "Escalated: budget exhausted on 'review'; the owner can run `gf extend <n>`, `gf return <stage> \"<reason>\"` to send the work back to an earlier stage, or `gf abandon \"<reason>\"`.", v.Next.Message)
 }
 
 func TestGivenAnExtendedBudget_WhenQueryingStatus_ThenItShowsTheNewBudget(t *testing.T) {
@@ -246,7 +246,7 @@ func TestGivenTheReworkLimit_WhenQueryingStatus_ThenTheOwnerIsAskedToExtendOrAba
 	assert.Equal(t, progress.AssignmentHandedToFixer, v.Current.Assignment)
 	assert.Equal(t, 3, v.Work.Reworks)
 	assert.Equal(t, progress.NextOwner, v.Next.Actor)
-	assert.Equal(t, []string{"gf rework-extend <n>", `gf abandon "<reason>"`}, v.Next.Commands)
+	assert.Equal(t, []string{"gf rework-extend <n>", `gf return <stage> "<reason>"`, `gf abandon "<reason>"`}, v.Next.Commands)
 	assert.Contains(t, v.Next.Message, "Rework limit reached")
 	assert.Contains(t, v.Next.Message, "3 of 3 times")
 }

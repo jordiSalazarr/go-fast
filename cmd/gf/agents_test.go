@@ -157,3 +157,63 @@ func TestPlugin_SkillCatalogIsValid(t *testing.T) {
 	assert.Contains(t, string(body), `"optimize": []`)
 	assert.Contains(t, string(body), `"fixer": []`)
 }
+
+// The refactor's agents: plan follows grill's decisions and never codes;
+// characterize pins behaviour with passing tests; implement stays in the
+// plan's areas and keeps every test.
+func TestRefactorAgents(t *testing.T) {
+	read := func(stage domain.Stage) string {
+		body, err := os.ReadFile(instructions(stage))
+		require.NoError(t, err)
+		return string(body)
+	}
+	plan := read(domain.StagePlan)
+	for _, want := range []string{"**links the decision document**", "`refactor-plan-v<visit>.json`", "`behaviourChange` is always `false`",
+		"`## Decisions for the owner`", "You plan; you never change code or tests."} {
+		assert.Contains(t, plan, want)
+	}
+	characterize := read(domain.StageCharacterize)
+	for _, want := range []string{"tests that **pass** against the current code", "`work.grill.mustNotChange`", "each item you judge not testable in Go, with the reason",
+		"you never change production code"} {
+		assert.Contains(t, characterize, want)
+	}
+	implement := read(domain.StageImplement)
+	assert.Contains(t, implement, "Change only the plan's `areas`, adding new files only under the directories they name; never modify or delete an existing test")
+	assert.Contains(t, read(domain.StageDiscovery), "map **the code about to move**")
+}
+
+// The performance agents: measure records a baseline and diagnoses with
+// evidence; optimize may load catalog skills and never edits existing
+// tests; the fixer writes `## Bottleneck` first, which unlocks its catalog.
+func TestPerformanceAgents(t *testing.T) {
+	read := func(stage domain.Stage) string {
+		body, err := os.ReadFile(instructions(stage))
+		require.NoError(t, err)
+		return string(body)
+	}
+	measure := read(domain.StageMeasure)
+	for _, want := range []string{"`<work.artifactDir>stress/<nfr-id>.js`", "a `## Bottleneck` section", "you never change code or tests", "there is nothing to improve and the work completes"} {
+		assert.Contains(t, measure, want)
+	}
+	optimize := read(domain.StageOptimize)
+	assert.Contains(t, optimize, "the performance skills in this stage's catalog are unlocked")
+	assert.Contains(t, optimize, "never modify or delete an existing test")
+	assert.Contains(t, optimize, "tools: Read, Grep, Glob, Bash, Write, Edit, Skill")
+	fixer := read(domain.StageFixer)
+	assert.Contains(t, fixer, "as a `## Bottleneck` section in your artifact: until it is there, the performance skills of the fixer's catalog stay locked")
+	assert.Contains(t, fixer, "(→ `measure`)")
+	assert.Contains(t, fixer, "(→ `plan`)")
+}
+
+// The drive offers all five work types, asks for the target NFRs, and
+// points the owner to the plan's decisions.
+func TestDrive_OffersEveryWorkType(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("..", "..", "plugin", "skills", "drive", "SKILL.md"))
+	require.NoError(t, err)
+	for _, typ := range domain.WorkTypes() {
+		assert.Contains(t, string(body), "`"+typ.String()+"`")
+	}
+	for _, want := range []string{"`--nfr <id>` per target NFR", "When plan waits for approval", "`## Decisions for the owner`", "found nothing to improve"} {
+		assert.Contains(t, string(body), want)
+	}
+}

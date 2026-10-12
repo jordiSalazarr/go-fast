@@ -258,6 +258,13 @@ func markdownSection(text, heading string) (body string, found bool) {
 	return strings.Join(lines, "\n"), found
 }
 
+// HasSection reports whether markdown has a non-empty "## <heading>"
+// section.
+func HasSection(markdown, heading string) bool {
+	body, found := markdownSection(markdown, heading)
+	return found && body != ""
+}
+
 // headingLevel is the level of an ATX heading line, 0 for any other line.
 func headingLevel(line string) int {
 	level := len(line) - len(strings.TrimLeft(line, "#"))

@@ -41,6 +41,8 @@ type assignmentFacts struct {
 	artifact   domain.RepoPath
 	// stressMandatory: the work's path always runs stress testing.
 	stressMandatory bool
+	// planned: the work's path has a refactor plan after grill.
+	planned bool
 }
 
 // drivingStarts: the owner ran /gofast:drive.
@@ -124,6 +126,10 @@ func sessionStop(in claudehooks.Input, facts assignmentFacts, driving bool) (out
 		return claudehooks.Block(fmt.Sprintf("'%s' is still open (attempt %d of %d). Run the %s%s agent.",
 			facts.stage, attempt, budget, agentPrefix, facts.stage)), false
 	case domain.AwaitingApproval:
+		if facts.stage == domain.StageGrill && facts.planned {
+			return claudehooks.Tell(fmt.Sprintf("'grill' is waiting for your approval. Read the decision document `%s` names, its `## Must not change` above all: approving it approves the refactor's intent; the plan comes next. Then run `gf approve` or `gf reject \"<feedback>\"` in your own terminal. %s",
+				facts.artifact, resumeHint)), true
+		}
 		if facts.stage == domain.StageGrill {
 			return claudehooks.Tell(fmt.Sprintf("'grill' is waiting for your approval. Read the decision document `%s` names: approving it approves the plan. Then run `gf approve` or `gf reject \"<feedback>\"` in your own terminal. %s",
 				facts.artifact, resumeHint)), true
@@ -131,12 +137,12 @@ func sessionStop(in claudehooks.Input, facts assignmentFacts, driving bool) (out
 		return claudehooks.Tell(fmt.Sprintf("'%s' is waiting for your approval. Review `%s`, then run `gf approve` or `gf reject \"<feedback>\"` in your own terminal. %s",
 			facts.stage, facts.artifact, resumeHint)), true
 	case domain.Escalated:
-		return claudehooks.Tell(fmt.Sprintf("Budget exhausted on '%s'. Review `%s`, then run `gf extend <n>` or `gf abandon \"<reason>\"` in your own terminal. %s",
+		return claudehooks.Tell(fmt.Sprintf("Budget exhausted on '%s'. Review `%s`, then run `gf extend <n>`, `gf return <stage> \"<reason>\"` or `gf abandon \"<reason>\"` in your own terminal. %s",
 			facts.stage, facts.artifact, resumeHint)), true
 	case domain.HandedToFixer:
 		// The automations take a handover into the fixer at once, so the
 		// current visit stays handed over only at the rework limit.
-		return claudehooks.Tell(fmt.Sprintf("Rework limit reached: '%s' found a problem in the code again, and the work has used its whole rework budget. Review `%s`, then run `gf rework-extend <n>` or `gf abandon \"<reason>\"` in your own terminal. %s",
+		return claudehooks.Tell(fmt.Sprintf("Rework limit reached: '%s' found a problem in the code again, and the work has used its whole rework budget. Review `%s`, then run `gf rework-extend <n>`, `gf return <stage> \"<reason>\"` or `gf abandon \"<reason>\"` in your own terminal. %s",
 			facts.stage, facts.artifact, resumeHint)), true
 	}
 	return claudehooks.Nothing(), false
@@ -272,7 +278,7 @@ func loadFacts(repo claudehooks.Repo, branchOf func(root string) (domain.Branch,
 		facts = assignmentFacts{
 			readable: true, active: true, stage: work.CurrentStage(), assignment: work.CurrentAssignment(),
 			budget: work.CurrentStep().Budget(), artifact: domain.ArtifactFor(work.ID(), work.CurrentStage(), work.CurrentVisit()),
-			stressMandatory: work.Path().StressMandatory(),
+			stressMandatory: work.Path().StressMandatory(), planned: work.Path().Includes(domain.StagePlan),
 		}
 		state, version, err := history.Assignment(facts.assignment)
 		switch {

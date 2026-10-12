@@ -54,6 +54,14 @@ type Facts struct {
 	// File reads a file of the working tree; ok is false when it doesn't
 	// exist.
 	File func(path domain.RepoPath) (content []byte, ok bool, err error)
+	// Plan reads a structured refactor plan; an *exitchecks.PlanError says
+	// why it can't.
+	Plan func(path domain.RepoPath) (domain.RefactorPlan, error)
+	// Coverage returns what the latest attempt of a stage visit measured
+	// for coverage-sufficient.
+	Coverage func(id domain.AssignmentID) (attempt int, result exitchecks.CoverageResult, ok bool, err error)
+	// NFRs returns the repository's NFRs.
+	NFRs func() ([]domain.NFR, error)
 }
 
 // View is the progress document. Its JSON form is consumed by hooks: field
@@ -123,6 +131,42 @@ type WorkView struct {
 	// NFRProposals are the NFRs the latest design visit proposes that
 	// .gofast/nfrs.json doesn't contain yet; absent when there are none.
 	NFRProposals *NFRProposalsView `json:"nfrProposals,omitempty"`
+	// Plan is a refactor's latest plan visit that wrote a plan; the latest
+	// accepted one's until a later visit writes its own; absent before.
+	Plan *PlanView `json:"plan,omitempty"`
+	// Coverage is what characterize last measured of the plan's areas;
+	// absent before it measured.
+	Coverage *CoverageView `json:"coverage,omitempty"`
+	// Baseline is what measure recorded of each target NFR before the work
+	// changed the code; absent before.
+	Baseline []BaselineView `json:"baseline,omitempty"`
+}
+
+// PlanView is a refactor's plan visit.
+type PlanView struct {
+	Visit    int      `json:"visit"`
+	Artifact string   `json:"artifact"` // the markdown plan
+	File     string   `json:"file"`     // the structured plan
+	Areas    []string `json:"areas"`    // what implement may change; never null
+	Accepted bool     `json:"accepted"`
+	Problem  string   `json:"problem,omitempty"`
+}
+
+// CoverageView is the statement coverage of the plan's packages, as one
+// characterize attempt measured it.
+type CoverageView struct {
+	Visit       int                          `json:"visit"`
+	Attempt     int                          `json:"attempt"`
+	MinCoverage float64                      `json:"minCoverage"` // 0: report only
+	Packages    []exitchecks.PackageCoverage `json:"packages"`
+}
+
+// BaselineView is a target NFR's baseline.
+type BaselineView struct {
+	NFR      string `json:"nfr"`
+	Measured string `json:"measured"`
+	Targets  string `json:"targets,omitempty"`
+	Met      bool   `json:"met"`
 }
 
 // EventModelView is the work's event modelling.
@@ -146,6 +190,8 @@ type GrillView struct {
 	DocPath             string `json:"docPath,omitempty"`
 	Decisions           int    `json:"decisions"`
 	AcceptanceScenarios int    `json:"acceptanceScenarios"`
+	// MustNotChange is what a refactor preserves; absent on other work.
+	MustNotChange []string `json:"mustNotChange,omitempty"`
 	// Accepted is set once the owner approved this visit.
 	Accepted bool `json:"accepted"`
 	// Problem says why gf couldn't read the outcome.
@@ -257,6 +303,9 @@ type CurrentView struct {
 	// specify must cover with Test<SliceName> specs; specify on paths with
 	// design only.
 	SlicesNeedingSpecs []string `json:"slicesNeedingSpecs,omitempty"`
+	// SkillsLoaded are the skills loaded during this stage visit, in order;
+	// absent when none was.
+	SkillsLoaded []string `json:"skillsLoaded,omitempty"`
 }
 
 // StressView is what the current stage needs to know about stress testing.
@@ -302,6 +351,9 @@ type StressResultsView struct {
 	RunDir  string `json:"runDir"`
 	// NFRs are each scripted NFR's measurement against its targets.
 	NFRs []exitchecks.StressResult `json:"nfrs"`
+	// AgainstBaseline describes, per target NFR, how it moved since the
+	// work's baseline, for information; absent without a baseline.
+	AgainstBaseline []string `json:"againstBaseline,omitempty"`
 }
 
 // FixerView is the stage visit that handed the work to the fixer.
@@ -403,6 +455,13 @@ func FactsAt(root string) Facts {
 			config, err := exitchecks.LoadConfig(root)
 			return config.Decisions, err
 		},
+		Plan: func(path domain.RepoPath) (domain.RefactorPlan, error) {
+			return exitchecks.LoadRefactorPlan(root, path)
+		},
+		Coverage: func(id domain.AssignmentID) (int, exitchecks.CoverageResult, bool, error) {
+			return exitchecks.ReadCoverage(root, id)
+		},
+		NFRs: func() ([]domain.NFR, error) { return exitchecks.LoadNFRs(root) },
 		File: func(path domain.RepoPath) ([]byte, bool, error) {
 			data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path.String())))
 			if errors.Is(err, os.ErrNotExist) {
@@ -432,6 +491,14 @@ func Read(log Reader, branch domain.Branch, facts Facts) (View, error) {
 	}
 	work, err := fact.Work()
 	if errors.Is(err, domain.ErrNoActiveWork) {
+		if measurements, ok := lastFoundNothingToImprove(works, branch); ok {
+			return View{Schema: 1, OtherBranches: others, Next: NextView{
+				Actor: NextAnyone,
+				Message: fmt.Sprintf("The last work on branch %s found nothing to improve: every target NFR already met its targets at baseline (%s), so it completed without optimizing. "+
+					"To ask for more, tighten the NFR with `gf nfrs adopt` on a later design, or start new work with a stricter NFR.", branch, describeMeasurements(measurements)),
+				Commands: []string{`gf start --type <fix-bug|new-feature|modify-behaviour|refactor|improve-performance> "<description>"`},
+			}}, nil
+		}
 		return View{Schema: 1, OtherBranches: others, Next: NextView{
 			Actor:    NextAnyone,
 			Message:  fmt.Sprintf("No active work on branch %s. Start one with `gf start --type <fix-bug|new-feature|modify-behaviour|refactor|improve-performance> \"<description>\"`.", branch),
@@ -508,6 +575,16 @@ func Read(log Reader, branch domain.Branch, facts Facts) (View, error) {
 	if visit, ok := lastVisit[domain.StageDesign]; ok && facts.NFRProposals != nil {
 		view.Work.NFRProposals = nfrProposalsView(domain.NFRProposalsFor(work.ID(), visit), facts)
 	}
+	if visit, ok := lastVisit[domain.StagePlan]; ok && facts.Plan != nil {
+		view.Work.Plan = planView(history, work.ID(), visit, facts)
+		if accepted, ok := latestAccepted(history, work.ID(), domain.StagePlan); ok && view.Work.Plan == nil {
+			view.Work.Plan = planView(history, work.ID(), accepted, facts) // until the later visit writes its own
+		}
+	}
+	if visit, ok := lastVisit[domain.StageCharacterize]; ok && facts.Coverage != nil {
+		view.Work.Coverage = coverageView(domain.AssignmentIDFor(work.ID(), domain.StageCharacterize, visit), visit, facts)
+	}
+	view.Work.Baseline = baselineViews(work.Baseline(), facts)
 	fixer, inFixer := work.(domain.InFixerWork)
 	// In the fixer, the path is done up to the stage that handed over.
 	onPath := work.CurrentStage()
@@ -571,6 +648,7 @@ func Read(log Reader, branch domain.Branch, facts Facts) (View, error) {
 		current.Assignment, current.AttemptsUsed, current.Budget = describeAssignment(state)
 	}
 	current.LastProblem = lastProblem(history.Records(eventlog.AssignmentStream(assignmentID)))
+	current.SkillsLoaded = skillsLoaded(history, work)
 	if stage == domain.StageSpecify && work.Path().Includes(domain.StageGrill) {
 		current.ScenariosToCover, current.UncoveredScenarios = scenarioCoverage(history, work, facts)
 	}
@@ -592,14 +670,16 @@ func Read(log Reader, branch domain.Branch, facts Facts) (View, error) {
 		view.Next = NextView{
 			Actor: NextOwner,
 			Message: fmt.Sprintf("Rework limit reached: '%s' found a problem in the code, and the work already went to the fixer %d of %d times. "+
-				"The owner can run `gf rework-extend <n>` to allow more rework, or `gf abandon \"<reason>\"`.",
+				"The owner can run `gf rework-extend <n>` to allow more rework, `gf return <stage> \"<reason>\"` to send the work back to an earlier stage, or `gf abandon \"<reason>\"`.",
 				stage, view.Work.Reworks, view.Work.ReworkBudget),
-			Commands: []string{"gf rework-extend <n>", `gf abandon "<reason>"`},
+			Commands: []string{"gf rework-extend <n>", `gf return <stage> "<reason>"`, `gf abandon "<reason>"`},
 		}
+	case current.Assignment == AssignmentAwaitingApproval && stage == domain.StagePlan:
+		view.Next = planAwaitsApproval(current, view.Work.Plan, facts)
 	case current.Assignment == AssignmentAwaitingApproval && stage == domain.StageDesign:
 		view.Next = designAwaitsApproval(current, view.Work.NFRProposals)
 	case current.Assignment == AssignmentAwaitingApproval && stage == domain.StageGrill:
-		view.Next = grillAwaitsApproval(current, view.Work.Grill)
+		view.Next = grillAwaitsApproval(current, view.Work.Grill, work.Path().Includes(domain.StagePlan))
 	case current.Assignment == AssignmentAwaitingApproval:
 		view.Next = NextView{
 			Actor:    NextOwner,
@@ -609,8 +689,8 @@ func Read(log Reader, branch domain.Branch, facts Facts) (View, error) {
 	case current.Assignment == AssignmentEscalated:
 		view.Next = NextView{
 			Actor:    NextOwner,
-			Message:  fmt.Sprintf("Escalated: budget exhausted on '%s'; the owner can run `gf extend <n>` or `gf abandon \"<reason>\"`.", stage),
-			Commands: []string{"gf extend <n>", `gf abandon "<reason>"`},
+			Message:  fmt.Sprintf("Escalated: budget exhausted on '%s'; the owner can run `gf extend <n>`, `gf return <stage> \"<reason>\"` to send the work back to an earlier stage, or `gf abandon \"<reason>\"`.", stage),
+			Commands: []string{"gf extend <n>", `gf return <stage> "<reason>"`, `gf abandon "<reason>"`},
 		}
 	case stage == domain.StressDecider() && work.Path().StressMandatory():
 		view.Next = NextView{
@@ -684,15 +764,24 @@ func grillView(history eventlog.History, work domain.WorkID, visit domain.Visit,
 		return v
 	}
 	v.DocPath, v.Decisions, v.AcceptanceScenarios = grill.DocPath().String(), len(grill.Decisions()), len(grill.AcceptanceScenarios())
+	v.MustNotChange = grill.MustNotChange()
 	return v
 }
 
 // grillAwaitsApproval tells the owner to read the decision document: its
 // approval is the owner's approval of the plan.
-func grillAwaitsApproval(current *CurrentView, grill *GrillView) NextView {
+func grillAwaitsApproval(current *CurrentView, grill *GrillView, planned bool) NextView {
 	doc := current.Artifact
 	if grill != nil && grill.DocPath != "" {
 		doc = grill.DocPath
+	}
+	if planned {
+		return NextView{
+			Actor: NextOwner,
+			Message: fmt.Sprintf("Waiting for the owner to approve 'grill': read the decision document %s, its `## Must not change` above all. Approving it approves the refactor's intent and what it must preserve; the plan comes next for your approval. Run `gf approve`, or `gf reject \"<feedback>\"` for another round.",
+				doc),
+			Commands: []string{"gf approve", `gf reject "<feedback>"`},
+		}
 	}
 	return NextView{
 		Actor: NextOwner,
@@ -700,6 +789,41 @@ func grillAwaitsApproval(current *CurrentView, grill *GrillView) NextView {
 			doc),
 		Commands: []string{"gf approve", `gf reject "<feedback>"`},
 	}
+}
+
+// planAwaitsApproval tells the owner to read the refactor plan, and its
+// `## Decisions for the owner` section when it has one.
+func planAwaitsApproval(current *CurrentView, plan *PlanView, facts Facts) NextView {
+	read := fmt.Sprintf("Waiting for the owner to approve 'plan': read %s and %s", current.Artifact, strings.TrimSuffix(current.Artifact, ".md")+".json")
+	if plan != nil && len(plan.Areas) > 0 {
+		read += " (implement may change only: " + strings.Join(plan.Areas, ", ") + ")"
+	}
+	read += "."
+	if hasDecisionsForOwner(current.Artifact, facts) {
+		read += " It has `## Decisions for the owner`: answer them by rejecting with feedback, or send the work back to grill with `gf return grill \"<reason>\"`."
+	}
+	return NextView{
+		Actor:    NextOwner,
+		Message:  read + " Then run `gf approve` or `gf reject \"<feedback>\"`.",
+		Commands: []string{"gf approve", `gf reject "<feedback>"`, `gf return grill "<reason>"`},
+	}
+}
+
+// hasDecisionsForOwner reports whether an artifact has a non-empty
+// `## Decisions for the owner` section.
+func hasDecisionsForOwner(artifact string, facts Facts) bool {
+	if facts.File == nil {
+		return false
+	}
+	path, err := domain.ParseRepoPath(artifact)
+	if err != nil {
+		return false
+	}
+	content, ok, err := facts.File(path)
+	if err != nil || !ok {
+		return false
+	}
+	return exitchecks.HasSection(string(content), "Decisions for the owner")
 }
 
 // designAwaitsApproval tells the owner what to read in the design, and to
@@ -938,6 +1062,9 @@ func stressView(work domain.ActiveWork, facts Facts) *StressView {
 			v.Problem = "gf could not read the last stress run: " + err.Error()
 		} else {
 			v.Results = r
+			if r != nil {
+				r.AgainstBaseline = againstBaseline(work.Baseline(), r.NFRs, facts)
+			}
 		}
 	}
 	return v
@@ -1129,9 +1256,44 @@ func RenderText(w io.Writer, v View) {
 		switch {
 		case g.Problem != "":
 			fmt.Fprintf(w, "Grill (visit %d): %s: %s\n", g.Visit, g.File, g.Problem)
+		case len(g.MustNotChange) > 0:
+			fmt.Fprintf(w, "Grill (visit %d): %s, %d decisions (%s)\n", g.Visit, g.DocPath, g.Decisions, g.File)
+			fmt.Fprintln(w, "Must not change:")
+			for _, item := range g.MustNotChange {
+				fmt.Fprintf(w, "  - %s\n", item)
+			}
 		default:
 			fmt.Fprintf(w, "Grill (visit %d): %s, %d decisions, %d acceptance scenarios (%s)\n", g.Visit, g.DocPath, g.Decisions, g.AcceptanceScenarios, g.File)
 		}
+	}
+	if p := v.Work.Plan; p != nil {
+		accepted := ""
+		if p.Accepted {
+			accepted = ", accepted"
+		}
+		switch {
+		case p.Problem != "":
+			fmt.Fprintf(w, "Plan (visit %d%s): %s: %s\n", p.Visit, accepted, p.File, p.Problem)
+		default:
+			fmt.Fprintf(w, "Plan (visit %d%s): %s; implement may change only: %s\n", p.Visit, accepted, p.Artifact, strings.Join(p.Areas, ", "))
+		}
+	}
+	if c := v.Work.Coverage; c != nil {
+		min := "report only"
+		if c.MinCoverage > 0 {
+			min = fmt.Sprintf("minimum %v%%", c.MinCoverage)
+		}
+		fmt.Fprintf(w, "Coverage (characterize visit %d, attempt %d; %s): %s\n", c.Visit, c.Attempt, min, exitchecks.DescribeCoverage(c.Packages))
+	}
+	if len(v.Work.TargetNFRs) > 0 {
+		fmt.Fprintf(w, "Target NFRs: %s\n", strings.Join(v.Work.TargetNFRs, ", "))
+	}
+	for _, b := range v.Work.Baseline {
+		met := "misses its targets"
+		if b.Met {
+			met = "meets its targets"
+		}
+		fmt.Fprintf(w, "Baseline of %s: %s (targets %s; %s)\n", b.NFR, b.Measured, b.Targets, met)
 	}
 	if d := v.Work.Design; d != nil {
 		renderDesign(w, d)
@@ -1165,6 +1327,9 @@ func RenderText(w io.Writer, v View) {
 	if p := v.Work.NFRProposals; p != nil {
 		fmt.Fprintf(w, "NFR proposals pending adoption: %s (%s). The owner adopts them with `gf nfrs adopt` while design waits for approval, then commits %s.\n",
 			p.File, describeProposals(p), exitchecks.NFRsPath)
+	}
+	if len(c.SkillsLoaded) > 0 {
+		fmt.Fprintf(w, "Skills loaded this visit: %s\n", strings.Join(c.SkillsLoaded, ", "))
 	}
 	if p := c.LastProblem; p != nil {
 		label := "Last failure"
@@ -1241,5 +1406,124 @@ func renderStress(w io.Writer, stage string, st *StressView) {
 				fmt.Fprintf(w, "  %s: %s (%s; targets %s)\n", n.NFR, strings.Join(n.Missed, ", "), n.Measured, n.Targets)
 			}
 		}
+		for _, a := range r.AgainstBaseline {
+			fmt.Fprintf(w, "  against the baseline: %s\n", a)
+		}
 	}
+}
+
+// planView is a plan visit's refactor plan, as its structured file says.
+func planView(history eventlog.History, work domain.WorkID, visit domain.Visit, facts Facts) *PlanView {
+	file := domain.RefactorPlanFor(work, visit)
+	v := &PlanView{Visit: visit.Int(), Artifact: domain.ArtifactFor(work, domain.StagePlan, visit).String(), File: file.String(), Areas: []string{}}
+	if state, _, err := history.Assignment(domain.AssignmentIDFor(work, domain.StagePlan, visit)); err == nil {
+		_, v.Accepted = state.(domain.Accepted)
+	}
+	plan, err := facts.Plan(file)
+	var invalid *exitchecks.PlanError
+	switch {
+	case errors.As(err, &invalid) && invalid.Missing:
+		return nil
+	case err != nil:
+		v.Problem = "gf could not read it: " + err.Error()
+		return v
+	}
+	for _, a := range plan.Areas() {
+		v.Areas = append(v.Areas, a.String())
+	}
+	return v
+}
+
+// coverageView is what a characterize visit's latest attempt measured.
+func coverageView(id domain.AssignmentID, visit domain.Visit, facts Facts) *CoverageView {
+	attempt, result, ok, err := facts.Coverage(id)
+	if err != nil || !ok {
+		return nil
+	}
+	return &CoverageView{Visit: visit.Int(), Attempt: attempt, MinCoverage: result.MinCoverage, Packages: result.Packages}
+}
+
+// baselineViews describe the work's baseline against the NFRs' current
+// targets.
+func baselineViews(baseline []domain.NFRMeasurement, facts Facts) []BaselineView {
+	var nfrs []domain.NFR
+	if facts.NFRs != nil && len(baseline) > 0 {
+		nfrs, _ = facts.NFRs()
+	}
+	var views []BaselineView
+	for _, b := range baseline {
+		v := BaselineView{NFR: b.NFR.String(), Measured: b.Measurement.Describe()}
+		for _, n := range nfrs {
+			if n.ID() == b.NFR {
+				v.Targets, v.Met = n.Targets().Describe(), n.Evaluate(b.Measurement).Met()
+			}
+		}
+		views = append(views, v)
+	}
+	return views
+}
+
+// skillsLoaded are the skills loaded during the work's current stage visit.
+func skillsLoaded(history eventlog.History, work domain.ActiveWork) []string {
+	var skills []string
+	for _, r := range history.Records(eventlog.ObservationsStream(work.ID())) {
+		if e, ok := r.Event.(domain.SkillLoaded); ok && e.Stage == work.CurrentStage() && e.Visit == work.CurrentVisit() {
+			skills = append(skills, e.Skill)
+		}
+	}
+	return skills
+}
+
+// lastFoundNothingToImprove is the baseline of the branch's last work, when
+// it completed because there was nothing to improve.
+func lastFoundNothingToImprove(works []domain.WorkState, branch domain.Branch) ([]domain.NFRMeasurement, bool) {
+	for i := len(works) - 1; i >= 0; i-- {
+		w, ok := works[i].(interface{ Branch() domain.Branch })
+		if !ok || w.Branch() != branch {
+			continue
+		}
+		if done, ok := works[i].(domain.CompletedWork); ok {
+			return done.FoundNothingToImprove()
+		}
+		return nil, false
+	}
+	return nil, false
+}
+
+func describeMeasurements(measurements []domain.NFRMeasurement) string {
+	var parts []string
+	for _, m := range measurements {
+		parts = append(parts, m.NFR.String()+": "+m.Measurement.Describe())
+	}
+	return strings.Join(parts, "; ")
+}
+
+// againstBaseline describes how each target NFR a stress run measured moved
+// since the work's baseline.
+func againstBaseline(baseline []domain.NFRMeasurement, results []exitchecks.StressResult, facts Facts) []string {
+	if len(baseline) == 0 || facts.NFRs == nil {
+		return nil
+	}
+	nfrs, err := facts.NFRs()
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, b := range baseline {
+		for _, r := range results {
+			if r.NFR != b.NFR.String() || r.Problem != "" {
+				continue
+			}
+			now, err := exitchecks.MeasurementOf(r)
+			if err != nil {
+				continue
+			}
+			for _, n := range nfrs {
+				if n.ID() == b.NFR {
+					out = append(out, b.NFR.String()+": "+domain.CompareToBaseline(n, b.Measurement, now))
+				}
+			}
+		}
+	}
+	return out
 }
