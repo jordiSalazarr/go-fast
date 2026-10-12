@@ -43,7 +43,11 @@ var (
 func allEvents() []domain.Event {
 	return []domain.Event{
 		domain.WorkStarted{WorkID: workID, WorkType: domain.WorkTypeFixBug, Description: must(domain.NewDescription("login broken")), Branch: must(domain.NewBranch("main"))},
-		domain.WorkStarted{WorkID: workID, WorkType: domain.WorkTypeNewFeature, PathVersion: domain.PathV2, Description: must(domain.NewDescription("wallets")), Branch: must(domain.NewBranch("main"))},
+		domain.WorkStarted{WorkID: workID, WorkType: domain.WorkTypeNewFeature, PathVersion: domain.PathV2, Description: must(domain.NewDescription("wallets")), Branch: must(domain.NewBranch("main")),
+			Inputs: []domain.WorkInput{
+				must(domain.NewWorkInput(domain.InputSpec, must(domain.ParseRepoPath("docs/wallets.md")), domain.HashOf([]byte("# Wallets")))),
+				must(domain.NewWorkInput(domain.InputEventModel, must(domain.ParseRepoPath("docs/wallets-board.pdf")), domain.HashOf([]byte("%PDF")))),
+			}},
 		domain.StageEntered{WorkID: workID, Stage: domain.StageDiscovery, Visit: domain.FirstVisit(), Gate: domain.GateHuman, Budget: budget3},
 		domain.WorkCompleted{WorkID: workID},
 		domain.WorkAbandoned{WorkID: workID, Owner: owner, Reason: reason},

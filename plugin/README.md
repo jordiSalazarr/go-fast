@@ -148,6 +148,21 @@ and new feature work v2:
 
 Stages in brackets are optional. Unmarked gates are auto.
 
+Feature work starts from the owner's input:
+
+```sh
+gf start --type new-feature "<title>" [--spec <path.md>] [--event-model <path>]
+```
+
+`--spec` is a markdown file describing the feature, in any structure;
+`--event-model` is your event model in whatever form it exists (JSON,
+markdown, an exported image or PDF of a board). Both are optional; with
+neither, the description is the only input. Both must be files of the
+repository (paths are relative to its root) and committed, so every stage
+reads the same thing: gf records each one's SHA-256 at start, lists them in
+`gf status` (`work.inputs`), and warns when one changes. Event modelling
+runs only when the work starts with an event model.
+
 `gf submit --passed` runs the stage's exit checks itself; the agent's claim
 alone never passes a stage. `gf status` (`current.checks`) and `gf checks`
 list them.

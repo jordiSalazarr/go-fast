@@ -19,13 +19,16 @@ type AssignmentEvent interface {
 // Work events.
 
 // WorkStarted records the version of its type's path the work follows; a
-// zero PathVersion (works started before paths had versions) is v1.
+// zero PathVersion (works started before paths had versions) is v1. Inputs
+// are the files the owner started it from; an event model among them
+// decides that the work enters event modelling.
 type WorkStarted struct {
 	WorkID      WorkID
 	WorkType    WorkType
 	PathVersion PathVersion
 	Description Description
 	Branch      Branch
+	Inputs      []WorkInput
 }
 
 // StageEntered carries the gate and budget so an assignment never needs to

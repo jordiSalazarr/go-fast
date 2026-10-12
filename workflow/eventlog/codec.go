@@ -69,6 +69,14 @@ type workStartedV1 struct {
 	PathVersion int    `json:"pathVersion,omitempty"`
 	Description string `json:"description"`
 	Branch      string `json:"branch"` // required; logs from before work belonged to a branch are not supported
+	// The files the owner started the work from; absent when there are none.
+	Inputs []workInputV1 `json:"inputs,omitempty"`
+}
+
+type workInputV1 struct {
+	Kind   string `json:"kind"`
+	Path   string `json:"path"`
+	SHA256 string `json:"sha256"`
 }
 
 type stageEnteredV1 struct {
@@ -254,7 +262,7 @@ func encodeEvent(e domain.Event) (eventType string, stream Stream, payload any, 
 	case domain.WorkStarted:
 		return typeWorkStarted, WorkStream(e.WorkID), workStartedV1{
 			WorkID: e.WorkID.String(), WorkType: e.WorkType.String(), PathVersion: e.PathVersion.Int(),
-			Description: e.Description.String(), Branch: e.Branch.String(),
+			Description: e.Description.String(), Branch: e.Branch.String(), Inputs: encodeInputs(e.Inputs),
 		}, nil
 	case domain.StageEntered:
 		return typeStageEntered, WorkStream(e.WorkID), stageEnteredV1{
@@ -352,7 +360,7 @@ func decodeEvent(eventType string, payload json.RawMessage) (domain.Event, Strea
 		d.unmarshal(payload, &p)
 		event = domain.WorkStarted{
 			WorkID: d.workID(p.WorkID), WorkType: d.workType(p.WorkType), PathVersion: d.pathVersion(p.PathVersion),
-			Description: d.description(p.Description), Branch: d.branch(p.Branch),
+			Description: d.description(p.Description), Branch: d.branch(p.Branch), Inputs: d.inputs(p.Inputs),
 		}
 	case typeStageEntered:
 		var p stageEnteredV1
@@ -481,6 +489,14 @@ func decodeEvent(eventType string, payload json.RawMessage) (domain.Event, Strea
 	return event, stream, err
 }
 
+func encodeInputs(inputs []domain.WorkInput) []workInputV1 {
+	var out []workInputV1
+	for _, in := range inputs {
+		out = append(out, workInputV1{Kind: in.Kind().String(), Path: in.Path().String(), SHA256: in.Hash().String()})
+	}
+	return out
+}
+
 func encodeOwner(o domain.Owner) ownerV1 { return ownerV1{Name: o.Name(), Email: o.Email()} }
 
 func nfrIDs(ids []domain.NFRID) []string {
@@ -524,6 +540,22 @@ func (d *decoder) workType(s string) domain.WorkType {
 	v, err := domain.ParseWorkType(s)
 	d.keep(err)
 	return v
+}
+
+func (d *decoder) inputs(in []workInputV1) []domain.WorkInput {
+	var out []domain.WorkInput
+	for _, i := range in {
+		kind, err := domain.ParseInputKind(i.Kind)
+		d.keep(err)
+		path, err := domain.ParseRepoPath(i.Path)
+		d.keep(err)
+		hash, err := domain.ParseContentHash(i.SHA256)
+		d.keep(err)
+		input, err := domain.NewWorkInput(kind, path, hash)
+		d.keep(err)
+		out = append(out, input)
+	}
+	return out
 }
 
 func (d *decoder) pathVersion(n int) domain.PathVersion {

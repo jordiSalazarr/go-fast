@@ -207,7 +207,7 @@ func (w active) includes(s PathStep) bool {
 	case StageStressTesting:
 		return w.stress != nil && w.stress.choice.decision == StressInclude
 	case StageEventModelling:
-		return w.eventModel
+		return w.hasEventModel()
 	}
 	return false
 }
@@ -220,7 +220,7 @@ func (w active) Skips(stage Stage) bool {
 	case StageStressTesting:
 		return w.stress != nil && w.stress.choice.decision == StressSkip
 	case StageEventModelling:
-		return w.path.Includes(stage) && !w.eventModel
+		return w.path.Includes(stage) && !w.hasEventModel()
 	}
 	return false
 }

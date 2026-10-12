@@ -69,9 +69,24 @@ type work struct {
 	workType    WorkType
 	description Description
 	branch      Branch
+	inputs      []WorkInput
 }
 
-func (w work) ID() WorkID               { return w.id }
+func (w work) ID() WorkID { return w.id }
+
+// Inputs are the files the owner started the work from, in the order given.
+func (w work) Inputs() []WorkInput { return slices.Clone(w.inputs) }
+
+// Input is the work's input of a kind; ok is false when it has none.
+func (w work) Input(kind InputKind) (WorkInput, bool) {
+	i := slices.IndexFunc(w.inputs, func(in WorkInput) bool { return in.kind == kind })
+	if i < 0 {
+		return WorkInput{}, false
+	}
+	return w.inputs[i], true
+}
+
+func (w work) hasEventModel() bool      { _, ok := w.Input(InputEventModel); return ok }
 func (w work) Type() WorkType           { return w.workType }
 func (w work) Description() Description { return w.description }
 
@@ -86,6 +101,8 @@ type ActiveWork interface {
 	Type() WorkType
 	Description() Description
 	Branch() Branch
+	Inputs() []WorkInput
+	Input(kind InputKind) (WorkInput, bool)
 	Path() Path
 	CurrentStage() Stage
 	CurrentVisit() Visit
@@ -117,7 +134,6 @@ type active struct {
 	reworks      ReworkCount
 	reworkBudget ReworkBudget
 	stress       *stressDecision // nil until decided on this pass; never mutated
-	eventModel   bool            // the work started with an event model
 }
 
 func (w active) Path() Path                 { return w.path }
@@ -261,9 +277,11 @@ func (ReworkLimitReachedWork) isWorkState() {}
 func (CompletedWork) isWorkState()          {}
 func (AbandonedWork) isWorkState()          {}
 
-// StartWork starts a work on a branch, on the first stage of its type's path,
-// unless the branch already has active work.
-func StartWork(id WorkID, workType WorkType, description Description, branch Branch, fact ActiveWorkFact) ([]WorkEvent, error) {
+// StartWork starts a work on a branch, on the first stage of its type's path
+// it enters, unless the branch already has active work. Its inputs are the
+// files the owner starts it from, at most one of each kind; an event model
+// makes it enter event modelling, which only paths with that stage have.
+func StartWork(id WorkID, workType WorkType, description Description, branch Branch, fact ActiveWorkFact, inputs ...WorkInput) ([]WorkEvent, error) {
 	if err := requirePresent(
 		required{"work id", id}, required{"work type", workType}, required{"description", description},
 		required{"branch", branch}, required{"active work fact", fact},
@@ -282,9 +300,12 @@ func StartWork(id WorkID, workType WorkType, description Description, branch Bra
 	if err != nil {
 		return nil, fmt.Errorf("start work %s: %w", id, err)
 	}
-	first := active{path: path}.firstStep()
+	if err := checkInputs(path, inputs); err != nil {
+		return nil, fmt.Errorf("start work %s: %w", id, err)
+	}
+	first := active{work: work{inputs: inputs}, path: path}.firstStep()
 	return []WorkEvent{
-		WorkStarted{WorkID: id, WorkType: workType, PathVersion: path.version, Description: description, Branch: branch},
+		WorkStarted{WorkID: id, WorkType: workType, PathVersion: path.version, Description: description, Branch: branch, Inputs: slices.Clone(inputs)},
 		StageEntered{WorkID: id, Stage: first.stage, Visit: FirstVisit(), Gate: first.gate, Budget: first.budget},
 	}, nil
 }
@@ -478,7 +499,10 @@ func RebuildWork(history []WorkEvent) (WorkState, error) {
 	if start.Branch.isZero() {
 		return nil, fmt.Errorf("rebuild work %s: started without a branch: %w", start.WorkID, ErrInconsistentHistory)
 	}
-	w := work{id: start.WorkID, workType: start.WorkType, description: start.Description, branch: start.Branch}
+	if err := checkInputs(path, start.Inputs); err != nil {
+		return nil, fmt.Errorf("rebuild work %s: %w: %w", start.WorkID, ErrInconsistentHistory, err)
+	}
+	w := work{id: start.WorkID, workType: start.WorkType, description: start.Description, branch: start.Branch, inputs: slices.Clone(start.Inputs)}
 	// The first stage is entered together with WorkStarted; before that the
 	// work has no current stage. Entering the fixer and starting a rework
 	// are each recorded with the StageEntered they cause, which must follow.

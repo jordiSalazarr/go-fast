@@ -81,3 +81,18 @@ func TestGivenTwoWorksInProgressOnTheBranch_WhenStartingWork_ThenTheHistoryIsInc
 		When(startWork).
 		ThenRejected(domain.ErrInconsistentHistory)
 }
+
+func TestGivenNoWork_WhenStartingFeatureWorkFromAnEventModel_ThenItRecordsItsInputsAndStartsOnEventModelling(t *testing.T) {
+	spec := Must(domain.NewWorkInput(domain.InputSpec, Must(domain.ParseRepoPath("docs/wallets.md")), domain.HashOf([]byte("# Wallets"))))
+	model := Must(domain.NewWorkInput(domain.InputEventModel, Must(domain.ParseRepoPath("docs/board.pdf")), domain.HashOf([]byte("%PDF"))))
+	eventlogtest.Given(t).
+		When(func(log *eventlog.Session) error {
+			_, err := startwork.StartWork(log, owner, Branch, newWorkID, domain.WorkTypeNewFeature, newDesc, spec, model)
+			return err
+		}).
+		Then(
+			domain.WorkStarted{WorkID: newWorkID, WorkType: domain.WorkTypeNewFeature, PathVersion: domain.PathV2, Description: newDesc, Branch: Branch,
+				Inputs: []domain.WorkInput{spec, model}},
+			domain.StageEntered{WorkID: newWorkID, Stage: domain.StageEventModelling, Visit: Visit1, Gate: domain.GateAuto, Budget: Budget(3)},
+		)
+}

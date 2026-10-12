@@ -12,6 +12,7 @@ import (
 	"github.com/jordiSalazarr/go-fast/workflow/eventlog"
 	"github.com/jordiSalazarr/go-fast/workflow/exitchecks"
 	"github.com/jordiSalazarr/go-fast/workflow/gitbranch"
+	startwork "github.com/jordiSalazarr/go-fast/workflow/slices/startWork"
 	"github.com/jordiSalazarr/go-fast/workflow/worktree"
 )
 
@@ -31,6 +32,7 @@ func friendly(err error, cmd *cobra.Command, ran bool) string {
 		noRoute   *domain.RouteMissingError
 		forced    *domain.StressForcedError
 		back      *domain.InvalidReturnError
+		input     *startwork.InputError
 	)
 	switch {
 	case errors.Is(err, gitbranch.ErrDetachedHead):
@@ -39,6 +41,10 @@ func friendly(err error, cmd *cobra.Command, ran bool) string {
 		return fmt.Sprintf("Only the owner can %s, from their own terminal. Run `%s` there.", ownerOnly.Action, ownerOnly.Command)
 	case errors.As(err, &ownerOnly):
 		return fmt.Sprintf("Only the owner can %s. Ask the owner to run `%s`.", ownerOnly.Action, ownerOnly.Command)
+	case errors.As(err, &input):
+		return input.Error()
+	case errors.Is(err, domain.ErrEventModelNotOnPath):
+		return "Only new-feature and modify-behaviour work can start from an event model (--event-model)."
 	case errors.As(err, &active):
 		return fmt.Sprintf("There is already active work on branch %s: %s %q (%s). Finish it, or have the owner run `gf abandon \"<reason>\"`, before starting another.",
 			active.Branch, active.Type, active.Description, active.ID)

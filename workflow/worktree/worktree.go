@@ -206,6 +206,36 @@ func Uncommitted(root, path string) (bool, error) {
 	return strings.TrimSpace(out) != "", nil
 }
 
+// Errors of CommittedFile.
+var (
+	ErrNotAFile     = errors.New("not a file")
+	ErrNotCommitted = errors.New("not committed")
+)
+
+// CommittedFile returns the content of a file that is committed as it is in
+// the working tree: tracked, and not modified, staged or deleted since HEAD.
+func CommittedFile(root string, path domain.RepoPath) ([]byte, error) {
+	abs := filepath.Join(root, filepath.FromSlash(path.String()))
+	info, err := os.Stat(abs)
+	if errors.Is(err, os.ErrNotExist) || (err == nil && !info.Mode().IsRegular()) {
+		return nil, fmt.Errorf("%s: %w", path, ErrNotAFile)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if _, err := git(root, nil, "ls-files", "--error-unmatch", "--", path.String()); err != nil {
+		return nil, fmt.Errorf("%s is not tracked: %w", path, ErrNotCommitted)
+	}
+	changed, err := Uncommitted(root, path.String())
+	if err != nil {
+		return nil, err
+	}
+	if changed {
+		return nil, fmt.Errorf("%s has uncommitted changes: %w", path, ErrNotCommitted)
+	}
+	return os.ReadFile(abs)
+}
+
 // gfWrites are the committed files gf itself changes during a stage visit.
 var gfWrites = func() map[string]bool {
 	m := map[string]bool{}

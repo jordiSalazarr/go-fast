@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/jordiSalazarr/go-fast/workflow/domain"
@@ -37,6 +39,9 @@ type Facts struct {
 	// Design reads a structured design; an *exitchecks.DesignError says
 	// what is wrong with it.
 	Design func(path domain.RepoPath) (domain.Design, error)
+	// File reads a file of the working tree; ok is false when it doesn't
+	// exist.
+	File func(path domain.RepoPath) (content []byte, ok bool, err error)
 }
 
 // View is the progress document. Its JSON form is consumed by hooks: field
@@ -75,12 +80,14 @@ type OtherBranchView struct {
 }
 
 type WorkView struct {
-	ID          string      `json:"id"`
-	Type        string      `json:"type"`
-	Description string      `json:"description"`
-	Branch      string      `json:"branch"`
-	ArtifactDir string      `json:"artifactDir"` // relative to the repository root, ends in "/"
-	Stages      []StageView `json:"stages"`
+	ID          string `json:"id"`
+	Type        string `json:"type"`
+	Description string `json:"description"`
+	Branch      string `json:"branch"`
+	ArtifactDir string `json:"artifactDir"` // relative to the repository root, ends in "/"
+	// Inputs are the files the owner started the work from; never null.
+	Inputs []InputView `json:"inputs"`
+	Stages []StageView `json:"stages"`
 	// Reworks is how many times the work entered the fixer, of ReworkBudget.
 	Reworks      int `json:"reworks"`
 	ReworkBudget int `json:"reworkBudget"`
@@ -90,6 +97,18 @@ type WorkView struct {
 	// NFRProposals are the NFRs the latest design visit proposes that
 	// .gofast/nfrs.json doesn't contain yet; absent when there are none.
 	NFRProposals *NFRProposalsView `json:"nfrProposals,omitempty"`
+}
+
+// InputView is a file the owner started the work from.
+type InputView struct {
+	Kind   string `json:"kind"` // spec or event-model
+	Path   string `json:"path"` // relative to the repository root
+	SHA256 string `json:"sha256"`
+	// Changed is set when the file's content is not what it was when the
+	// work started, or the file is gone.
+	Changed bool `json:"changed,omitempty"`
+	// Problem says why gf couldn't read the file.
+	Problem string `json:"problem,omitempty"`
 }
 
 // NFRProposalsView is NFR proposals pending adoption by the owner.
@@ -303,6 +322,13 @@ func FactsAt(root string) Facts {
 			return plan.Adoption, err == nil, err
 		},
 		Design: func(path domain.RepoPath) (domain.Design, error) { return exitchecks.LoadDesign(root, path) },
+		File: func(path domain.RepoPath) ([]byte, bool, error) {
+			data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path.String())))
+			if errors.Is(err, os.ErrNotExist) {
+				return nil, false, nil
+			}
+			return data, err == nil, err
+		},
 	}
 }
 
@@ -340,6 +366,7 @@ func Read(log Reader, branch domain.Branch, facts Facts) (View, error) {
 		Branch:      work.Branch().String(),
 		ArtifactDir: domain.ArtifactDir(work.ID()).String() + "/",
 		Reworks:     work.Reworks().Int(), ReworkBudget: work.ReworkBudget().Int(),
+		Inputs: inputViews(work, facts),
 	}}
 	lastVisit := map[domain.Stage]domain.Visit{}
 	var reworkOf *ReworkOfView
@@ -490,6 +517,28 @@ func Read(log Reader, branch domain.Branch, facts Facts) (View, error) {
 		}
 	}
 	return view, nil
+}
+
+// inputViews are the work's inputs, each checked against its content at
+// start.
+func inputViews(work domain.ActiveWork, facts Facts) []InputView {
+	views := []InputView{}
+	for _, in := range work.Inputs() {
+		v := InputView{Kind: in.Kind().String(), Path: in.Path().String(), SHA256: in.Hash().String()}
+		if facts.File != nil {
+			content, ok, err := facts.File(in.Path())
+			switch {
+			case err != nil:
+				v.Problem = "gf could not read it: " + err.Error()
+			case !ok:
+				v.Changed, v.Problem = true, "it no longer exists"
+			default:
+				v.Changed = in.ChangedSince(content)
+			}
+		}
+		views = append(views, v)
+	}
+	return views
 }
 
 // designAwaitsApproval tells the owner what to read in the design, and to
@@ -762,7 +811,19 @@ func RenderText(w io.Writer, v View) {
 		}
 		return
 	}
-	fmt.Fprintf(w, "%s: %s (%s) on branch %s\n\n", v.Work.Type, v.Work.Description, v.Work.ID, v.Work.Branch)
+	fmt.Fprintf(w, "%s: %s (%s) on branch %s\n", v.Work.Type, v.Work.Description, v.Work.ID, v.Work.Branch)
+	for _, in := range v.Work.Inputs {
+		fmt.Fprintf(w, "Input (%s): %s\n", in.Kind, in.Path)
+		switch {
+		case in.Changed && in.Problem != "":
+			fmt.Fprintf(w, "  Warning: %s, so stages can't read what the work started from. Restore it from git.\n", in.Problem)
+		case in.Changed:
+			fmt.Fprintln(w, "  Warning: its content changed since the work started, so stages now read something else than what the work started from. Restore it, or have the owner abandon the work and start it again.")
+		case in.Problem != "":
+			fmt.Fprintf(w, "  %s\n", in.Problem)
+		}
+	}
+	fmt.Fprintln(w)
 	for _, s := range v.Work.Stages {
 		optional := ""
 		if s.Optional {
