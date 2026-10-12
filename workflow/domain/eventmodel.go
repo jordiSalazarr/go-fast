@@ -420,6 +420,36 @@ func UncoveredScenarios(toCover []string, written []string, markers map[string][
 	return uncovered
 }
 
+// PassingScenario is a scenario every spec of which passes: its specs pin
+// nothing the work changes.
+type PassingScenario struct {
+	ID    string
+	Tests []string
+}
+
+// ScenariosCoveredOnlyByPassingSpecs are the scenarios to cover, in order,
+// that tests written in this visit mark but none of which failed. A
+// scenario describes behaviour the work adds or changes, so a spec of it
+// fails before implement; behaviour that stays belongs to the existing
+// suite. failed are the tests that failed in specs-fail's run.
+func ScenariosCoveredOnlyByPassingSpecs(toCover, written, failed []string, markers map[string][]string) []PassingScenario {
+	var out []PassingScenario
+	for _, id := range toCover {
+		var marking []string
+		failing := false
+		for _, test := range written {
+			if slices.Contains(markers[test], id) {
+				marking = append(marking, test)
+				failing = failing || slices.Contains(failed, test)
+			}
+		}
+		if len(marking) > 0 && !failing {
+			out = append(out, PassingScenario{ID: id, Tests: marking})
+		}
+	}
+	return out
+}
+
 // ScenarioIDs are the ids of the scenarios, in order.
 func ScenarioIDs(scenarios []Scenario) []string { return names(scenarios, Scenario.ID) }
 

@@ -99,6 +99,7 @@ func TestSpecifyAgent_MarksTheScenarios(t *testing.T) {
 	body, err := os.ReadFile(instructions(domain.StageSpecify))
 	require.NoError(t, err)
 	assert.Contains(t, string(body), "put a comment line `// gofast:scenario <ID>` directly above each test's `func`")
+	assert.Contains(t, string(body), "**every marked spec must fail before implement, and fail for the right reason**")
 }
 
 // Review decides stress testing as it passes.

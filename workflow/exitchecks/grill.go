@@ -274,12 +274,29 @@ func (c *checkRun) specsCoverScenarios() (finding, error) {
 			markers[test] = append(markers[test], ids...)
 		}
 	}
-	uncovered := domain.UncoveredScenarios(toCover, tests, markers)
-	if len(uncovered) == 0 {
+	var failed []string
+	if c.specs != nil {
+		if !c.specs.built() {
+			return fail("the specs don't compile, so they cover no scenario (see specs-fail)"), nil
+		}
+		failed = c.specs.failed
+	}
+	var parts []string
+	if uncovered := domain.UncoveredScenarios(toCover, tests, markers); len(uncovered) > 0 {
+		parts = append(parts, fmt.Sprintf("no spec covers: %s (mark a spec written in this stage with `// %s <ID>` above its func)",
+			strings.Join(uncovered, ", "), domain.ScenarioMarker))
+	}
+	if passing := domain.ScenariosCoveredOnlyByPassingSpecs(toCover, tests, failed, markers); len(passing) > 0 {
+		var named []string
+		for _, s := range passing {
+			named = append(named, s.ID+" ("+strings.Join(s.Tests, ", ")+")")
+		}
+		parts = append(parts, "covered only by passing specs: "+strings.Join(named, ", ")+"; a spec of a scenario must fail before implement")
+	}
+	if len(parts) == 0 {
 		return pass, nil
 	}
-	return fail("no spec written in this stage covers %s: %s; mark each spec with `// %s <ID>` above its func",
-		plural(len(uncovered), "scenario"), strings.Join(uncovered, ", "), domain.ScenarioMarker), nil
+	return fail("%s", strings.Join(parts, "; ")), nil
 }
 
 // WrittenSpecs are the tests a stage visit wrote or changed so far, and the

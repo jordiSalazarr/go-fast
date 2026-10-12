@@ -153,6 +153,9 @@ type checkRun struct {
 	logPath   string
 	baselines worktree.Baselines
 	stress    *stressRun // run once, by the first stress check
+	// specs is specs-fail's run of the tests written in this visit, which
+	// specs-cover-scenarios reads; nil when specs-fail ran no test.
+	specs *testReport
 }
 
 func (c *checkRun) check(check domain.ExitCheck) (finding, error) {
@@ -272,6 +275,7 @@ func (c *checkRun) specsFail() (finding, error) {
 	if err != nil {
 		return finding{}, err
 	}
+	c.specs = &report
 	switch {
 	case timedOut != "":
 		return c.ran(fail("%s", timedOut)), nil

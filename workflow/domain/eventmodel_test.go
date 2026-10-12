@@ -226,3 +226,11 @@ func TestUncoveredScenarios(t *testing.T) {
 		"TestOldSpec wasn't written in this visit")
 	assert.Empty(t, domain.UncoveredScenarios(nil, nil, nil))
 }
+
+func TestScenariosCoveredOnlyByPassingSpecs(t *testing.T) {
+	markers := map[string][]string{"TestA1": {"A1"}, "TestA2": {"A2"}, "TestBoth": {"A1", "A2"}, "TestOld": {"A3"}}
+	assert.Equal(t, []domain.PassingScenario{{ID: "A2", Tests: []string{"TestA2"}}},
+		domain.ScenariosCoveredOnlyByPassingSpecs([]string{"A1", "A2", "A3"}, []string{"TestA1", "TestA2"}, []string{"TestA1"}, markers),
+		"A3 isn't marked by a test of this visit: it is uncovered, not passing")
+	assert.Empty(t, domain.ScenariosCoveredOnlyByPassingSpecs([]string{"A1", "A2"}, []string{"TestA2", "TestBoth"}, []string{"TestBoth"}, markers))
+}

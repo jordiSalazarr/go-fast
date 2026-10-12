@@ -157,7 +157,7 @@ func TestNewFeatureV2_FromAnEventModel_EndToEnd(t *testing.T) {
 	r.write("server/posting_test.go", postingSpecs)
 	r.writeArtifact("Specs for S1 and S3.")
 	out = r.submitAsAgent("--passed")
-	assert.Contains(t, out, "✗ specs-cover-scenarios: no spec written in this stage covers 1 scenario: S2")
+	assert.Contains(t, out, "✗ specs-cover-scenarios: no spec covers: S2 (")
 	out = r.specifyPasses(map[string]string{"server/overdraft_test.go": overdraftSpecS2})
 	assert.Contains(t, out, "✓ specs-fail\n✓ specs-cover-scenarios\n")
 	r.gf("approve")
@@ -205,7 +205,12 @@ func TestNewFeatureV2_FromASpec_EndToEnd(t *testing.T) {
 	assert.Equal(t, []string{"A1", "A2"}, v.Current.ScenariosToCover)
 	r.write("server/posting_test.go", strings.Replace(postSpec, "func TestPostTransaction", "// gofast:scenario A2\nfunc TestPostTransaction", 1))
 	r.writeArtifact("A2 only.")
-	assert.Contains(t, r.submitAsAgent("--passed"), "✗ specs-cover-scenarios: no spec written in this stage covers 1 scenario: A1")
+	assert.Contains(t, r.submitAsAgent("--passed"), "✗ specs-cover-scenarios: no spec covers: A1 (")
+
+	// An empty spec marked A1 pins nothing: A1 is still not covered.
+	r.write("server/empty_test.go", "package server\n\nimport \"testing\"\n\n// gofast:scenario A1\nfunc TestA1(t *testing.T) {}\n")
+	assert.Contains(t, r.submitAsAgent("--passed"), "✗ specs-cover-scenarios: covered only by passing specs: A1 (TestA1)")
+	r.remove("server/empty_test.go")
 	out = r.specifyPasses(map[string]string{"server/overdraft_test.go": strings.Replace(overdraftSpec, "func Test", "// gofast:scenario A1\nfunc Test", 1)})
 	assert.Contains(t, out, "✓ specs-cover-scenarios")
 	r.gf("approve")

@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	// portSpecs cover A1 with one test and A2 and A3 with another.
+	// portSpecs cover A1 with one failing test and A2 and A3 with another.
 	portSpecs = `package server
 
 import "testing"
@@ -21,13 +21,13 @@ func TestPort_Is8080(t *testing.T) {
 	}
 }
 
-// TestPort_IsNotZero also covers two scenarios.
+// TestPort_IsTheDefault also covers two scenarios.
 //
 // gofast:scenario A2
 // gofast:scenario A3
-func TestPort_IsNotZero(t *testing.T) {
-	if Port() == 0 {
-		t.Fatal("want a port")
+func TestPort_IsTheDefault(t *testing.T) {
+	if Port() != 8080 {
+		t.Fatal("want the default port")
 	}
 }
 `
@@ -64,7 +64,7 @@ func TestSpecsCoverScenarios_AnUncoveredScenario_Fails(t *testing.T) {
 	m.write("server/port_test.go", "package server\n\nimport \"testing\"\n\n// gofast:scenario A1\nfunc TestPort_Is8080(t *testing.T) {\n\tif Port() != 8080 {\n\t\tt.Fatal(\"want 8080\")\n\t}\n}\n")
 
 	fails(t, m.checkSpecify()[domain.CheckSpecsCoverScenarios],
-		"no spec written in this stage covers 2 scenarios: A2, A3; mark each spec with `// gofast:scenario <ID>` above its func")
+		"no spec covers: A2, A3 (mark a spec written in this stage with `// gofast:scenario <ID>` above its func)")
 }
 
 func TestSpecsCoverScenarios_AMarkerOnATestNotWrittenInThisVisit_DoesntCount(t *testing.T) {
@@ -72,7 +72,7 @@ func TestSpecsCoverScenarios_AMarkerOnATestNotWrittenInThisVisit_DoesntCount(t *
 	m.write("server/port_test.go", "package server\n\nimport \"testing\"\n\n// gofast:scenario A1\n// gofast:scenario A2\nfunc TestPort_Is8080(t *testing.T) {\n\tif Port() != 8080 {\n\t\tt.Fatal(\"want 8080\")\n\t}\n}\n")
 	m.write("server/config_test.go", configMarker)
 
-	fails(t, m.checkSpecify()[domain.CheckSpecsCoverScenarios], "covers 1 scenario: A3")
+	fails(t, m.checkSpecify()[domain.CheckSpecsCoverScenarios], "no spec covers: A3 (")
 }
 
 // With an event model, the scenarios to cover are the model's, of the
@@ -86,5 +86,62 @@ func TestSpecsCoverScenarios_WithAnEventModel_CoversItsScenarios(t *testing.T) {
 	m.writeArtifact(domain.StageSpecify)
 	m.write("server/port_test.go", "package server\n\nimport \"testing\"\n\n// gofast:scenario S1\n// gofast:scenario S3\nfunc TestPort_Is8080(t *testing.T) {\n\tif Port() != 8080 {\n\t\tt.Fatal(\"want 8080\")\n\t}\n}\n")
 
-	fails(t, m.checkSpecify()[domain.CheckSpecsCoverScenarios], "covers 1 scenario: S2")
+	fails(t, m.checkSpecify()[domain.CheckSpecsCoverScenarios], "no spec covers: S2 (")
+}
+
+// A spec of a scenario pins the behaviour the work changes, so it fails
+// before implement: a scenario whose marked specs all pass is not covered.
+func TestSpecsCoverScenarios_AScenarioOnlyAPassingSpecMarks_Fails(t *testing.T) {
+	m := onSpecifyAfterGrill(t)
+	m.write("server/port_test.go", `package server
+
+import "testing"
+
+// gofast:scenario A1
+// gofast:scenario A3
+func TestA1(t *testing.T) { t.Fatal("not yet") }
+
+// gofast:scenario A2
+func TestA2(t *testing.T) {}
+`)
+
+	results := m.checkSpecify()
+	passes(t, results[domain.CheckSpecsFail])
+	fails(t, results[domain.CheckSpecsCoverScenarios], "covered only by passing specs: A2 (TestA2); a spec of a scenario must fail before implement")
+}
+
+func TestSpecsCoverScenarios_TwoFailingSpecs_Pass(t *testing.T) {
+	m := onSpecifyAfterGrill(t)
+	m.write("server/port_test.go", `package server
+
+import "testing"
+
+// gofast:scenario A1
+func TestA1(t *testing.T) { t.Fatal("not yet") }
+
+// gofast:scenario A2
+// gofast:scenario A3
+func TestA2(t *testing.T) { t.Fatal("not yet") }
+`)
+
+	passes(t, m.checkSpecify()[domain.CheckSpecsCoverScenarios])
+}
+
+// One failing spec is enough: a passing spec next to it is fine.
+func TestSpecsCoverScenarios_AScenarioWithAFailingAndAPassingSpec_Passes(t *testing.T) {
+	m := onSpecifyAfterGrill(t)
+	m.write("server/port_test.go", `package server
+
+import "testing"
+
+// gofast:scenario A1
+// gofast:scenario A2
+// gofast:scenario A3
+func TestA1(t *testing.T) { t.Fatal("not yet") }
+
+// gofast:scenario A2
+func TestA2(t *testing.T) {}
+`)
+
+	passes(t, m.checkSpecify()[domain.CheckSpecsCoverScenarios])
 }

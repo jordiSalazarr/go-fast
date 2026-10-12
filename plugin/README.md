@@ -324,8 +324,11 @@ After you approve, specify covers the agreed **scenarios**
 the model adds or changes; without one, every acceptance scenario of grill's
 decision document. A spec covers a scenario when a test function written in
 this visit has a comment line `// gofast:scenario <ID>` directly above it
-(one per line; a test may cover several). The failure lists the uncovered
-ids. On path v1, specify instead covers every `command` and `automation`
+(one per line; a test may cover several), and that test **failed** in
+`specs-fail`'s run: a scenario is behaviour the work adds or changes, so
+its spec fails before implement (behaviour that stays belongs to the
+existing suite). The failure lists the scenarios no spec covers, and those
+covered only by passing specs, with their tests. On path v1, specify instead covers every `command` and `automation`
 slice the design adds or changes with a new test named `Test<SliceName>…`
 (`specs-cover-slices`; `gf status` lists them as
 `current.slicesNeedingSpecs`). Specify and implement read the latest accepted

@@ -246,7 +246,8 @@ type CurrentView struct {
 	// ScenariosToCover are the scenarios specify covers, after grill: the
 	// accepted event model's of the slices it adds or changes, or grill's
 	// acceptance scenarios. UncoveredScenarios are those no test written
-	// in this visit marks yet. Specify on path v2 only.
+	// in this visit marks yet; specs-cover-scenarios also requires a marked
+	// test to fail, which only its run tells. Specify on path v2 only.
 	ScenariosToCover   []string `json:"scenariosToCover,omitempty"`
 	UncoveredScenarios []string `json:"uncoveredScenarios,omitempty"`
 	// SlicesNeedingSpecs are the slices of the latest accepted design that
