@@ -192,3 +192,83 @@ func (c *checkRun) acceptedAssumptions() ([]domain.Assumption, *finding, error) 
 	assumptions, _ := ParseAssumptions(string(data))
 	return assumptions, nil, nil
 }
+
+// acceptedGrill is the work's latest accepted grill outcome, as it was when
+// grill was accepted.
+func (c *checkRun) acceptedGrill() (domain.Grill, *finding, error) {
+	if c.visit.Grill == (domain.Visit{}) {
+		f := fail("the work has no accepted grill")
+		return domain.Grill{}, &f, nil
+	}
+	path := domain.GrillFor(c.visit.Work, c.visit.Grill)
+	data, exists, problem, err := c.acceptedFile(domain.StageGrill, path, c.visit.GrillEnd)
+	if err != nil || problem != nil {
+		return domain.Grill{}, problem, err
+	}
+	if !exists {
+		f := fail("the accepted grill %s is missing", path)
+		return domain.Grill{}, &f, nil
+	}
+	grill, invalid := parseGrill(data)
+	if invalid != "" {
+		f := fail("the accepted grill %s is invalid: %s", path, invalid)
+		return domain.Grill{}, &f, nil
+	}
+	return grill, nil, nil
+}
+
+// scenariosToCover are the ids of the scenarios specify covers: the
+// accepted event model's scenarios of the slices it adds or changes, or,
+// without an event model, the accepted grill's acceptance scenarios.
+func (c *checkRun) scenariosToCover() ([]string, *finding, error) {
+	if c.visit.HasEventModel {
+		model, ok, problem, err := c.acceptedEventModel()
+		if err != nil || problem != nil {
+			return nil, problem, err
+		}
+		if !ok {
+			f := fail("the work has an event model but no accepted event-modelling visit")
+			return nil, &f, nil
+		}
+		return domain.ScenarioIDs(model.ScenariosToCover()), nil, nil
+	}
+	grill, problem, err := c.acceptedGrill()
+	if err != nil || problem != nil {
+		return nil, problem, err
+	}
+	return grill.AcceptanceIDs(), nil, nil
+}
+
+func (c *checkRun) specsCoverScenarios() (finding, error) {
+	toCover, problem, err := c.scenariosToCover()
+	if err != nil || problem != nil {
+		return deref(problem), err
+	}
+	specs, tests, problem, err := c.specsWritten()
+	if err != nil || problem != nil {
+		return deref(problem), err
+	}
+	markers := map[string][]string{}
+	for _, p := range specs {
+		src, err := os.ReadFile(filepath.Join(c.Root, filepath.FromSlash(p.String())))
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return finding{}, err
+		}
+		found, err := scenarioMarkers(src)
+		if err != nil {
+			return fail("specs don't parse: %s", firstLines(err.Error(), 1)), nil
+		}
+		for test, ids := range found {
+			markers[test] = append(markers[test], ids...)
+		}
+	}
+	uncovered := domain.UncoveredScenarios(toCover, tests, markers)
+	if len(uncovered) == 0 {
+		return pass, nil
+	}
+	return fail("no spec written in this stage covers %s: %s; mark each spec with `// %s <ID>` above its func",
+		plural(len(uncovered), "scenario"), strings.Join(uncovered, ", "), domain.ScenarioMarker), nil
+}

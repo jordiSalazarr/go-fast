@@ -11,6 +11,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/jordiSalazarr/go-fast/workflow/domain"
 )
 
 // testReport is what `go test -json` reported.
@@ -149,6 +151,31 @@ func testFuncs(src []byte) ([]testFunc, error) {
 		funcs = append(funcs, testFunc{name: fd.Name.Name, source: string(src[start:end])})
 	}
 	return funcs, nil
+}
+
+// scenarioMarkers maps each test function of a Go file to the scenario ids
+// its "// gofast:scenario <ID>" comment lines name. A marker counts only in
+// the comment directly above the function, one id per line.
+func scenarioMarkers(src []byte) (map[string][]string, error) {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "", src, parser.SkipObjectResolution|parser.ParseComments)
+	if err != nil {
+		return nil, err
+	}
+	markers := map[string][]string{}
+	for _, d := range file.Decls {
+		fd, ok := d.(*ast.FuncDecl)
+		if !ok || !isTestFunc(fd) || fd.Doc == nil {
+			continue
+		}
+		for _, c := range fd.Doc.List {
+			fields := strings.Fields(strings.TrimPrefix(c.Text, "//"))
+			if len(fields) == 2 && fields[0] == domain.ScenarioMarker {
+				markers[fd.Name.Name] = appendUnique(markers[fd.Name.Name], fields[1])
+			}
+		}
+	}
+	return markers, nil
 }
 
 func isTestFunc(fd *ast.FuncDecl) bool {

@@ -54,12 +54,15 @@ type Target struct {
 	work    domain.ActiveWork
 	// specify is the latest accepted specify visit, and specifyEnd the visit
 	// entered when it was accepted; designVisit and designEnd the same for
-	// design, eventModelVisit and eventModelEnd for event modelling.
+	// design, eventModelVisit and eventModelEnd for event modelling,
+	// grillVisit and grillEnd for grill.
 	specify, specifyEnd domain.AssignmentID
 	designVisit         domain.Visit
 	designEnd           domain.AssignmentID
 	eventModelVisit     domain.Visit
 	eventModelEnd       domain.AssignmentID
+	grillVisit          domain.Visit
+	grillEnd            domain.AssignmentID
 }
 
 // Checked is what gf found out about the stage visit before deciding.
@@ -125,6 +128,7 @@ func Find(log Reader, branch domain.Branch) (Target, error) {
 	target.specify, target.specifyEnd, _ = LatestAccepted(history, work.ID(), domain.StageSpecify)
 	_, target.designEnd, target.designVisit = LatestAccepted(history, work.ID(), domain.StageDesign)
 	_, target.eventModelEnd, target.eventModelVisit = LatestAccepted(history, work.ID(), domain.StageEventModelling)
+	_, target.grillEnd, target.grillVisit = LatestAccepted(history, work.ID(), domain.StageGrill)
 	return target, nil
 }
 
@@ -213,6 +217,7 @@ func Check(target Target, claim domain.AgentClaim, changes Changes, decisions De
 		Attempt: currentAttempt(open), Specify: target.specify, SpecifyEnd: target.specifyEnd,
 		Design: target.designVisit, DesignEnd: target.designEnd,
 		EventModel: target.eventModelVisit, EventModelEnd: target.eventModelEnd, HasEventModel: hasEventModel(target.work),
+		Grill: target.grillVisit, GrillEnd: target.grillEnd,
 		Changed: changed, BaselineStarted: started, FirstAssignment: target.work.FirstAssignment(),
 	}, progress)
 	if err != nil {

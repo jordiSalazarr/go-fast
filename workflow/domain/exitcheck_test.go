@@ -29,6 +29,7 @@ func TestEachStageRequiresItsExitChecks(t *testing.T) {
 		domain.StageSpecify, []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckSpecsFail, domain.CheckSpecsCoverSlices})
 	feature := with(with(designed, domain.StageEventModelling, []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckEventModelValid}),
 		domain.StageGrill, []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckGrillValid})
+	feature = with(feature, domain.StageSpecify, []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckSpecsFail, domain.CheckSpecsCoverScenarios})
 	behaviourDelta := []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckBehaviourDelta}
 	want := map[domain.WorkType]map[domain.PathVersion]map[domain.Stage][]domain.ExitCheck{
 		domain.WorkTypeFixBug:          {domain.PathV1: fixBug},
@@ -59,7 +60,7 @@ func TestExitChecksHaveStableNames(t *testing.T) {
 	}
 	assert.Equal(t, []string{"artifact-written", "specs-fail", "build-passes", "specs-pass",
 		"specs-untouched", "suite-passes", "formatted", "integration-passes", "stress-scripts-valid", "nfrs-met",
-		"design-valid", "nfr-proposals-valid", "behaviour-delta", "specs-cover-slices", "event-model-valid", "grill-valid"}, names)
+		"design-valid", "nfr-proposals-valid", "behaviour-delta", "specs-cover-slices", "event-model-valid", "grill-valid", "specs-cover-scenarios"}, names)
 }
 
 func TestCheckFailed_NeedsASummary(t *testing.T) {

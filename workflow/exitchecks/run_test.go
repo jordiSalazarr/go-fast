@@ -26,6 +26,9 @@ type module struct {
 	// eventModel: the work started from an event model, whose first
 	// event-modelling visit was accepted before grill's first visit.
 	eventModel bool
+	// grill: the work's first grill visit was accepted, as specify's
+	// baseline has it.
+	grill bool
 }
 
 func newModule(t *testing.T) *module {
@@ -103,6 +106,9 @@ func (m *module) checkOn(path domain.Path, stage domain.Stage, config exitchecks
 	}
 	if m.eventModel {
 		visit.HasEventModel, visit.EventModel, visit.EventModelEnd = true, Visit1, AssignmentOn(domain.StageGrill)
+	}
+	if m.grill {
+		visit.Grill, visit.GrillEnd = Visit1, AssignmentOn(domain.StageSpecify)
 	}
 	results, err := runner.Run(visit)
 	require.NoError(m.t, err)

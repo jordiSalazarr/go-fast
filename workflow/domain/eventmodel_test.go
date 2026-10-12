@@ -212,3 +212,17 @@ func TestAssumptions_HaveStableUniqueIDs(t *testing.T) {
 		require.ErrorIs(t, err, domain.ErrInvalidEventModel, bad[0])
 	}
 }
+
+// A scenario is covered by a test written in this visit whose marker names
+// it; a marker on any other test doesn't count.
+func TestUncoveredScenarios(t *testing.T) {
+	markers := map[string][]string{
+		"TestPostTransaction_Posts":           {"S1"},
+		"TestPostTransaction_RejectsAndPosts": {"S2", "S1"},
+		"TestOldSpec":                         {"S3"},
+	}
+	assert.Equal(t, []string{"S2", "S3"}, domain.UncoveredScenarios([]string{"S1", "S2", "S3"}, []string{"TestPostTransaction_Posts"}, markers))
+	assert.Equal(t, []string{"S3"}, domain.UncoveredScenarios([]string{"S1", "S2", "S3"}, []string{"TestPostTransaction_RejectsAndPosts", "TestNoMarker"}, markers),
+		"TestOldSpec wasn't written in this visit")
+	assert.Empty(t, domain.UncoveredScenarios(nil, nil, nil))
+}

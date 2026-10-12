@@ -396,3 +396,34 @@ func AssumptionProblems(assumptions []Assumption) []string {
 	}
 	return p.list
 }
+
+// ScenarioMarker is the comment line above a spec that says which scenario
+// it covers: "// gofast:scenario <ID>".
+const ScenarioMarker = "gofast:scenario"
+
+// UncoveredScenarios are the scenarios to cover, in order, that no test
+// written in this visit covers. markers maps a test to the scenario ids its
+// marker lines name; markers on other tests don't count.
+func UncoveredScenarios(toCover []string, written []string, markers map[string][]string) []string {
+	covered := map[string]bool{}
+	for _, test := range written {
+		for _, id := range markers[test] {
+			covered[id] = true
+		}
+	}
+	var uncovered []string
+	for _, id := range toCover {
+		if !covered[id] {
+			uncovered = append(uncovered, id)
+		}
+	}
+	return uncovered
+}
+
+// ScenarioIDs are the ids of the scenarios, in order.
+func ScenarioIDs(scenarios []Scenario) []string { return names(scenarios, Scenario.ID) }
+
+// AcceptanceIDs are the ids of grill's acceptance scenarios, in order.
+func (g Grill) AcceptanceIDs() []string {
+	return names(g.v.AcceptanceScenarios, func(a AcceptanceScenario) string { return a.ID })
+}

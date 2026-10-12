@@ -50,6 +50,10 @@ type Visit struct {
 	EventModelEnd domain.AssignmentID
 	// HasEventModel: the work started from an event model.
 	HasEventModel bool
+	// Grill is the work's latest accepted grill visit, and GrillEnd the
+	// stage visit entered when it was accepted. Zero when the work has none.
+	Grill    domain.Visit
+	GrillEnd domain.AssignmentID
 	// Changed is what the visit changed since its baseline.
 	Changed domain.ChangedFiles
 	// BaselineStarted: the visit had no baseline until this submission, so
@@ -185,6 +189,8 @@ func (c *checkRun) check(check domain.ExitCheck) (finding, error) {
 		return c.eventModelValid()
 	case domain.CheckGrillValid:
 		return c.grillValid()
+	case domain.CheckSpecsCoverScenarios:
+		return c.specsCoverScenarios()
 	}
 	return finding{}, fmt.Errorf("gf does not know how to run %q", check)
 }

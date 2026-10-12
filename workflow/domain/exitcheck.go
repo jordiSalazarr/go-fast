@@ -55,6 +55,12 @@ var (
 	// model parses and has no problems (EventModel.Problems), and its
 	// assumptions have ids.
 	CheckEventModelValid = ExitCheck{name: "event-model-valid"}
+	// CheckSpecsCoverScenarios: on a path with grill, the tests written in
+	// specify cover every scenario to cover: the event model's scenarios of
+	// the slices it adds or changes, or, without an event model, grill's
+	// acceptance scenarios. A test covers the scenarios its
+	// "// gofast:scenario <ID>" comment lines name.
+	CheckSpecsCoverScenarios = ExitCheck{name: "specs-cover-scenarios"}
 	// CheckGrillValid: the grill visit's structured outcome parses and has
 	// no problems (Grill.Problems), and its decision document has the
 	// required sections.
@@ -67,7 +73,7 @@ func ExitChecks() []ExitCheck {
 		CheckArtifactWritten, CheckSpecsFail, CheckBuildPasses, CheckSpecsPass,
 		CheckSpecsUntouched, CheckSuitePasses, CheckFormatted, CheckIntegrationPasses,
 		CheckStressScriptsValid, CheckNFRsMet, CheckDesignValid, CheckNFRProposalsValid, CheckBehaviourDelta,
-		CheckSpecsCoverSlices, CheckEventModelValid, CheckGrillValid,
+		CheckSpecsCoverSlices, CheckEventModelValid, CheckGrillValid, CheckSpecsCoverScenarios,
 	}
 }
 
@@ -83,6 +89,8 @@ func RequiredChecks(stage Stage, path Path) []ExitCheck {
 	switch {
 	case stage == StageDiscovery && path.workType == WorkTypeModifyBehaviour:
 		checks = append(checks, CheckBehaviourDelta)
+	case stage == StageSpecify && path.Includes(StageGrill):
+		checks = append(checks, CheckSpecsCoverScenarios)
 	case stage == StageSpecify && path.Includes(StageDesign):
 		checks = append(checks, CheckSpecsCoverSlices)
 	}
@@ -339,7 +347,7 @@ func ClassifyFailure(outcome ExitCheckOutcome) (kind FailureKind, ok bool) {
 func (c ExitCheck) judgesStageWork() bool {
 	switch c {
 	case CheckArtifactWritten, CheckStressScriptsValid, CheckDesignValid, CheckNFRProposalsValid, CheckBehaviourDelta,
-		CheckSpecsCoverSlices, CheckEventModelValid, CheckGrillValid:
+		CheckSpecsCoverSlices, CheckEventModelValid, CheckGrillValid, CheckSpecsCoverScenarios:
 		return true
 	}
 	return false
