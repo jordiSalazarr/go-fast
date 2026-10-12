@@ -119,7 +119,8 @@ The guard hook and `gf`'s own owner check (below) cover those.
    layers that make `gf` refuse owner-only commands from Claude's shell (see
    "How the owner approves").
 2. **`/gofast:drive`.** With no active work, Claude asks you for a work type
-   and a one-line description and runs `gf start`. Otherwise it runs the
+   and a one-line title, and for feature work your inputs (a spec, an event
+   model), and runs `gf start`. Otherwise it runs the
    current stage's agent.
 3. **Stage agents.** Each one reads `gf status --json`, does its stage inside
    its write scope, writes its artifact to `.gofast/works/<work>/<stage>-v<n>.md`,
@@ -167,6 +168,13 @@ repository (paths are relative to its root) and committed, so every stage
 reads the same thing: gf records each one's SHA-256 at start, lists them in
 `gf status` (`work.inputs`), and warns when one changes. Event modelling
 runs only when the work starts with an event model.
+
+On feature work, `gf status` (and `--json`) also shows: `work.inputs`, with
+a warning when one changed since the start; `work.eventModel`, whether the
+work enters event modelling and its latest accepted model; `work.grill`,
+the decision document and how many decisions grill recorded;
+`work.decisionsDir`; and on specify, `current.scenariosToCover` and
+`current.uncoveredScenarios`.
 
 `gf submit --passed` runs the stage's exit checks itself; the agent's claim
 alone never passes a stage. `gf status` (`current.checks`) and `gf checks`
@@ -358,7 +366,9 @@ artifact, with what the next visit must do. It ends with
 if the model is wrong (a missing invariant, a wrong aggregate boundary, a
 missing slice), specify if the spec was wrong or missed a case, implement if
 the code is wrong. gf only accepts an earlier stage on the work's path that
-can change code, or design on the paths that have it; any other route is
+can change code, or design on the paths that have it, or event modelling on
+work that entered it; grill is never a route (it needs you live: send the
+work back with `gf return grill "<reason>"`); any other route is
 refused without using an attempt. Design can't change code, but a wrong
 design is fixed by redesigning, and its human gate shows you the new design.
 

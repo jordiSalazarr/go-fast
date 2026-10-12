@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/jordiSalazarr/go-fast/workflow/domain"
+	"github.com/jordiSalazarr/go-fast/workflow/worktree"
 )
 
 // grillFile is grill's structured outcome in JSON. Its field names are the
@@ -271,4 +272,54 @@ func (c *checkRun) specsCoverScenarios() (finding, error) {
 	}
 	return fail("no spec written in this stage covers %s: %s; mark each spec with `// %s <ID>` above its func",
 		plural(len(uncovered), "scenario"), strings.Join(uncovered, ", "), domain.ScenarioMarker), nil
+}
+
+// WrittenSpecs are the tests a stage visit wrote or changed so far, and the
+// scenario markers above them, for status to show specify's coverage. It
+// reads nothing but the working tree and the visit's baseline; ok is false
+// when the visit has no baseline yet.
+func WrittenSpecs(root string, id domain.AssignmentID) (tests []string, markers map[string][]string, ok bool, err error) {
+	baselines := worktree.OpenBaselines(root)
+	base, ok, err := baselines.Tree(id)
+	if err != nil || !ok {
+		return nil, nil, false, err
+	}
+	now, err := worktree.Snapshot(root)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	names, err := worktree.Diff(root, base, now)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	var specs []domain.RepoPath
+	for _, name := range names {
+		if strings.HasSuffix(name, "_test.go") {
+			p, err := domain.ParseRepoPath(name)
+			if err != nil {
+				return nil, nil, false, err
+			}
+			specs = append(specs, p)
+		}
+	}
+	run := &checkRun{Runner: Runner{Root: root}}
+	tests, _, err = run.testsChanged(specs, base, "")
+	if err != nil {
+		return nil, nil, false, err
+	}
+	markers = map[string][]string{}
+	for _, p := range specs {
+		src, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(p.String())))
+		if err != nil {
+			continue // deleted
+		}
+		found, err := scenarioMarkers(src)
+		if err != nil {
+			continue // specs-cover-scenarios reports it
+		}
+		for test, ids := range found {
+			markers[test] = append(markers[test], ids...)
+		}
+	}
+	return tests, markers, true, nil
 }

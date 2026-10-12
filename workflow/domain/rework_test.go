@@ -366,3 +366,66 @@ func TestRebuildWork_AReworkIntoDesign_IsReplayed(t *testing.T) {
 	}))
 	require.ErrorIs(t, err, domain.ErrInconsistentHistory, "fix-bug has no design")
 }
+
+// toFixerFrom starts work of a type from its inputs, advances it to stage,
+// and hands it to the fixer from there.
+func toFixerFrom(t *testing.T, workType domain.WorkType, version domain.PathVersion, stage domain.Stage, inputs ...domain.WorkInput) domain.InFixerWork {
+	t.Helper()
+	var history []domain.WorkEvent
+	if version == domain.PathV1 {
+		path := must(domain.PathOf(workType, version))
+		first := path.Steps()[0]
+		history = []domain.WorkEvent{
+			domain.WorkStarted{WorkID: workID, WorkType: workType, Description: description, Branch: mainBranch},
+			domain.StageEntered{WorkID: workID, Stage: first.Stage(), Visit: visit1, Gate: first.Gate(), Budget: first.Budget()},
+		}
+	} else {
+		history = must(domain.StartWork(workID, workType, description, mainBranch, activeOn(t, mainBranch), inputs...))
+	}
+	for {
+		w := asInProgress(t, givenWork(t, history...))
+		if w.CurrentStage() == stage {
+			events, err := w.EnterFixer(stage, w.CurrentVisit(), reasonOf("suite fails"))
+			require.NoError(t, err)
+			return stateIs[domain.InFixerWork](t, givenWork(t, append(history, events...)...))
+		}
+		var choice domain.StressChoice
+		if w.CurrentStage() == domain.StressDecider() {
+			choice = skipStress
+		}
+		events, err := w.AdvancePastStage(w.CurrentStage(), w.CurrentVisit(), choice)
+		require.NoError(t, err)
+		history = append(history, events...)
+	}
+}
+
+// The fixer's routes depend on the work's path version and on whether it
+// entered event modelling; grill is never one.
+func TestRouteTargets_PerPathVersion(t *testing.T) {
+	model := must(domain.NewWorkInput(domain.InputEventModel, must(domain.ParseRepoPath("docs/model.json")), domain.HashOf([]byte("{}"))))
+	cases := []struct {
+		name string
+		w    domain.InFixerWork
+		want []domain.Stage
+	}{
+		{"fix-bug", toFixerFrom(t, domain.WorkTypeFixBug, domain.PathV1, domain.StageReview),
+			[]domain.Stage{domain.StageSpecify, domain.StageImplement}},
+		{"new-feature v1", toFixerFrom(t, domain.WorkTypeNewFeature, domain.PathV1, domain.StageReview),
+			[]domain.Stage{domain.StageDesign, domain.StageSpecify, domain.StageImplement}},
+		{"new-feature v2 with an event model", toFixerFrom(t, domain.WorkTypeNewFeature, domain.PathV2, domain.StageReview, model),
+			[]domain.Stage{domain.StageEventModelling, domain.StageDesign, domain.StageSpecify, domain.StageImplement}},
+		{"modify-behaviour v2 without an event model", toFixerFrom(t, domain.WorkTypeModifyBehaviour, domain.PathV2, domain.StageIntegrationTesting),
+			[]domain.Stage{domain.StageDesign, domain.StageSpecify, domain.StageImplement}},
+	}
+	for _, c := range cases {
+		assert.Equal(t, c.want, c.w.RouteTargets(), c.name)
+		assert.ErrorIs(t, c.w.CheckRoute(domain.StageGrill), domain.ErrInvalidRoute, c.name)
+	}
+
+	// The fixer returns the work to event modelling, whose new visit runs
+	// before grill's: every later stage runs again.
+	w := cases[2].w
+	events, err := w.ReturnToStage(domain.StageEventModelling, reasonOf("the model misses a rejection"))
+	require.NoError(t, err)
+	assert.Equal(t, domain.StageEntered{WorkID: workID, Stage: domain.StageEventModelling, Visit: visit(2), Gate: domain.GateAuto, Budget: budget3}, events[1])
+}

@@ -395,14 +395,20 @@ func (w InProgressWork) requireCurrent(stage Stage, visit Visit) error {
 
 // RouteTargets are the stages the fixer may return the work to: on the
 // work's path, earlier than the stage that handed over, and able to change
-// code, or design. Design can't change code, but a wrong design (a missing
-// invariant, a wrong aggregate boundary, a missing slice) is fixed by
-// redesigning, and its human gate shows the owner. In path order.
+// code, or design, or event modelling when the work entered it. Neither can
+// change code, but a wrong design (a missing invariant, a wrong aggregate
+// boundary, a missing slice) is fixed by redesigning, and a wrong event
+// model (a missing scenario, rejection or event) by remodelling. Grill is
+// never a route: it needs the owner live; the owner sends work back to it
+// with `gf return grill`. In path order.
 func (w InFixerWork) RouteTargets() []Stage {
 	var targets []Stage
 	end, _ := w.path.indexOf(w.from)
 	for _, step := range w.path.steps[:end] {
-		if step.stage.WriteScope().CanChangeCode() || step.stage == StageDesign {
+		if !w.includes(step) {
+			continue
+		}
+		if step.stage.WriteScope().CanChangeCode() || step.stage == StageDesign || step.stage == StageEventModelling {
 			targets = append(targets, step.stage)
 		}
 	}

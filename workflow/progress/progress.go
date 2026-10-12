@@ -48,6 +48,9 @@ type Facts struct {
 	// EventModel reads a canonical event model; an
 	// *exitchecks.EventModelError says what is wrong with it.
 	EventModel func(path domain.RepoPath) (domain.EventModel, error)
+	// WrittenSpecs are the tests a stage visit wrote so far and the
+	// scenario markers above them; ok is false before it has a baseline.
+	WrittenSpecs func(id domain.AssignmentID) (tests []string, markers map[string][]string, ok bool, err error)
 	// File reads a file of the working tree; ok is false when it doesn't
 	// exist.
 	File func(path domain.RepoPath) (content []byte, ok bool, err error)
@@ -106,12 +109,29 @@ type WorkView struct {
 	// Design is the latest accepted design, on a path with design; absent
 	// before one is accepted, and on paths without design.
 	Design *DesignView `json:"design,omitempty"`
+	// EventModel says whether the work enters event modelling and, once a
+	// visit is accepted, where its canonical model is; absent on paths
+	// without event modelling.
+	EventModel *EventModelView `json:"eventModel,omitempty"`
 	// Grill is the latest grill visit's outcome: its decision document and
 	// what it settled; absent before grill writes one.
 	Grill *GrillView `json:"grill,omitempty"`
 	// NFRProposals are the NFRs the latest design visit proposes that
 	// .gofast/nfrs.json doesn't contain yet; absent when there are none.
 	NFRProposals *NFRProposalsView `json:"nfrProposals,omitempty"`
+}
+
+// EventModelView is the work's event modelling.
+type EventModelView struct {
+	// Included is set when the work started from an event model, so it
+	// enters event modelling; otherwise the stage is skipped.
+	Included bool `json:"included"`
+	// The latest accepted visit and its files; absent before one.
+	Visit     int    `json:"visit,omitempty"`
+	File      string `json:"file,omitempty"`
+	Artifact  string `json:"artifact,omitempty"`
+	Scenarios int    `json:"scenarios,omitempty"`
+	Problem   string `json:"problem,omitempty"`
 }
 
 // GrillView is a grill visit's outcome.
@@ -222,6 +242,12 @@ type CurrentView struct {
 	// visit's canonical event model, after an attempt failed;
 	// event-modelling only.
 	EventModelProblems []string `json:"eventModelProblems,omitempty"`
+	// ScenariosToCover are the scenarios specify covers, after grill: the
+	// accepted event model's of the slices it adds or changes, or grill's
+	// acceptance scenarios. UncoveredScenarios are those no test written
+	// in this visit marks yet. Specify on path v2 only.
+	ScenariosToCover   []string `json:"scenariosToCover,omitempty"`
+	UncoveredScenarios []string `json:"uncoveredScenarios,omitempty"`
 	// SlicesNeedingSpecs are the slices of the latest accepted design that
 	// specify must cover with Test<SliceName> specs; specify on paths with
 	// design only.
@@ -364,6 +390,9 @@ func FactsAt(root string) Facts {
 			return exitchecks.LoadEventModel(root, path)
 		},
 		Grill: func(path domain.RepoPath) (domain.Grill, error) { return exitchecks.LoadGrill(root, path) },
+		WrittenSpecs: func(id domain.AssignmentID) ([]string, map[string][]string, bool, error) {
+			return exitchecks.WrittenSpecs(root, id)
+		},
 		DecisionsDir: func() (domain.DecisionsDir, error) {
 			config, err := exitchecks.LoadConfig(root)
 			return config.Decisions, err
@@ -453,6 +482,9 @@ func Read(log Reader, branch domain.Branch, facts Facts) (View, error) {
 	if d := view.Work.Design; d != nil && facts.Design != nil {
 		describeDesign(d, work.ID(), facts)
 	}
+	if work.Path().Includes(domain.StageEventModelling) {
+		view.Work.EventModel = eventModelView(history, work, facts)
+	}
 	if work.Path().Includes(domain.StageGrill) && facts.DecisionsDir != nil {
 		if dir, err := facts.DecisionsDir(); err == nil {
 			view.Work.DecisionsDir = dir.Path().String()
@@ -527,6 +559,9 @@ func Read(log Reader, branch domain.Branch, facts Facts) (View, error) {
 		current.Assignment, current.AttemptsUsed, current.Budget = describeAssignment(state)
 	}
 	current.LastProblem = lastProblem(history.Records(eventlog.AssignmentStream(assignmentID)))
+	if stage == domain.StageSpecify && work.Path().Includes(domain.StageGrill) {
+		current.ScenariosToCover, current.UncoveredScenarios = scenarioCoverage(history, work, facts)
+	}
 	if stage == domain.StageEventModelling && current.LastProblem != nil && facts.EventModel != nil {
 		current.EventModelProblems = eventModelProblems(domain.EventModelFor(work.ID(), work.CurrentVisit()), facts)
 	}
@@ -667,6 +702,57 @@ func designAwaitsApproval(current *CurrentView, proposals *NFRProposalsView) Nex
 			read, proposals.File, exitchecks.NFRsPath),
 		Commands: []string{"gf nfrs adopt", "gf approve", `gf reject "<feedback>"`},
 	}
+}
+
+// eventModelView is whether the work enters event modelling, and its latest
+// accepted canonical model.
+func eventModelView(history eventlog.History, work domain.ActiveWork, facts Facts) *EventModelView {
+	v := &EventModelView{Included: !work.Skips(domain.StageEventModelling)}
+	visit, ok := latestAccepted(history, work.ID(), domain.StageEventModelling)
+	if !ok {
+		return v
+	}
+	file := domain.EventModelFor(work.ID(), visit)
+	v.Visit, v.File, v.Artifact = visit.Int(), file.String(), domain.ArtifactFor(work.ID(), domain.StageEventModelling, visit).String()
+	if facts.EventModel != nil {
+		model, err := facts.EventModel(file)
+		if err != nil {
+			v.Problem = "gf could not read the event model: " + err.Error()
+		} else {
+			v.Scenarios = len(model.Scenarios())
+		}
+	}
+	return v
+}
+
+// scenarioCoverage are the scenarios specify covers, and those no test
+// written in its current visit marks yet.
+func scenarioCoverage(history eventlog.History, work domain.ActiveWork, facts Facts) (toCover, uncovered []string) {
+	if _, ok := work.Input(domain.InputEventModel); ok {
+		model := acceptedEventModel(history, work, facts)
+		if model == nil {
+			return nil, nil
+		}
+		toCover = domain.ScenarioIDs(model.ScenariosToCover())
+	} else {
+		visit, ok := latestAccepted(history, work.ID(), domain.StageGrill)
+		if !ok || facts.Grill == nil {
+			return nil, nil
+		}
+		grill, err := facts.Grill(domain.GrillFor(work.ID(), visit))
+		if err != nil {
+			return nil, nil
+		}
+		toCover = grill.AcceptanceIDs()
+	}
+	if facts.WrittenSpecs == nil {
+		return toCover, nil
+	}
+	tests, markers, ok, err := facts.WrittenSpecs(work.CurrentAssignment())
+	if err != nil || !ok {
+		return toCover, nil
+	}
+	return toCover, domain.UncoveredScenarios(toCover, tests, markers)
 }
 
 // acceptedEventModel is the work's latest accepted canonical event model,
@@ -1009,6 +1095,18 @@ func RenderText(w io.Writer, v View) {
 	if r := c.Returned; r != nil {
 		fmt.Fprintf(w, "Returned: the owner sent the work back from %s (visit %d) to %s (visit %d): %s\n", r.From, r.FromVisit, r.Target, r.TargetVisit, r.Reason)
 	}
+	if e := v.Work.EventModel; e != nil {
+		switch {
+		case !e.Included:
+			fmt.Fprintln(w, "Event modelling: skipped (the work started without an event model)")
+		case e.Visit == 0:
+			fmt.Fprintln(w, "Event modelling: on the path (the work started from an event model)")
+		case e.Problem != "":
+			fmt.Fprintf(w, "Event model (visit %d): %s: %s\n", e.Visit, e.File, e.Problem)
+		default:
+			fmt.Fprintf(w, "Event model (visit %d): %s, %d scenarios (%s)\n", e.Visit, e.File, e.Scenarios, e.Artifact)
+		}
+	}
 	if g := v.Work.Grill; g != nil {
 		switch {
 		case g.Problem != "":
@@ -1032,6 +1130,12 @@ func RenderText(w io.Writer, v View) {
 		fmt.Fprintln(w, "Event model problems (event-model-valid):")
 		for _, p := range c.EventModelProblems {
 			fmt.Fprintf(w, "  - %s\n", p)
+		}
+	}
+	if len(c.ScenariosToCover) > 0 {
+		fmt.Fprintf(w, "Scenarios to cover (a `// gofast:scenario <ID>` line above a new test each): %s\n", strings.Join(c.ScenariosToCover, ", "))
+		if len(c.UncoveredScenarios) > 0 {
+			fmt.Fprintf(w, "Not covered yet: %s\n", strings.Join(c.UncoveredScenarios, ", "))
 		}
 	}
 	if len(c.SlicesNeedingSpecs) > 0 {

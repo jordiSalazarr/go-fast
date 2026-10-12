@@ -75,6 +75,32 @@ func TestDiscoveryAgent_FitsTheAgreedBehaviourToTheCode(t *testing.T) {
 	}
 }
 
+// The fixer may send the work back to event modelling, never to grill; the
+// owner can.
+func TestFixerAgent_RoutesToEventModelling_NotToGrill(t *testing.T) {
+	body, err := os.ReadFile(instructions(domain.StageFixer))
+	require.NoError(t, err)
+	assert.Contains(t, string(body), "(→ `event-modelling`, only on work that started from an event model)")
+	assert.Contains(t, string(body), "the owner may send the work back with `gf return grill \"<reason>\"`")
+}
+
+// The drive asks for feature work's inputs, and runs grill itself.
+func TestDrive_AsksForTheInputs_AndRunsGrillInTheSession(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("..", "..", "plugin", "skills", "drive", "SKILL.md"))
+	require.NoError(t, err)
+	for _, want := range []string{"adding `--spec <path>` and `--event-model <path>`", "load the `gofast:grill` skill",
+		"tell the owner which decision document to read (`work.grill.docPath`)"} {
+		assert.Contains(t, string(body), want)
+	}
+}
+
+// Specify marks each spec with the scenarios it covers.
+func TestSpecifyAgent_MarksTheScenarios(t *testing.T) {
+	body, err := os.ReadFile(instructions(domain.StageSpecify))
+	require.NoError(t, err)
+	assert.Contains(t, string(body), "put a comment line `// gofast:scenario <ID>` directly above each test's `func`")
+}
+
 // Review decides stress testing as it passes.
 func TestReviewAgent_DecidesStressTesting(t *testing.T) {
 	body, err := os.ReadFile(filepath.Join("..", "..", "plugin", "agents", "review.md"))

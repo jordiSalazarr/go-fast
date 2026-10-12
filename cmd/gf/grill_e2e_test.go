@@ -164,3 +164,34 @@ func TestDiscoveryAfterGrill_ModifyBehaviour_NeedsTheBehaviourDelta_OnAnAutoGate
 	assert.Contains(t, r.submitAsAgent("--passed"), "'discovery' accepted.")
 	r.expect("design", progress.AssignmentOpen, 0, 3)
 }
+
+// On specify after grill, status lists the scenarios to cover and those no
+// new test marks yet.
+func TestStatus_OnSpecifyAfterGrill_ShowsTheScenariosToCover(t *testing.T) {
+	r := newDesignRepo(t)
+	r.git("add", "-A")
+	r.git("commit", "-q", "-m", "initial")
+	r.gf("start", "--type", "new-feature", "Wallets")
+	a2 := `{"id": "A2", "given": "a wallet with 10", "when": "a credit of 5 is posted", "then": "its balance is 15"}`
+	r.grillWrites(d1, a1+", "+a2, decisionDocument(a1Document+"\n- A2: Given a wallet with 10, when a credit of 5 is posted, then its balance is 15."))
+	r.submitAsAgent("--passed")
+	r.gf("approve")
+	r.writeArtifact("Posting lives in server/posting.go.")
+	r.submitAsAgent("--passed")
+	r.designAwaitsApproval("")
+	r.gf("approve")
+
+	v := r.expect("specify", progress.AssignmentOpen, 0, 3)
+	assert.Equal(t, []string{"artifact-written", "specs-fail", "specs-cover-scenarios"}, v.Current.Checks)
+	assert.Equal(t, []string{"A1", "A2"}, v.Current.ScenariosToCover)
+	assert.Equal(t, []string{"A1", "A2"}, v.Current.UncoveredScenarios)
+	require.NotNil(t, v.Work.EventModel)
+	assert.False(t, v.Work.EventModel.Included)
+
+	r.write("server/posting_test.go", strings.Replace(postSpec, "func TestPostTransaction", "// gofast:scenario A2\nfunc TestPostTransaction", 1))
+	v = r.status()
+	assert.Equal(t, []string{"A1"}, v.Current.UncoveredScenarios)
+	out := r.gf("status")
+	assert.Contains(t, out, "Scenarios to cover (a `// gofast:scenario <ID>` line above a new test each): A1, A2\nNot covered yet: A1\n")
+	assert.Contains(t, out, "Event modelling: skipped (the work started without an event model)\n")
+}
