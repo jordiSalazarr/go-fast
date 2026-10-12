@@ -49,6 +49,8 @@ func allEvents() []domain.Event {
 		domain.ReworkLimitReached{WorkID: workID, Reworks: must(domain.NewReworkCount(3))},
 		domain.ReworkStarted{WorkID: workID, Target: domain.StageImplement, Visit: must(domain.NewVisit(2)), Reason: reason},
 		domain.ReworkBudgetExtended{WorkID: workID, Owner: owner, Additional: must(domain.NewReworkBudget(1)), NewBudget: must(domain.NewReworkBudget(4))},
+		domain.WorkReturned{WorkID: workID, Owner: owner, From: domain.StageReview, FromVisit: domain.FirstVisit(), Target: domain.StageSpecify,
+			Visit: must(domain.NewVisit(2)), Reason: must(domain.NewReason("the specs miss the refund case"))},
 		domain.AssignmentOpened{AssignmentID: assignmentID, WorkID: workID, Stage: domain.StageDiscovery, Visit: domain.FirstVisit(), Gate: domain.GateHuman, Budget: budget3},
 		domain.AttemptFailed{AssignmentID: assignmentID, Attempt: must(domain.NewAttempt(1)), Reason: reason},
 		domain.SubmittedForApproval{AssignmentID: assignmentID, Attempt: must(domain.NewAttempt(2))},

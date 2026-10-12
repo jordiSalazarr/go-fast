@@ -63,6 +63,19 @@ type ReworkStarted struct {
 	Reason Reason
 }
 
+// WorkReturned: the owner sent the work back from its current stage visit
+// to an earlier stage of its path, which it enters again on a new visit.
+// Followed by that stage's StageEntered.
+type WorkReturned struct {
+	WorkID    WorkID
+	Owner     Owner
+	From      Stage
+	FromVisit Visit
+	Target    Stage
+	Visit     Visit
+	Reason    Reason
+}
+
 // ReworkBudgetExtended: the owner allowed more reworks.
 type ReworkBudgetExtended struct {
 	WorkID     WorkID
@@ -171,6 +184,7 @@ func (FixerEntered) isEvent()            {}
 func (ReworkLimitReached) isEvent()      {}
 func (ReworkStarted) isEvent()           {}
 func (ReworkBudgetExtended) isEvent()    {}
+func (WorkReturned) isEvent()            {}
 func (StressDecided) isEvent()           {}
 func (AssignmentOpened) isEvent()        {}
 func (AttemptFailed) isEvent()           {}
@@ -190,6 +204,7 @@ func (e FixerEntered) workID() WorkID         { return e.WorkID }
 func (e ReworkLimitReached) workID() WorkID   { return e.WorkID }
 func (e ReworkStarted) workID() WorkID        { return e.WorkID }
 func (e ReworkBudgetExtended) workID() WorkID { return e.WorkID }
+func (e WorkReturned) workID() WorkID         { return e.WorkID }
 func (e StressDecided) workID() WorkID        { return e.WorkID }
 
 func (e AssignmentOpened) assignmentID() AssignmentID        { return e.AssignmentID }

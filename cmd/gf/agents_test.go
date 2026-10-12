@@ -91,7 +91,7 @@ func TestAgentsAndDrive_NeverRunOwnerCommands(t *testing.T) {
 	for _, p := range paths {
 		body, err := os.ReadFile(p)
 		require.NoError(t, err)
-		for _, owner := range []string{"`gf approve`", "`gf reject`", "`gf extend`", "`gf rework-extend`", "`gf stress`", "`gf abandon`", "`gf nfrs adopt`"} {
+		for _, owner := range []string{"`gf approve`", "`gf reject`", "`gf extend`", "`gf rework-extend`", "`gf stress`", "`gf abandon`", "`gf return`", "`gf nfrs adopt`"} {
 			assert.Contains(t, string(body), owner, "%s must say never to run %s", p, owner)
 		}
 	}

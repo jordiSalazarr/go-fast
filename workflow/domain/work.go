@@ -414,6 +414,39 @@ func (w InFixerWork) ReturnToStage(target Stage, reason Reason) ([]WorkEvent, er
 	}, nil
 }
 
+// ReturnTargets are the stages the owner may send the work back to: the
+// stages of its path before the current one that the work entered, in path
+// order.
+func (w InProgressWork) ReturnTargets() []Stage {
+	var targets []Stage
+	end, _ := w.path.indexOf(w.stage)
+	for _, step := range w.path.steps[:end] {
+		if _, entered := w.visits[step.stage]; entered {
+			targets = append(targets, step.stage)
+		}
+	}
+	return targets
+}
+
+// ReturnTo sends the work back, from its current stage visit, to a new visit
+// of an earlier stage, whatever state the current visit is in. From there
+// the path continues in order, so every later stage runs again, and the next
+// review decides stress testing again. It is not a rework: the fixer did not
+// send it.
+func (w InProgressWork) ReturnTo(owner Owner, target Stage, reason Reason) ([]WorkEvent, error) {
+	if err := requirePresent(required{"owner", owner}, required{"stage", target}, required{"reason", reason}); err != nil {
+		return nil, fmt.Errorf("return work %s: %w", w.id, err)
+	}
+	if !slices.Contains(w.ReturnTargets(), target) {
+		return nil, fmt.Errorf("return work %s: %w", w.id, &InvalidReturnError{Target: target, Allowed: w.ReturnTargets()})
+	}
+	entered := w.entering(target)
+	return []WorkEvent{
+		WorkReturned{WorkID: w.id, Owner: owner, From: w.stage, FromVisit: w.visit, Target: target, Visit: entered.Visit, Reason: reason},
+		entered,
+	}, nil
+}
+
 // AllowMoreRework extends the rework budget. The work is back in progress
 // on the stage visit that handed it over, so the handover enters the fixer.
 func (w ReworkLimitReachedWork) AllowMoreRework(owner Owner, additional ReworkBudget) ([]WorkEvent, error) {
@@ -518,6 +551,15 @@ func evolveWork(w work, path Path, state WorkState, e WorkEvent) (next WorkState
 			in := s.onStage(fixer)
 			in.reworks = in.reworks.plusOne()
 			return InFixerWork{active: in, from: e.From, fromVisit: e.FromVisit, mode: e.Mode, reason: e.Reason}, &fixer, true
+		case WorkReturned:
+			entered := s.entering(e.Target)
+			if e.From != s.stage || e.FromVisit != s.visit || !slices.Contains(s.ReturnTargets(), e.Target) ||
+				e.Visit != entered.Visit || e.Owner.isZero() || e.Reason.isZero() {
+				return nil, nil, false
+			}
+			back := s.onStage(entered)
+			back.stress = nil // the next review decides again
+			return InProgressWork{back}, &entered, true
 		case ReworkLimitReached:
 			if !s.stage.ChecksCode() || !s.reworkBudget.exhaustedBy(s.reworks) || e.Reworks != s.reworks {
 				return nil, nil, false

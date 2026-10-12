@@ -30,6 +30,7 @@ func friendly(err error, cmd *cobra.Command, ran bool) string {
 		route     *domain.InvalidRouteError
 		noRoute   *domain.RouteMissingError
 		forced    *domain.StressForcedError
+		back      *domain.InvalidReturnError
 	)
 	switch {
 	case errors.Is(err, gitbranch.ErrDetachedHead):
@@ -62,6 +63,13 @@ func friendly(err error, cmd *cobra.Command, ran bool) string {
 	case errors.As(err, &noRoute):
 		return fmt.Sprintf("The fixer says where the work goes: `gf submit --passed --route <%s> \"<reason>\"`. No attempt was used.",
 			strings.ReplaceAll(stageNames(noRoute.Allowed), ", ", "|"))
+	case errors.As(err, &back) && len(back.Allowed) == 0:
+		return fmt.Sprintf("The work can't go back to '%s': it is on the first stage of its path.", back.Target)
+	case errors.As(err, &back):
+		return fmt.Sprintf("The work can only go back to an earlier stage of its path that it entered: %s. '%s' is not one of them.",
+			stageNames(back.Allowed), back.Target)
+	case errors.Is(err, domain.ErrNotReturnable):
+		return "The work can only be sent back while it is on a stage of its path, not while it is in the fixer or at its rework limit. Run `gf status` to see where it is."
 	case errors.Is(err, domain.ErrRouteOutsideFixer):
 		return "Only the fixer chooses a route. Submit with `gf submit --passed` or `gf submit --failed \"<reason>\"`. No attempt was used."
 	case errors.As(err, &forced) && cmd.Name() == "stress":

@@ -29,6 +29,7 @@ import (
 	keepagentonstage "github.com/jordiSalazarr/go-fast/workflow/slices/keepAgentOnStage"
 	overridestressdecision "github.com/jordiSalazarr/go-fast/workflow/slices/overrideStressDecision"
 	"github.com/jordiSalazarr/go-fast/workflow/slices/reject"
+	returnwork "github.com/jordiSalazarr/go-fast/workflow/slices/returnWork"
 	startwork "github.com/jordiSalazarr/go-fast/workflow/slices/startWork"
 	"github.com/jordiSalazarr/go-fast/workflow/slices/status"
 	submitforacceptance "github.com/jordiSalazarr/go-fast/workflow/slices/submitForAcceptance"
@@ -90,6 +91,7 @@ func (a *app) rootCommand() *cobra.Command {
 		extendreworkbudget.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch),
 		overridestressdecision.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch, a.stressFacts),
 		abandonwork.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch),
+		returnwork.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch),
 		adoptnfrproposals.NewCommand(a.openStore, a.resolveCaller, a.currentBranch, a.repositoryRoot),
 		status.NewCommand(a.openStore, a.currentBranch, a.repositoryRoot),
 		checks.NewCommand(a.repositoryRoot),

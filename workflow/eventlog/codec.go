@@ -34,6 +34,7 @@ const (
 	typeReworkStarted           = "ReworkStarted"
 	typeReworkBudgetExtended    = "ReworkBudgetExtended"
 	typeStressDecided           = "StressDecided"
+	typeWorkReturned            = "WorkReturned"
 )
 
 type envelope struct {
@@ -111,6 +112,16 @@ type reworkBudgetExtendedV1 struct {
 	Owner      ownerV1 `json:"owner"`
 	Additional int     `json:"additional"`
 	NewBudget  int     `json:"newBudget"`
+}
+
+type workReturnedV1 struct {
+	WorkID    string  `json:"workId"`
+	Owner     ownerV1 `json:"owner"`
+	From      string  `json:"from"`
+	FromVisit int     `json:"fromVisit"`
+	Target    string  `json:"target"`
+	Visit     int     `json:"visit"`
+	Reason    string  `json:"reason"`
 }
 
 type stressDecidedV1 struct {
@@ -267,6 +278,11 @@ func encodeEvent(e domain.Event) (eventType string, stream Stream, payload any, 
 		return typeReworkBudgetExtended, WorkStream(e.WorkID), reworkBudgetExtendedV1{
 			WorkID: e.WorkID.String(), Owner: encodeOwner(e.Owner), Additional: e.Additional.Int(), NewBudget: e.NewBudget.Int(),
 		}, nil
+	case domain.WorkReturned:
+		return typeWorkReturned, WorkStream(e.WorkID), workReturnedV1{
+			WorkID: e.WorkID.String(), Owner: encodeOwner(e.Owner), From: e.From.String(), FromVisit: e.FromVisit.Int(),
+			Target: e.Target.String(), Visit: e.Visit.Int(), Reason: e.Reason.String(),
+		}, nil
 	case domain.StressDecided:
 		p := stressDecidedV1{
 			WorkID: e.WorkID.String(), Decision: e.Decision.String(), Reason: e.Reason.String(), ForcedBy: nfrIDs(e.ForcedBy),
@@ -370,6 +386,13 @@ func decodeEvent(eventType string, payload json.RawMessage) (domain.Event, Strea
 		event = domain.ReworkBudgetExtended{
 			WorkID: d.workID(p.WorkID), Owner: d.owner(p.Owner),
 			Additional: d.reworkBudget(p.Additional), NewBudget: d.reworkBudget(p.NewBudget),
+		}
+	case typeWorkReturned:
+		var p workReturnedV1
+		d.unmarshal(payload, &p)
+		event = domain.WorkReturned{
+			WorkID: d.workID(p.WorkID), Owner: d.owner(p.Owner), From: d.stage(p.From), FromVisit: d.visit(p.FromVisit),
+			Target: d.stage(p.Target), Visit: d.visit(p.Visit), Reason: d.reason(p.Reason),
 		}
 	case typeStressDecided:
 		var p stressDecidedV1

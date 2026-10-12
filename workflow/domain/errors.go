@@ -42,6 +42,8 @@ var (
 	ErrInvalidRoute      = errors.New("the fixer can only return work to an earlier stage on its path that can change code, or design")
 	ErrMissingRoute      = errors.New("the fixer's pass must say which stage the work returns to")
 	ErrRouteOutsideFixer = errors.New("only the fixer chooses a route")
+	ErrInvalidReturn     = errors.New("work can only be returned to an earlier stage of its path that it entered")
+	ErrNotReturnable     = errors.New("work can only be returned while it is on a stage of its path, not in the fixer or at its rework limit")
 	// Stress testing.
 	ErrMissingStressDecision = errors.New("review's pass must decide whether stress testing runs")
 	ErrStressOutsideReview   = errors.New("only review decides stress testing when it submits")
@@ -142,3 +144,20 @@ func (e *RouteMissingError) Error() string {
 }
 
 func (e *RouteMissingError) Unwrap() error { return ErrMissingRoute }
+
+// InvalidReturnError names the stage the owner asked to return the work to
+// and the ones it may return to.
+type InvalidReturnError struct {
+	Target  Stage
+	Allowed []Stage // in path order
+}
+
+func (e *InvalidReturnError) Error() string {
+	names := make([]string, len(e.Allowed))
+	for i, s := range e.Allowed {
+		names[i] = s.name
+	}
+	return fmt.Sprintf("%s: %s is not one of [%s]", ErrInvalidReturn, e.Target, strings.Join(names, ", "))
+}
+
+func (e *InvalidReturnError) Unwrap() error { return ErrInvalidReturn }

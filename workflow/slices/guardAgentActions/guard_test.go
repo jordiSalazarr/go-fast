@@ -89,14 +89,15 @@ func TestRule1_OwnerOnlyCommandsAreDeniedInAnySegment(t *testing.T) {
 
 func TestRule1_EachOwnerOnlyCommandHasItsOwnReason(t *testing.T) {
 	cases := map[string]string{
-		"gf reject 'no'":                  "Only the owner can reject a submission. Ask the owner to run `gf reject \"<feedback>\"` in their own terminal.",
-		"gf extend 2":                     "Only the owner can extend a budget. Ask the owner to run `gf extend <attempts>` in their own terminal.",
-		"gf rework-extend 1":              "Only the owner can allow more rework. Ask the owner to run `gf rework-extend <n>` in their own terminal.",
-		"cd x && GF=1 gf rework-extend 2": "Only the owner can allow more rework. Ask the owner to run `gf rework-extend <n>` in their own terminal.",
-		"gf stress skip 'docs only'":      "Only the owner can override the stress-testing decision. Review decides it with `gf submit --passed --stress <include|skip> \"<reason>\"`; otherwise ask the owner to run `gf stress <include|skip> \"<reason>\"` in their own terminal.",
-		"gf abandon 'give up'":            "Only the owner can abandon work. Ask the owner to run `gf abandon \"<reason>\"` in their own terminal.",
-		"gf log accept":                   "Only the owner can accept a changed event log. Ask the owner to run `gf log accept` in their own terminal.",
-		"gf nfrs adopt --yes":             "Only the owner can adopt NFR proposals. Write them in the design's nfrs.proposed-v<visit>.json and ask the owner to run `gf nfrs adopt` in their own terminal.",
+		"gf reject 'no'":                         "Only the owner can reject a submission. Ask the owner to run `gf reject \"<feedback>\"` in their own terminal.",
+		"gf extend 2":                            "Only the owner can extend a budget. Ask the owner to run `gf extend <attempts>` in their own terminal.",
+		"gf rework-extend 1":                     "Only the owner can allow more rework. Ask the owner to run `gf rework-extend <n>` in their own terminal.",
+		"cd x && GF=1 gf rework-extend 2":        "Only the owner can allow more rework. Ask the owner to run `gf rework-extend <n>` in their own terminal.",
+		"gf stress skip 'docs only'":             "Only the owner can override the stress-testing decision. Review decides it with `gf submit --passed --stress <include|skip> \"<reason>\"`; otherwise ask the owner to run `gf stress <include|skip> \"<reason>\"` in their own terminal.",
+		"gf abandon 'give up'":                   "Only the owner can abandon work. Ask the owner to run `gf abandon \"<reason>\"` in their own terminal.",
+		"gf return specify 'specs miss refunds'": "Only the owner can send work back to an earlier stage. Ask the owner to run `gf return <stage> \"<reason>\"` in their own terminal.",
+		"gf log accept":                          "Only the owner can accept a changed event log. Ask the owner to run `gf log accept` in their own terminal.",
+		"gf nfrs adopt --yes":                    "Only the owner can adopt NFR proposals. Write them in the design's nfrs.proposed-v<visit>.json and ask the owner to run `gf nfrs adopt` in their own terminal.",
 	}
 	for command, reason := range cases {
 		assert.Equal(t, denied(reason), decide(bash(command), on(domain.StageSpecify), true, root), command)

@@ -159,6 +159,9 @@ type CurrentView struct {
 	// ReworkOf is set after the fixer returned the work to an earlier stage:
 	// every later stage visit reads the fixer's artifact first.
 	ReworkOf *ReworkOfView `json:"reworkOf"`
+	// Returned is set after the owner sent the work back to an earlier
+	// stage with `gf return`: every later stage visit reads the reason.
+	Returned *ReturnedView `json:"returned,omitempty"`
 	// Stress is set on review, integration testing and stress testing.
 	Stress *StressView `json:"stress,omitempty"`
 	// DesignProblems are what is wrong with this design visit's structured
@@ -238,6 +241,15 @@ type ReworkOfView struct {
 	Reason        string `json:"reason"`
 	Target        string `json:"target"`
 	TargetVisit   int    `json:"targetVisit"`
+}
+
+// ReturnedView is the owner sending the work back to an earlier stage.
+type ReturnedView struct {
+	From        string `json:"from"`
+	FromVisit   int    `json:"fromVisit"`
+	Target      string `json:"target"`
+	TargetVisit int    `json:"targetVisit"`
+	Reason      string `json:"reason"`
 }
 
 // Problem kinds.
@@ -331,6 +343,7 @@ func Read(log Reader, branch domain.Branch, facts Facts) (View, error) {
 	}}
 	lastVisit := map[domain.Stage]domain.Visit{}
 	var reworkOf *ReworkOfView
+	var returned *ReturnedView
 	for _, r := range history.Records(eventlog.WorkStream(work.ID())) {
 		switch e := r.Event.(type) {
 		case domain.StageEntered:
@@ -345,6 +358,10 @@ func Read(log Reader, branch domain.Branch, facts Facts) (View, error) {
 						File: domain.DesignFor(work.ID(), e.Visit).String(), Slices: map[string]int{},
 					}
 				}
+			}
+		case domain.WorkReturned:
+			returned = &ReturnedView{
+				From: e.From.String(), FromVisit: e.FromVisit.Int(), Target: e.Target.String(), TargetVisit: e.Visit.Int(), Reason: e.Reason.String(),
 			}
 		case domain.ReworkStarted:
 			reworkOf = &ReworkOfView{
@@ -404,6 +421,7 @@ func Read(log Reader, branch domain.Branch, facts Facts) (View, error) {
 	} else {
 		current.ReworkOf = reworkOf
 	}
+	current.Returned = returned
 	switch work.CurrentStage() {
 	case domain.StressDecider(), domain.StageIntegrationTesting, domain.StageStressTesting:
 		current.Stress = stressView(work, facts)
@@ -768,6 +786,9 @@ func RenderText(w io.Writer, v View) {
 	if r := c.ReworkOf; r != nil {
 		fmt.Fprintf(w, "Rework: the fixer sent the work back to %s (visit %d): %s\n", r.Target, r.TargetVisit, r.Reason)
 		fmt.Fprintf(w, "Fixer's artifact: %s\n", r.FixerArtifact)
+	}
+	if r := c.Returned; r != nil {
+		fmt.Fprintf(w, "Returned: the owner sent the work back from %s (visit %d) to %s (visit %d): %s\n", r.From, r.FromVisit, r.Target, r.TargetVisit, r.Reason)
 	}
 	if d := v.Work.Design; d != nil {
 		renderDesign(w, d)
