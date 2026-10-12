@@ -70,7 +70,12 @@ type work struct {
 	description Description
 	branch      Branch
 	inputs      []WorkInput
+	targets     []NFRID
 }
+
+// TargetNFRs are the NFRs improve-performance work must meet; none on any
+// other work.
+func (w work) TargetNFRs() []NFRID { return slices.Clone(w.targets) }
 
 func (w work) ID() WorkID { return w.id }
 
@@ -103,6 +108,10 @@ type ActiveWork interface {
 	Branch() Branch
 	Inputs() []WorkInput
 	Input(kind InputKind) (WorkInput, bool)
+	TargetNFRs() []NFRID
+	// Baseline is what measure recorded of the target NFRs before the work
+	// changed the code; none before.
+	Baseline() []NFRMeasurement
 	Path() Path
 	CurrentStage() Stage
 	CurrentVisit() Visit
@@ -133,8 +142,11 @@ type active struct {
 	visits       visits // the last visit of every stage entered
 	reworks      ReworkCount
 	reworkBudget ReworkBudget
-	stress       *stressDecision // nil until decided on this pass; never mutated
+	stress       *stressDecision  // nil until decided on this pass; never mutated
+	baseline     []NFRMeasurement // copied on write
 }
+
+func (w active) Baseline() []NFRMeasurement { return slices.Clone(w.baseline) }
 
 func (w active) Path() Path                 { return w.path }
 func (w active) CurrentStage() Stage        { return w.stage }
@@ -258,8 +270,17 @@ func (w InFixerWork) Reason() Reason   { return w.reason }
 // more rework or abandons it.
 type ReworkLimitReachedWork struct{ active }
 
-// CompletedWork went through its whole path.
-type CompletedWork struct{ work }
+// CompletedWork went through its whole path, or found nothing to improve.
+type CompletedWork struct {
+	work
+	nothingToImprove []NFRMeasurement
+}
+
+// FoundNothingToImprove is the baseline that already met every target NFR,
+// when the work completed for that reason; ok is false otherwise.
+func (w CompletedWork) FoundNothingToImprove() ([]NFRMeasurement, bool) {
+	return slices.Clone(w.nothingToImprove), w.nothingToImprove != nil
+}
 
 // AbandonedWork was abandoned by the owner.
 type AbandonedWork struct {
@@ -283,6 +304,13 @@ func (AbandonedWork) isWorkState()          {}
 // of each; an event model makes it enter event modelling. These rules apply
 // at start only: a recorded start replays as it was recorded.
 func StartWork(id WorkID, workType WorkType, description Description, branch Branch, fact ActiveWorkFact, inputs ...WorkInput) ([]WorkEvent, error) {
+	return StartWorkTargeting(id, workType, description, branch, fact, nil, nil, inputs...)
+}
+
+// StartWorkTargeting starts a work like StartWork, targeting NFRs: the
+// work type decides whether it takes them (improve-performance work needs
+// at least one), and each must be one of the repository's NFRs, nfrs.
+func StartWorkTargeting(id WorkID, workType WorkType, description Description, branch Branch, fact ActiveWorkFact, targets []NFRID, nfrs []NFR, inputs ...WorkInput) ([]WorkEvent, error) {
 	if err := requirePresent(
 		required{"work id", id}, required{"work type", workType}, required{"description", description},
 		required{"branch", branch}, required{"active work fact", fact},
@@ -312,9 +340,12 @@ func StartWork(id WorkID, workType WorkType, description Description, branch Bra
 	if err := checkInputs(path, inputs); err != nil {
 		return nil, fmt.Errorf("start work %s: %w", id, err)
 	}
+	if err := workType.checkTargets(targets, nfrs, true); err != nil {
+		return nil, fmt.Errorf("start work %s: %w", id, err)
+	}
 	first := active{work: work{inputs: inputs}, path: path}.firstStep()
 	return []WorkEvent{
-		WorkStarted{WorkID: id, WorkType: workType, PathVersion: path.version, Description: description, Branch: branch, Inputs: slices.Clone(inputs)},
+		WorkStarted{WorkID: id, WorkType: workType, PathVersion: path.version, Description: description, Branch: branch, Inputs: slices.Clone(inputs), TargetNFRs: slices.Clone(targets)},
 		StageEntered{WorkID: id, Stage: first.stage, Visit: FirstVisit(), Gate: first.gate, Budget: first.budget},
 	}, nil
 }
@@ -363,6 +394,9 @@ func (w InProgressWork) OverrideStressDecision(owner Owner, choice StressChoice)
 	}
 	if !choice.valid() {
 		return nil, fmt.Errorf("override stress decision of work %s: %w", w.id, ErrStressForced)
+	}
+	if w.path.StressMandatory() {
+		return nil, fmt.Errorf("override stress decision of work %s: %w", w.id, ErrStressMandatoryOnPath)
 	}
 	if !w.stressStillOpen() {
 		return nil, fmt.Errorf("override stress decision of work %s on %s: %w", w.id, w.stage, ErrStressDecisionClosed)
@@ -425,11 +459,11 @@ func (w InFixerWork) RouteTargets() []Stage {
 // writes artifacts only, because the code follows what it wrote: a wrong
 // design (a missing invariant, a wrong aggregate boundary, a missing slice)
 // is fixed by redesigning, a wrong event model (a missing scenario,
-// rejection or event) by remodelling, and a wrong refactor plan by
-// replanning.
+// rejection or event) by remodelling, a wrong refactor plan by replanning,
+// and a wrong diagnosis of a bottleneck by measuring again.
 func (s Stage) fixerRedoes() bool {
 	switch s {
-	case StageDesign, StageEventModelling, StagePlan:
+	case StageDesign, StageEventModelling, StagePlan, StageMeasure:
 		return true
 	}
 	return false
@@ -528,7 +562,11 @@ func RebuildWork(history []WorkEvent) (WorkState, error) {
 	if err := checkInputs(path, start.Inputs); err != nil {
 		return nil, fmt.Errorf("rebuild work %s: %w: %w", start.WorkID, ErrInconsistentHistory, err)
 	}
-	w := work{id: start.WorkID, workType: start.WorkType, description: start.Description, branch: start.Branch, inputs: slices.Clone(start.Inputs)}
+	if err := start.WorkType.checkTargets(start.TargetNFRs, nil, false); err != nil {
+		return nil, fmt.Errorf("rebuild work %s: %w: %w", start.WorkID, ErrInconsistentHistory, err)
+	}
+	w := work{id: start.WorkID, workType: start.WorkType, description: start.Description, branch: start.Branch,
+		inputs: slices.Clone(start.Inputs), targets: slices.Clone(start.TargetNFRs)}
 	// The first stage is entered together with WorkStarted; before that the
 	// work has no current stage. Entering the fixer and starting a rework
 	// are each recorded with the StageEntered they cause, which must follow.
@@ -585,6 +623,20 @@ func evolveWork(w work, path Path, state WorkState, e WorkEvent) (next WorkState
 				return nil, nil, false
 			}
 			return CompletedWork{work: w}, nil, true
+		case BaselineMeasured:
+			_, optimized := s.visits[StageOptimize]
+			if s.stage != StageMeasure || optimized || !slices.Contains(s.targets, e.NFR) ||
+				slices.ContainsFunc(s.baseline, func(m NFRMeasurement) bool { return m.NFR == e.NFR }) {
+				return nil, nil, false
+			}
+			s.baseline = append(slices.Clone(s.baseline), NFRMeasurement{NFR: e.NFR, Measurement: e.Measurement})
+			return InProgressWork{s.active}, nil, true
+		case WorkFoundNothingToImprove:
+			_, optimized := s.visits[StageOptimize]
+			if s.stage != StageMeasure || optimized || len(e.Measurements) == 0 || !sameNFRs(s.baseline, e.Measurements) || len(s.baseline) != len(s.targets) {
+				return nil, nil, false
+			}
+			return CompletedWork{work: w, nothingToImprove: slices.Clone(e.Measurements)}, nil, true
 		case StressDecided:
 			choice := StressChoice{decision: e.Decision, reason: e.Reason, forcedBy: e.ForcedBy}
 			byReview := e.Owner.isZero() && s.stage == StressDecider()
@@ -653,4 +705,9 @@ func evolveWork(w work, path Path, state WorkState, e WorkEvent) (next WorkState
 
 func abandoned(w work, e WorkAbandoned) AbandonedWork {
 	return AbandonedWork{work: w, owner: e.Owner, reason: e.Reason}
+}
+
+// sameNFRs reports whether two lists measure the same NFRs, in order.
+func sameNFRs(a, b []NFRMeasurement) bool {
+	return slices.EqualFunc(a, b, func(x, y NFRMeasurement) bool { return x.NFR == y.NFR })
 }

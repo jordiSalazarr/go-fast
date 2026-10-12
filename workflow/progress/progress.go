@@ -102,7 +102,10 @@ type WorkView struct {
 	DecisionsDir string `json:"decisionsDir,omitempty"`
 	// Inputs are the files the owner started the work from; never null.
 	Inputs []InputView `json:"inputs"`
-	Stages []StageView `json:"stages"`
+	// TargetNFRs are the NFRs improve-performance work must meet; absent on
+	// other work.
+	TargetNFRs []string    `json:"targetNfrs,omitempty"`
+	Stages     []StageView `json:"stages"`
 	// Reworks is how many times the work entered the fixer, of ReworkBudget.
 	Reworks      int `json:"reworks"`
 	ReworkBudget int `json:"reworkBudget"`
@@ -258,8 +261,9 @@ type CurrentView struct {
 
 // StressView is what the current stage needs to know about stress testing.
 type StressView struct {
-	// Mandatory are the NFRs covering what the work changed: they make
-	// stress testing mandatory, and each needs a script; never null.
+	// Mandatory are the NFRs the work targets and those covering what it
+	// changed: they make stress testing mandatory, and each needs a script;
+	// never null.
 	Mandatory []MandatoryNFRView `json:"mandatory"`
 	// Decision is this pass's stress decision; null until one is recorded.
 	Decision *StressDecisionView `json:"decision"`
@@ -430,8 +434,8 @@ func Read(log Reader, branch domain.Branch, facts Facts) (View, error) {
 	if errors.Is(err, domain.ErrNoActiveWork) {
 		return View{Schema: 1, OtherBranches: others, Next: NextView{
 			Actor:    NextAnyone,
-			Message:  fmt.Sprintf("No active work on branch %s. Start one with `gf start --type <fix-bug|new-feature|modify-behaviour> \"<description>\"`.", branch),
-			Commands: []string{`gf start --type <fix-bug|new-feature|modify-behaviour> "<description>"`},
+			Message:  fmt.Sprintf("No active work on branch %s. Start one with `gf start --type <fix-bug|new-feature|modify-behaviour|refactor|improve-performance> \"<description>\"`.", branch),
+			Commands: []string{`gf start --type <fix-bug|new-feature|modify-behaviour|refactor|improve-performance> "<description>"`},
 		}}, nil
 	}
 	if err != nil {
@@ -445,6 +449,9 @@ func Read(log Reader, branch domain.Branch, facts Facts) (View, error) {
 		Reworks:     work.Reworks().Int(), ReworkBudget: work.ReworkBudget().Int(),
 		Inputs: inputViews(work, facts),
 	}}
+	for _, id := range work.TargetNFRs() {
+		view.Work.TargetNFRs = append(view.Work.TargetNFRs, id.String())
+	}
 	lastVisit := map[domain.Stage]domain.Visit{}
 	var reworkOf *ReworkOfView
 	var returned *ReturnedView
@@ -604,6 +611,12 @@ func Read(log Reader, branch domain.Branch, facts Facts) (View, error) {
 			Actor:    NextOwner,
 			Message:  fmt.Sprintf("Escalated: budget exhausted on '%s'; the owner can run `gf extend <n>` or `gf abandon \"<reason>\"`.", stage),
 			Commands: []string{"gf extend <n>", `gf abandon "<reason>"`},
+		}
+	case stage == domain.StressDecider() && work.Path().StressMandatory():
+		view.Next = NextView{
+			Actor:    NextAgent,
+			Message:  "Work on 'review', then run `gf submit --passed` or `gf submit --failed \"<reason>\"`. Stress testing always runs on improve-performance work: there is no stress decision to make.",
+			Commands: []string{"gf submit --passed", `gf submit --failed "<reason>"`},
 		}
 	case stage == domain.StressDecider():
 		view.Next = reviewNext(current.Stress)
@@ -908,7 +921,7 @@ func stressView(work domain.ActiveWork, facts Facts) *StressView {
 		if err != nil {
 			v.Problem = "gf could not tell which NFRs this change makes mandatory: " + err.Error()
 		}
-		for _, n := range domain.Covering(nfrs, changed) {
+		for _, n := range domain.MandatoryNFRs(nfrs, changed, work.TargetNFRs()) {
 			areas := []string{}
 			for _, a := range n.Areas() {
 				areas = append(areas, a.String())

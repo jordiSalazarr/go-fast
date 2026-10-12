@@ -169,7 +169,7 @@ func TestFixBugPath_EndToEnd(t *testing.T) {
 
 	v := r.status()
 	assert.Nil(t, v.Work)
-	assert.Contains(t, v.Next.Message, "gf start --type <fix-bug|new-feature|modify-behaviour>")
+	assert.Contains(t, v.Next.Message, "gf start --type <fix-bug|new-feature|modify-behaviour|refactor|improve-performance>")
 
 	r.gf("start", "--type", "fix-bug", "login button does nothing")
 	v = r.expect("discovery", progress.AssignmentOpen, 0, 3)
@@ -309,10 +309,10 @@ func TestErrors_AreFriendlyOnTheTerminalAndDetailedInTheLog(t *testing.T) {
 	r := newRepo(t)
 
 	res := r.gfFails(nil, "approve")
-	assert.Equal(t, "There is no active work on this branch. Start one with `gf start --type <fix-bug|new-feature|modify-behaviour> \"<description>\"`.\n", res.stderr)
+	assert.Equal(t, "There is no active work on this branch. Start one with `gf start --type <fix-bug|new-feature|modify-behaviour|refactor|improve-performance> \"<description>\"`.\n", res.stderr)
 
 	res = r.gfFails(nil, "start", "--type", "feature", "x")
-	assert.Equal(t, "Unknown work type. Available: fix-bug, new-feature, modify-behaviour, refactor.\n", res.stderr)
+	assert.Equal(t, "Unknown work type. Available: fix-bug, new-feature, modify-behaviour, refactor, improve-performance.\n", res.stderr)
 
 	res = r.gfFails(nil, "submit", "--passed", "--failed", "x")
 	assert.Contains(t, res.stderr, "Choose exactly one of --passed or --failed")
@@ -324,7 +324,7 @@ func TestErrors_AreFriendlyOnTheTerminalAndDetailedInTheLog(t *testing.T) {
 	log, err := os.ReadFile(filepath.Join(r.dir, ".gofast", "gf.log"))
 	require.NoError(t, err)
 	assert.Contains(t, string(log), "approve: branch main: no active work")
-	assert.Contains(t, string(log), `work type \"feature\" (available: fix-bug, modify-behaviour, new-feature, refactor): unknown work type`)
+	assert.Contains(t, string(log), `work type \"feature\" (available: fix-bug, improve-performance, modify-behaviour, new-feature, refactor): unknown work type`)
 	assert.NotContains(t, res.stderr, "attempt budget must be", "no raw error chain on the terminal")
 }
 

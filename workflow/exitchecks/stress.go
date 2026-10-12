@@ -89,8 +89,18 @@ func (c *checkRun) nfrsMet() (finding, error) {
 			missed = append(missed, o.result.Summary())
 		}
 	}
+	compared, err := c.comparedToBaseline(run.outcomes)
+	if err != nil {
+		return finding{}, err
+	}
 	if len(missed) > 0 {
+		if compared != "" {
+			missed = append(missed, "against the baseline: "+compared)
+		}
 		return c.ran(fail("%s", strings.Join(missed, "; "))), nil
+	}
+	if compared != "" {
+		return finding{passed: true, note: "against the baseline: " + compared}, nil
 	}
 	return pass, nil
 }
@@ -241,8 +251,18 @@ func (c *checkRun) plannedScripts(run *stressRun) ([]plannedScript, error) {
 		}
 		scripts = append(scripts, plannedScript{nfr: nfrs[i], path: domain.StressScriptFor(c.visit.Work, nfrs[i].ID())})
 	}
-	for _, n := range domain.Covering(nfrs, changed) {
-		if !slices.ContainsFunc(scripts, func(s plannedScript) bool { return s.nfr.ID() == n.ID() }) {
+	for _, id := range c.visit.TargetNFRs {
+		if !slices.ContainsFunc(nfrs, func(n domain.NFR) bool { return n.ID() == id }) {
+			problem("the work targets %s, which is no longer in %s; the owner restores it", id, NFRsPath)
+		}
+	}
+	for _, n := range domain.MandatoryNFRs(nfrs, changed, c.visit.TargetNFRs) {
+		if slices.ContainsFunc(scripts, func(s plannedScript) bool { return s.nfr.ID() == n.ID() }) {
+			continue
+		}
+		if slices.Contains(c.visit.TargetNFRs, n.ID()) {
+			problem("no script for %s, which the work targets: write %s", n.ID(), domain.StressScriptFor(c.visit.Work, n.ID()))
+		} else {
 			problem("no script for %s, which this change makes mandatory: write %s", n.ID(), domain.StressScriptFor(c.visit.Work, n.ID()))
 		}
 	}

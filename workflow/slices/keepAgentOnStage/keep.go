@@ -39,6 +39,8 @@ type assignmentFacts struct {
 	state      domain.AssignmentState // nil before it is opened
 	budget     domain.AttemptBudget   // the path's budget, for an assignment not opened yet
 	artifact   domain.RepoPath
+	// stressMandatory: the work's path always runs stress testing.
+	stressMandatory bool
 }
 
 // drivingStarts: the owner ran /gofast:drive.
@@ -77,16 +79,17 @@ func subagentStop(in claudehooks.Input, facts assignmentFacts, start agentsessio
 	if in.StopHookActive {
 		return claudehooks.Tell(fmt.Sprintf("%s finished without submitting '%s'; run /gofast:drive to continue.", in.AgentType, facts.stage))
 	}
-	return claudehooks.Block(submitBeforeFinishing(facts.stage))
+	return claudehooks.Block(submitBeforeFinishing(facts.stage, facts.stressMandatory))
 }
 
 // submitBeforeFinishing says how the stage's agent submits: review's pass
-// decides stress testing, the fixer's names its route.
-func submitBeforeFinishing(stage domain.Stage) string {
-	switch stage {
-	case domain.StressDecider():
+// decides stress testing, unless the path always runs it; the fixer's names
+// its route.
+func submitBeforeFinishing(stage domain.Stage, stressMandatory bool) string {
+	switch {
+	case stage == domain.StressDecider() && !stressMandatory:
 		return "Submit before finishing: run `gf submit --passed --stress <include|skip> \"<reason>\"` or `gf submit --failed \"<reason>\"`."
-	case domain.StageFixer:
+	case stage == domain.StageFixer:
 		return "Submit before finishing: run `gf submit --passed --route <stage> \"<reason>\"` or `gf submit --failed \"<reason>\"`."
 	}
 	return "Submit before finishing: run `gf submit --passed` or `gf submit --failed \"<reason>\"`."
@@ -269,6 +272,7 @@ func loadFacts(repo claudehooks.Repo, branchOf func(root string) (domain.Branch,
 		facts = assignmentFacts{
 			readable: true, active: true, stage: work.CurrentStage(), assignment: work.CurrentAssignment(),
 			budget: work.CurrentStep().Budget(), artifact: domain.ArtifactFor(work.ID(), work.CurrentStage(), work.CurrentVisit()),
+			stressMandatory: work.Path().StressMandatory(),
 		}
 		state, version, err := history.Assignment(facts.assignment)
 		switch {

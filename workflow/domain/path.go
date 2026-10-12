@@ -67,17 +67,19 @@ var paths = map[WorkType]map[PathVersion][]PathStep{
 		{stage: StageIntegrationTesting, gate: GateAuto, budget: AttemptBudget{n: 3}},
 		{stage: StageStressTesting, gate: GateAuto, budget: AttemptBudget{n: 3}, optional: true},
 	}},
-	WorkTypeNewFeature:      {PathV1: designedPath, PathV2: featurePath},
-	WorkTypeModifyBehaviour: {PathV1: designedPath, PathV2: featurePath},
-	WorkTypeRefactor:        {PathV1: refactorPath},
+	WorkTypeNewFeature:         {PathV1: designedPath, PathV2: featurePath},
+	WorkTypeModifyBehaviour:    {PathV1: designedPath, PathV2: featurePath},
+	WorkTypeRefactor:           {PathV1: refactorPath},
+	WorkTypeImprovePerformance: {PathV1: performancePath},
 }
 
 // currentVersions are the versions new works start on.
 var currentVersions = map[WorkType]PathVersion{
-	WorkTypeFixBug:          PathV1,
-	WorkTypeNewFeature:      PathV2,
-	WorkTypeModifyBehaviour: PathV2,
-	WorkTypeRefactor:        PathV1,
+	WorkTypeFixBug:             PathV1,
+	WorkTypeNewFeature:         PathV2,
+	WorkTypeModifyBehaviour:    PathV2,
+	WorkTypeRefactor:           PathV1,
+	WorkTypeImprovePerformance: PathV1,
 }
 
 // designedPath (v1) is fix-bug's path with design between discovery and
@@ -122,6 +124,19 @@ var refactorPath = []PathStep{
 	{stage: StageReview, gate: GateAuto, budget: AttemptBudget{n: 3}},
 	{stage: StageIntegrationTesting, gate: GateAuto, budget: AttemptBudget{n: 3}},
 	{stage: StageStressTesting, gate: GateAuto, budget: AttemptBudget{n: 3}, optional: true},
+}
+
+// performancePath has no grill: the owner says what "improved" means by
+// choosing the NFRs the work targets. Measure records their baseline and
+// diagnoses the bottleneck; optimize changes the code; stress testing always
+// runs, and passes only when the targets are met.
+var performancePath = []PathStep{
+	{stage: StageDiscovery, gate: GateAuto, budget: AttemptBudget{n: 3}},
+	{stage: StageMeasure, gate: GateAuto, budget: AttemptBudget{n: 3}},
+	{stage: StageOptimize, gate: GateAuto, budget: AttemptBudget{n: 3}},
+	{stage: StageReview, gate: GateAuto, budget: AttemptBudget{n: 3}},
+	{stage: StageIntegrationTesting, gate: GateAuto, budget: AttemptBudget{n: 3}},
+	{stage: StageStressTesting, gate: GateAuto, budget: AttemptBudget{n: 3}},
 }
 
 // fixerStep is the fixer's gate and budget. The fixer is on no path.
@@ -203,6 +218,13 @@ func (p Path) stepOf(stage Stage) (PathStep, bool) {
 		return PathStep{}, false
 	}
 	return p.steps[i], true
+}
+
+// StressMandatory reports whether the path always enters stress testing: it
+// is on the path and not optional. Review then makes no stress decision.
+func (p Path) StressMandatory() bool {
+	i, ok := p.indexOf(StageStressTesting)
+	return ok && !p.steps[i].optional
 }
 
 // StressDecider is the stage whose agent decides whether stress testing

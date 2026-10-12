@@ -40,6 +40,8 @@ var (
 		[]domain.NFRID{must(domain.NewNFRID("wallet-transaction-latency")), must(domain.NewNFRID("ledger-write"))}))
 )
 
+var measured = must(domain.NewMeasurement(domain.MeasurementValues{P95: 212345678, P99: 380 * time.Millisecond, ErrorRate: 0.0125, RPS: 240.5, Requests: 14430}))
+
 func allEvents() []domain.Event {
 	return []domain.Event{
 		domain.WorkStarted{WorkID: workID, WorkType: domain.WorkTypeFixBug, Description: must(domain.NewDescription("login broken")), Branch: must(domain.NewBranch("main"))},
@@ -48,8 +50,12 @@ func allEvents() []domain.Event {
 				must(domain.NewWorkInput(domain.InputSpec, must(domain.ParseRepoPath("docs/wallets.md")), domain.HashOf([]byte("# Wallets")))),
 				must(domain.NewWorkInput(domain.InputEventModel, must(domain.ParseRepoPath("docs/wallets-board.pdf")), domain.HashOf([]byte("%PDF")))),
 			}},
+		domain.WorkStarted{WorkID: workID, WorkType: domain.WorkTypeImprovePerformance, PathVersion: domain.PathV1, Description: must(domain.NewDescription("faster posting")),
+			Branch: must(domain.NewBranch("main")), TargetNFRs: []domain.NFRID{must(domain.NewNFRID("wallet-transaction-latency"))}},
 		domain.StageEntered{WorkID: workID, Stage: domain.StageDiscovery, Visit: domain.FirstVisit(), Gate: domain.GateHuman, Budget: budget3},
 		domain.WorkCompleted{WorkID: workID},
+		domain.BaselineMeasured{WorkID: workID, NFR: must(domain.NewNFRID("wallet-transaction-latency")), Measurement: measured},
+		domain.WorkFoundNothingToImprove{WorkID: workID, Measurements: []domain.NFRMeasurement{{NFR: must(domain.NewNFRID("wallet-transaction-latency")), Measurement: measured}}},
 		domain.WorkAbandoned{WorkID: workID, Owner: owner, Reason: reason},
 		domain.FixerEntered{WorkID: workID, From: domain.StageReview, FromVisit: domain.FirstVisit(), Visit: must(domain.NewVisit(2)), Mode: domain.FixerModeCorrectness, Reason: reason},
 		domain.ReworkLimitReached{WorkID: workID, Reworks: must(domain.NewReworkCount(3))},

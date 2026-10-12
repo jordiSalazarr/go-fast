@@ -24,7 +24,7 @@ func submitting(claim domain.AgentClaim, changed ...string) func(*eventlog.Sessi
 
 func submittingChecked(claim domain.AgentClaim, checks submitforacceptance.Checks, changed ...string) func(*eventlog.Session) error {
 	return func(log *eventlog.Session) error {
-		_, err := submitforacceptance.SubmitForAcceptance(log, agent, Branch, claim, changes(changed...), defaultScope, checks)
+		_, err := submitforacceptance.SubmitForAcceptance(log, agent, Branch, claim, changes(changed...), defaultScope, checks, submitforacceptance.Baseline{})
 		return err
 	}
 }
@@ -167,7 +167,7 @@ func TestGivenAFoundAssignment_WhenItChangesBeforeSubmitting_ThenTheSubmissionCo
 			if target, err = submitforacceptance.Find(log, Branch); err != nil {
 				return err
 			}
-			checked, err = submitforacceptance.Check(target, passed, changes(), defaultScope, checksPassing, io.Discard)
+			checked, err = submitforacceptance.Check(target, passed, changes(), defaultScope, checksPassing, submitforacceptance.Baseline{}, io.Discard)
 			return err
 		}).
 		Then()
@@ -324,7 +324,7 @@ func decidingStress(decision domain.StressDecision, facts submitforacceptance.St
 		if err := submitforacceptance.CheckClaim(target, claim); err != nil {
 			return err
 		}
-		checked, err := submitforacceptance.Check(target, claim, changes(), defaultScope, checks, io.Discard)
+		checked, err := submitforacceptance.Check(target, claim, changes(), defaultScope, checks, submitforacceptance.Baseline{}, io.Discard)
 		if err != nil {
 			return err
 		}

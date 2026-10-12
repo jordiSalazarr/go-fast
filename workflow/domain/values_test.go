@@ -20,7 +20,7 @@ func TestParseWorkType(t *testing.T) {
 
 	_, err := domain.ParseWorkType("feature")
 	require.ErrorIs(t, err, domain.ErrUnknownWorkType)
-	assert.Contains(t, err.Error(), "available: fix-bug, modify-behaviour, new-feature")
+	assert.Contains(t, err.Error(), "available: fix-bug, improve-performance, modify-behaviour, new-feature, refactor")
 }
 
 type pathStep struct {

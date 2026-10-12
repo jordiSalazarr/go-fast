@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -65,6 +66,15 @@ func PlanFacts(target Target, decisions domain.DecisionsDir, acceptedPlan func(w
 // since it started.
 type StressFacts func(work domain.ActiveWork) ([]domain.NFR, domain.ChangedFiles, error)
 
+// Baseline is how a measure visit's baseline is read and kept. Measure
+// returns what the visit's latest stress run measured of the work's target
+// NFRs, judged against their targets; Keep records it once the work
+// recorded it as its baseline. The zero value records no baseline.
+type Baseline struct {
+	Measure func(target Target) ([]domain.NFRResult, error)
+	Keep    func(target Target) error
+}
+
 // Target is the open assignment a submission is for, as it was found.
 type Target struct {
 	Open    domain.Open
@@ -97,19 +107,25 @@ type Checked struct {
 	BaselineStarted bool
 	// Results are the exit checks' results; none for a failed claim.
 	Results []domain.CheckResult
+	// Baseline is what a passing measure visit measured of the target
+	// NFRs; none on any other stage.
+	Baseline []domain.NFRResult
 }
 
 // Submission is what submitting did.
 type Submission struct {
 	Assignment domain.Open
 	Events     []domain.AssignmentEvent
+	// WorkEvents are what the work recorded: a measure visit's baseline,
+	// and its completion when there is nothing to improve.
+	WorkEvents []domain.WorkEvent
 	Checked    Checked
 }
 
 // SubmitForAcceptance submits the active work's current assignment in one
 // go. The command does the same in three steps, so the checks run without
 // holding the event log.
-func SubmitForAcceptance(log Log, actor eventlog.Actor, branch domain.Branch, claim domain.AgentClaim, changes Changes, scope Scope, checks Checks) (Submission, error) {
+func SubmitForAcceptance(log Log, actor eventlog.Actor, branch domain.Branch, claim domain.AgentClaim, changes Changes, scope Scope, checks Checks, baseline Baseline) (Submission, error) {
 	target, err := Find(log, branch)
 	if err != nil {
 		return Submission{}, err
@@ -117,7 +133,7 @@ func SubmitForAcceptance(log Log, actor eventlog.Actor, branch domain.Branch, cl
 	if err := CheckClaim(target, claim); err != nil {
 		return Submission{}, err
 	}
-	checked, err := Check(target, claim, changes, scope, checks, io.Discard)
+	checked, err := Check(target, claim, changes, scope, checks, baseline, io.Discard)
 	if err != nil {
 		return Submission{}, err
 	}
@@ -174,6 +190,28 @@ func CheckClaim(target Target, claim domain.AgentClaim) error {
 	return nil
 }
 
+// MandatoryStress is review's pass on a path that always runs stress
+// testing: gf records the choice, including stress testing, forced by the
+// work's target NFRs and those covering what it changed. Review makes no
+// decision there, so a --stress decision is refused before any check
+// runs, using no attempt.
+func MandatoryStress(target Target, claim domain.AgentClaim, decided bool, facts StressFacts) (domain.AgentClaim, error) {
+	if target.Open.Stage() != domain.StressDecider() || !target.work.Path().StressMandatory() {
+		return claim, nil
+	}
+	if decided {
+		return domain.AgentClaim{}, fmt.Errorf("submit for acceptance: %w", domain.ErrStressMandatoryOnPath)
+	}
+	if !claim.Passed() {
+		return claim, nil
+	}
+	nfrs, changed, err := facts(target.work)
+	if err != nil {
+		return domain.AgentClaim{}, fmt.Errorf("submit for acceptance: %w", err)
+	}
+	return domain.ClaimStressDecided(domain.MandatoryStress(nfrs, changed, target.work.TargetNFRs())), nil
+}
+
 // DecideStress is review's pass with its stress decision. The NFRs covering
 // what the work changed make stress testing mandatory, so a skip is then
 // refused (domain.StressForcedError) before any check runs, using no
@@ -196,7 +234,7 @@ func DecideStress(target Target, decision domain.StressDecision, reason domain.R
 // Check finds the files the visit changed and, when the agent claims a
 // pass, runs the stage's exit checks. A failed claim is the agent's own
 // verdict, so its checks are not run.
-func Check(target Target, claim domain.AgentClaim, changes Changes, scope Scope, checks Checks, progress io.Writer) (Checked, error) {
+func Check(target Target, claim domain.AgentClaim, changes Changes, scope Scope, checks Checks, baseline Baseline, progress io.Writer) (Checked, error) {
 	open := target.Open
 	changed, started, err := changes(open.ID())
 	if err != nil {
@@ -217,9 +255,16 @@ func Check(target Target, claim domain.AgentClaim, changes Changes, scope Scope,
 		EventModel: target.eventModelVisit, EventModelEnd: target.eventModelEnd, HasEventModel: hasEventModel(target.work),
 		Grill: target.grillVisit, GrillEnd: target.grillEnd, Plan: target.planVisit, PlanEnd: target.planEnd,
 		Changed: changed, BaselineStarted: started, FirstAssignment: target.work.FirstAssignment(),
+		TargetNFRs: target.work.TargetNFRs(),
 	}, progress)
 	if err != nil {
 		return Checked{}, fmt.Errorf("submit for acceptance: %w", err)
+	}
+	allPassed := !slices.ContainsFunc(checked.Results, func(r domain.CheckResult) bool { return !r.Passed() })
+	if open.Stage() == domain.StageMeasure && allPassed && baseline.Measure != nil {
+		if checked.Baseline, err = baseline.Measure(target); err != nil {
+			return Checked{}, fmt.Errorf("submit for acceptance: %w", err)
+		}
 	}
 	return checked, nil
 }
@@ -246,10 +291,34 @@ func Submit(log Log, actor eventlog.Actor, target Target, claim domain.AgentClai
 	if err := log.Append(eventlog.AssignmentStream(open.ID()), target.version, actor, eventlog.Events(events)...); err != nil {
 		return Submission{}, fmt.Errorf("submit for acceptance: %w", err)
 	}
-	return Submission{Assignment: open, Events: events, Checked: checked}, nil
+	submitted := Submission{Assignment: open, Events: events, Checked: checked}
+	accepted := slices.ContainsFunc(events, func(e domain.AssignmentEvent) bool { _, ok := e.(domain.AssignmentAccepted); return ok })
+	if !accepted || len(checked.Baseline) == 0 {
+		return submitted, nil
+	}
+	// Measure was accepted: the work records the baseline it measured.
+	measuring, ok := target.work.(domain.InProgressWork)
+	if !ok {
+		return submitted, nil
+	}
+	if submitted.WorkEvents, err = measuring.RecordBaseline(checked.Baseline); err != nil {
+		return Submission{}, fmt.Errorf("submit for acceptance: %w", err)
+	}
+	if len(submitted.WorkEvents) == 0 {
+		return submitted, nil
+	}
+	records, err := log.ReadAll()
+	if err != nil {
+		return Submission{}, fmt.Errorf("submit for acceptance: %w", err)
+	}
+	stream := eventlog.WorkStream(open.Work())
+	if err := log.Append(stream, eventlog.NewHistory(records).Version(stream), actor, eventlog.Events(submitted.WorkEvents)...); err != nil {
+		return Submission{}, fmt.Errorf("submit for acceptance: %w", err)
+	}
+	return submitted, nil
 }
 
-func NewCommand(openStore func() (*eventlog.Store, error), automate automations.Runner, resolveCaller func() (caller.Caller, error), currentBranch func() (domain.Branch, error), changes Changes, scope Scope, checks Checks, stressFacts StressFacts) *cobra.Command {
+func NewCommand(openStore func() (*eventlog.Store, error), automate automations.Runner, resolveCaller func() (caller.Caller, error), currentBranch func() (domain.Branch, error), changes Changes, scope Scope, checks Checks, stressFacts StressFacts, baseline Baseline) *cobra.Command {
 	var passed bool
 	var failed, routeTo, stress string
 	cmd := &cobra.Command{
@@ -332,6 +401,12 @@ func NewCommand(openStore func() (*eventlog.Store, error), automate automations.
 					if target, err = Find(s, branch); err != nil {
 						return err
 					}
+					if target.work.Path().StressMandatory() {
+						if claim, err = MandatoryStress(target, claim, decision != (domain.StressDecision{}), stressFacts); err != nil {
+							return err
+						}
+						return CheckClaim(target, claim)
+					}
 					if decision != (domain.StressDecision{}) {
 						reason, err := domain.NewReason(args[0])
 						if err != nil {
@@ -351,7 +426,7 @@ func NewCommand(openStore func() (*eventlog.Store, error), automate automations.
 			if claim.Passed() {
 				fmt.Fprintf(out, "Running the exit checks of '%s': %s\n", target.Open.Stage(), checkNames(target.Open.Stage(), target.work.Path()))
 			}
-			checked, err := Check(target, claim, changes, scope, checks, out)
+			checked, err := Check(target, claim, changes, scope, checks, baseline, out)
 			if err != nil {
 				return err
 			}
@@ -365,6 +440,11 @@ func NewCommand(openStore func() (*eventlog.Store, error), automate automations.
 			if err != nil {
 				return err
 			}
+			if recordsBaseline(submitted.WorkEvents) && baseline.Keep != nil {
+				if err := baseline.Keep(target); err != nil {
+					return err
+				}
+			}
 			describe(out, submitted)
 			return nil
 		},
@@ -374,6 +454,10 @@ func NewCommand(openStore func() (*eventlog.Store, error), automate automations.
 	cmd.Flags().StringVar(&routeTo, "route", "", "fixer only: the earlier stage the work returns to; the reason follows")
 	cmd.Flags().StringVar(&stress, "stress", "", "review only: include or skip stress testing; the reason follows")
 	return cmd
+}
+
+func recordsBaseline(events []domain.WorkEvent) bool {
+	return slices.ContainsFunc(events, func(e domain.WorkEvent) bool { _, ok := e.(domain.BaselineMeasured); return ok })
 }
 
 func checkNames(stage domain.Stage, path domain.Path) string {
@@ -413,6 +497,15 @@ func describe(out io.Writer, submitted Submission) {
 				continue
 			}
 			fmt.Fprintf(out, "'%s' accepted. Run `gf status` to see what happens next.\n", stage)
+		}
+	}
+	for _, e := range submitted.WorkEvents {
+		switch e := e.(type) {
+		case domain.BaselineMeasured:
+			fmt.Fprintf(out, "Baseline of %s: %s.\n", e.NFR, e.Measurement.Describe())
+		case domain.WorkFoundNothingToImprove:
+			fmt.Fprintln(out, "Every target NFR already meets its targets at baseline: there is nothing to improve, so the work is complete. "+
+				"To ask for more, tighten the NFR with `gf nfrs adopt` on a later design, or start new work with a stricter NFR.")
 		}
 	}
 }

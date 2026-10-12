@@ -33,6 +33,7 @@ func friendly(err error, cmd *cobra.Command, ran bool) string {
 		forced    *domain.StressForcedError
 		back      *domain.InvalidReturnError
 		input     *startwork.InputError
+		target    *domain.UnknownTargetNFRError
 	)
 	switch {
 	case errors.Is(err, gitbranch.ErrDetachedHead):
@@ -45,6 +46,18 @@ func friendly(err error, cmd *cobra.Command, ran bool) string {
 		return input.Error()
 	case errors.Is(err, domain.ErrInputNotAccepted), errors.Is(err, domain.ErrEventModelNotOnPath):
 		return "Inputs (--spec, --event-model) are for feature work: new-feature or modify-behaviour."
+	case errors.Is(err, domain.ErrTargetNFRsRequired):
+		return "Improve-performance work targets the NFRs it must meet: `gf start --type improve-performance --nfr <id> [--nfr <id>…] \"<description>\"`, with ids from .gofast/nfrs.json (`gf checks` lists them)."
+	case errors.Is(err, domain.ErrTargetNFRsNotAccepted):
+		return "Target NFRs (--nfr) are for improve-performance work."
+	case errors.As(err, &target) && len(target.Known) == 0:
+		return fmt.Sprintf("The NFR '%s' is not in .gofast/nfrs.json, which lists none. The owner adds it first; `gf checks` shows the NFRs.", target.NFR)
+	case errors.As(err, &target):
+		return fmt.Sprintf("The NFR '%s' is not in .gofast/nfrs.json. Its NFRs: %s.", target.NFR, target.KnownIDs())
+	case errors.Is(err, domain.ErrStressMandatoryOnPath) && cmd.Name() == "stress":
+		return "Improve-performance work always runs stress testing against its target NFRs: there is no stress decision to change."
+	case errors.Is(err, domain.ErrStressMandatoryOnPath):
+		return "Improve-performance work always runs stress testing: review makes no stress decision. Submit with `gf submit --passed` or `gf submit --failed \"<reason>\"`. No attempt was used."
 	case errors.Is(err, domain.ErrSpecNotMarkdown):
 		return "The spec must be a markdown file (.md)."
 	case errors.As(err, &active):
@@ -58,7 +71,7 @@ func friendly(err error, cmd *cobra.Command, ran bool) string {
 		return fmt.Sprintf("Branch %s has more than one work in progress (%s), usually after a bad merge. Resolve .gofast/events.jsonl by hand. %s",
 			conflict.Branch, strings.Join(ids, ", "), seeLog)
 	case errors.Is(err, domain.ErrNoActiveWork):
-		return "There is no active work on this branch. Start one with `gf start --type <fix-bug|new-feature|modify-behaviour> \"<description>\"`."
+		return "There is no active work on this branch. Start one with `gf start --type <fix-bug|new-feature|modify-behaviour|refactor|improve-performance> \"<description>\"`."
 	case errors.Is(err, domain.ErrNotAwaitingSubmission):
 		return "There is nothing to submit right now. Run `gf status` to see what happens next."
 	case errors.Is(err, domain.ErrNotAwaitingApproval):
@@ -112,7 +125,7 @@ func friendly(err error, cmd *cobra.Command, ran bool) string {
 		}
 		return fmt.Sprintf("Unknown work type. Available: %s.", strings.Join(names, ", "))
 	case errors.Is(err, domain.ErrEmptyDescription):
-		return "Describe the work: `gf start --type <fix-bug|new-feature|modify-behaviour> \"<description>\"`."
+		return "Describe the work: `gf start --type <fix-bug|new-feature|modify-behaviour|refactor|improve-performance> \"<description>\"`."
 	case errors.Is(err, domain.ErrEmptyFeedback):
 		return "Say what needs to change: `gf reject \"<feedback>\"`."
 	case errors.Is(err, domain.ErrEmptyReason):

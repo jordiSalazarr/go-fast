@@ -81,6 +81,13 @@ var (
 	// CheckTestsUntouched: no test file that existed when the stage visit
 	// began was modified or deleted. New test files are allowed.
 	CheckTestsUntouched = ExitCheck{name: "tests-untouched"}
+	// CheckBaselineRecorded: measure's run measured every target NFR, so
+	// the work has a baseline to improve on.
+	CheckBaselineRecorded = ExitCheck{name: "baseline-recorded"}
+	// CheckDiagnosisWritten: measure's artifact has a non-empty
+	// `## Bottleneck` section that references at least one file in the
+	// work's artifact directory: a profile or a measurement.
+	CheckDiagnosisWritten = ExitCheck{name: "diagnosis-written"}
 )
 
 // ExitChecks lists every exit check.
@@ -91,6 +98,7 @@ func ExitChecks() []ExitCheck {
 		CheckStressScriptsValid, CheckNFRsMet, CheckDesignValid, CheckNFRProposalsValid, CheckBehaviourDelta,
 		CheckSpecsCoverSlices, CheckEventModelValid, CheckGrillValid, CheckSpecsCoverScenarios,
 		CheckPlanValid, CheckCharacterizationPasses, CheckCoverageSufficient, CheckTestsUntouched,
+		CheckBaselineRecorded, CheckDiagnosisWritten,
 	}
 }
 
@@ -133,6 +141,11 @@ func (s Stage) checks() []ExitCheck {
 		return []ExitCheck{CheckArtifactWritten, CheckPlanValid}
 	case StageCharacterize:
 		return []ExitCheck{CheckArtifactWritten, CheckCharacterizationPasses, CheckCoverageSufficient}
+	case StageMeasure:
+		return []ExitCheck{CheckArtifactWritten, CheckStressScriptsValid, CheckBaselineRecorded, CheckDiagnosisWritten}
+	case StageOptimize:
+		// Performance work changes no behaviour: every existing test stays.
+		return []ExitCheck{CheckArtifactWritten, CheckBuildPasses, CheckFormatted, CheckTestsUntouched, CheckSuitePasses}
 	case StageSpecify:
 		return []ExitCheck{CheckArtifactWritten, CheckSpecsFail}
 	case StageImplement:
@@ -392,7 +405,8 @@ func ClassifyFailure(outcome ExitCheckOutcome) (kind FailureKind, ok bool) {
 func (c ExitCheck) judgesStageWork() bool {
 	switch c {
 	case CheckArtifactWritten, CheckStressScriptsValid, CheckDesignValid, CheckNFRProposalsValid, CheckBehaviourDelta,
-		CheckSpecsCoverSlices, CheckEventModelValid, CheckGrillValid, CheckSpecsCoverScenarios, CheckPlanValid:
+		CheckSpecsCoverSlices, CheckEventModelValid, CheckGrillValid, CheckSpecsCoverScenarios, CheckPlanValid,
+		CheckBaselineRecorded, CheckDiagnosisWritten:
 		return true
 	}
 	return false

@@ -65,7 +65,7 @@ func TestTheStressDecider_IsOnEveryPathBeforeStressTesting_WithAnAutoGate(t *tes
 				assert.Equal(t, domain.GateAuto, s.Gate(), path.WorkType().String())
 			}
 			if s.Stage() == domain.StageStressTesting {
-				assert.True(t, s.Optional())
+				assert.Equal(t, !path.StressMandatory(), s.Optional(), "%s: stress testing is optional unless the path always runs it", path.WorkType())
 				assert.True(t, decider >= 0 && decider < i, "%s %s: stress testing comes before the stress decider", path.WorkType(), path.Version())
 			}
 		}

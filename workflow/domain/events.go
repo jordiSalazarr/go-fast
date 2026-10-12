@@ -21,7 +21,8 @@ type AssignmentEvent interface {
 // WorkStarted records the version of its type's path the work follows; a
 // zero PathVersion (works started before paths had versions) is v1. Inputs
 // are the files the owner started it from; an event model among them
-// decides that the work enters event modelling.
+// decides that the work enters event modelling. TargetNFRs are the NFRs
+// improve-performance work must meet; none on any other work.
 type WorkStarted struct {
 	WorkID      WorkID
 	WorkType    WorkType
@@ -29,6 +30,7 @@ type WorkStarted struct {
 	Description Description
 	Branch      Branch
 	Inputs      []WorkInput
+	TargetNFRs  []NFRID
 }
 
 // StageEntered carries the gate and budget so an assignment never needs to
@@ -104,6 +106,21 @@ type StressDecided struct {
 
 type WorkCompleted struct {
 	WorkID WorkID
+}
+
+// BaselineMeasured: measure measured a target NFR before the work changed
+// the code; one per target NFR.
+type BaselineMeasured struct {
+	WorkID      WorkID
+	NFR         NFRID
+	Measurement Measurement
+}
+
+// WorkFoundNothingToImprove: every target NFR already met its targets at
+// baseline, so the work completed instead of entering optimize.
+type WorkFoundNothingToImprove struct {
+	WorkID       WorkID
+	Measurements []NFRMeasurement
 }
 
 type WorkAbandoned struct {
@@ -182,36 +199,40 @@ type AssignmentCancelled struct {
 	Reason       Reason
 }
 
-func (WorkStarted) isEvent()             {}
-func (StageEntered) isEvent()            {}
-func (WorkCompleted) isEvent()           {}
-func (WorkAbandoned) isEvent()           {}
-func (FixerEntered) isEvent()            {}
-func (ReworkLimitReached) isEvent()      {}
-func (ReworkStarted) isEvent()           {}
-func (ReworkBudgetExtended) isEvent()    {}
-func (WorkReturned) isEvent()            {}
-func (StressDecided) isEvent()           {}
-func (AssignmentOpened) isEvent()        {}
-func (AttemptFailed) isEvent()           {}
-func (SubmittedForApproval) isEvent()    {}
-func (AssignmentRejected) isEvent()      {}
-func (AssignmentEscalated) isEvent()     {}
-func (BudgetExtended) isEvent()          {}
-func (AssignmentAccepted) isEvent()      {}
-func (AssignmentCancelled) isEvent()     {}
-func (AssignmentHandedToFixer) isEvent() {}
+func (WorkStarted) isEvent()               {}
+func (StageEntered) isEvent()              {}
+func (WorkCompleted) isEvent()             {}
+func (BaselineMeasured) isEvent()          {}
+func (WorkFoundNothingToImprove) isEvent() {}
+func (WorkAbandoned) isEvent()             {}
+func (FixerEntered) isEvent()              {}
+func (ReworkLimitReached) isEvent()        {}
+func (ReworkStarted) isEvent()             {}
+func (ReworkBudgetExtended) isEvent()      {}
+func (WorkReturned) isEvent()              {}
+func (StressDecided) isEvent()             {}
+func (AssignmentOpened) isEvent()          {}
+func (AttemptFailed) isEvent()             {}
+func (SubmittedForApproval) isEvent()      {}
+func (AssignmentRejected) isEvent()        {}
+func (AssignmentEscalated) isEvent()       {}
+func (BudgetExtended) isEvent()            {}
+func (AssignmentAccepted) isEvent()        {}
+func (AssignmentCancelled) isEvent()       {}
+func (AssignmentHandedToFixer) isEvent()   {}
 
-func (e WorkStarted) workID() WorkID          { return e.WorkID }
-func (e StageEntered) workID() WorkID         { return e.WorkID }
-func (e WorkCompleted) workID() WorkID        { return e.WorkID }
-func (e WorkAbandoned) workID() WorkID        { return e.WorkID }
-func (e FixerEntered) workID() WorkID         { return e.WorkID }
-func (e ReworkLimitReached) workID() WorkID   { return e.WorkID }
-func (e ReworkStarted) workID() WorkID        { return e.WorkID }
-func (e ReworkBudgetExtended) workID() WorkID { return e.WorkID }
-func (e WorkReturned) workID() WorkID         { return e.WorkID }
-func (e StressDecided) workID() WorkID        { return e.WorkID }
+func (e WorkStarted) workID() WorkID               { return e.WorkID }
+func (e StageEntered) workID() WorkID              { return e.WorkID }
+func (e WorkCompleted) workID() WorkID             { return e.WorkID }
+func (e BaselineMeasured) workID() WorkID          { return e.WorkID }
+func (e WorkFoundNothingToImprove) workID() WorkID { return e.WorkID }
+func (e WorkAbandoned) workID() WorkID             { return e.WorkID }
+func (e FixerEntered) workID() WorkID              { return e.WorkID }
+func (e ReworkLimitReached) workID() WorkID        { return e.WorkID }
+func (e ReworkStarted) workID() WorkID             { return e.WorkID }
+func (e ReworkBudgetExtended) workID() WorkID      { return e.WorkID }
+func (e WorkReturned) workID() WorkID              { return e.WorkID }
+func (e StressDecided) workID() WorkID             { return e.WorkID }
 
 func (e AssignmentOpened) assignmentID() AssignmentID        { return e.AssignmentID }
 func (e AttemptFailed) assignmentID() AssignmentID           { return e.AssignmentID }

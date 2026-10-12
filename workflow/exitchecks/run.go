@@ -54,6 +54,9 @@ type Visit struct {
 	// stage visit entered when it was accepted. Zero when the work has none.
 	Grill    domain.Visit
 	GrillEnd domain.AssignmentID
+	// TargetNFRs are the NFRs improve-performance work must meet: every
+	// stress run scripts them.
+	TargetNFRs []domain.NFRID
 	// Plan is the work's latest accepted refactor plan visit, and PlanEnd
 	// the stage visit entered when it was accepted. Zero when the work has
 	// none.
@@ -214,6 +217,10 @@ func (c *checkRun) check(check domain.ExitCheck) (finding, error) {
 		return c.coverageSufficient()
 	case domain.CheckTestsUntouched:
 		return c.testsUntouched()
+	case domain.CheckBaselineRecorded:
+		return c.baselineRecorded()
+	case domain.CheckDiagnosisWritten:
+		return c.diagnosisWritten()
 	}
 	return finding{}, fmt.Errorf("gf does not know how to run %q", check)
 }

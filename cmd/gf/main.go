@@ -84,8 +84,8 @@ func (a *app) rootCommand() *cobra.Command {
 	}
 	root.PersistentFlags().StringVar(&a.dir, "dir", "", "repository root (default: the git repository containing the working directory)")
 	root.AddCommand(
-		startwork.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch, a.repositoryRoot),
-		submitforacceptance.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch, a.changedFiles, a.scopeFacts, a.runChecks, a.stressFacts),
+		startwork.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch, a.repositoryRoot, exitchecks.LoadNFRs),
+		submitforacceptance.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch, a.changedFiles, a.scopeFacts, a.runChecks, a.stressFacts, a.baseline()),
 		approve.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch),
 		reject.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch),
 		extendbudget.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch),
@@ -264,6 +264,24 @@ func (a *app) scopeFacts(target submitforacceptance.Target) (domain.ScopeFacts, 
 	return submitforacceptance.PlanFacts(target, dir, func(work domain.WorkID, visit domain.Visit, end domain.AssignmentID) (domain.RefactorPlan, error) {
 		return exitchecks.AcceptedRefactorPlan(a.root, work, visit, end)
 	})
+}
+
+// baseline reads what a measure visit measured, and keeps it once the
+// work recorded it as its baseline.
+func (a *app) baseline() submitforacceptance.Baseline {
+	return submitforacceptance.Baseline{
+		Measure: func(target submitforacceptance.Target) ([]domain.NFRResult, error) {
+			results, _, err := exitchecks.MeasuredBaseline(a.root, target.Open.ID(), target.Work().TargetNFRs())
+			return results, err
+		},
+		Keep: func(target submitforacceptance.Target) error {
+			_, kept, err := exitchecks.MeasuredBaseline(a.root, target.Open.ID(), target.Work().TargetNFRs())
+			if err != nil {
+				return err
+			}
+			return exitchecks.WriteBaseline(a.root, target.Open.Work(), kept)
+		},
+	}
 }
 
 // stressFacts reads the repository's NFRs and the files the work changed

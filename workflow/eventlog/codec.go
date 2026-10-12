@@ -16,25 +16,27 @@ var errUnknownEvent = errors.New("unknown event type")
 
 // Stable event names. Never rename: they are stored in committed logs.
 const (
-	typeWorkStarted             = "WorkStarted"
-	typeStageEntered            = "StageEntered"
-	typeWorkCompleted           = "WorkCompleted"
-	typeWorkAbandoned           = "WorkAbandoned"
-	typeAssignmentOpened        = "AssignmentOpened"
-	typeAttemptFailed           = "AttemptFailed"
-	typeSubmittedForApproval    = "SubmittedForApproval"
-	typeAssignmentRejected      = "AssignmentRejected"
-	typeAssignmentEscalated     = "AssignmentEscalated"
-	typeBudgetExtended          = "BudgetExtended"
-	typeAssignmentAccepted      = "AssignmentAccepted"
-	typeAssignmentCancelled     = "AssignmentCancelled"
-	typeAssignmentHandedToFixer = "AssignmentHandedToFixer"
-	typeFixerEntered            = "FixerEntered"
-	typeReworkLimitReached      = "ReworkLimitReached"
-	typeReworkStarted           = "ReworkStarted"
-	typeReworkBudgetExtended    = "ReworkBudgetExtended"
-	typeStressDecided           = "StressDecided"
-	typeWorkReturned            = "WorkReturned"
+	typeWorkStarted               = "WorkStarted"
+	typeStageEntered              = "StageEntered"
+	typeWorkCompleted             = "WorkCompleted"
+	typeWorkAbandoned             = "WorkAbandoned"
+	typeAssignmentOpened          = "AssignmentOpened"
+	typeAttemptFailed             = "AttemptFailed"
+	typeSubmittedForApproval      = "SubmittedForApproval"
+	typeAssignmentRejected        = "AssignmentRejected"
+	typeAssignmentEscalated       = "AssignmentEscalated"
+	typeBudgetExtended            = "BudgetExtended"
+	typeAssignmentAccepted        = "AssignmentAccepted"
+	typeAssignmentCancelled       = "AssignmentCancelled"
+	typeAssignmentHandedToFixer   = "AssignmentHandedToFixer"
+	typeFixerEntered              = "FixerEntered"
+	typeReworkLimitReached        = "ReworkLimitReached"
+	typeReworkStarted             = "ReworkStarted"
+	typeReworkBudgetExtended      = "ReworkBudgetExtended"
+	typeStressDecided             = "StressDecided"
+	typeWorkReturned              = "WorkReturned"
+	typeBaselineMeasured          = "BaselineMeasured"
+	typeWorkFoundNothingToImprove = "WorkFoundNothingToImprove"
 )
 
 type envelope struct {
@@ -71,6 +73,33 @@ type workStartedV1 struct {
 	Branch      string `json:"branch"` // required; logs from before work belonged to a branch are not supported
 	// The files the owner started the work from; absent when there are none.
 	Inputs []workInputV1 `json:"inputs,omitempty"`
+	// The NFRs improve-performance work must meet; absent on other work.
+	TargetNFRs []string `json:"targetNfrs,omitempty"`
+}
+
+// measurementV1 is a measurement, latencies in nanoseconds.
+type measurementV1 struct {
+	P95Ns     int64   `json:"p95Ns"`
+	P99Ns     int64   `json:"p99Ns"`
+	ErrorRate float64 `json:"errorRate"`
+	RPS       float64 `json:"rps"`
+	Requests  int     `json:"requests"`
+}
+
+type baselineMeasuredV1 struct {
+	WorkID      string        `json:"workId"`
+	NFR         string        `json:"nfr"`
+	Measurement measurementV1 `json:"measurement"`
+}
+
+type nfrMeasurementV1 struct {
+	NFR         string        `json:"nfr"`
+	Measurement measurementV1 `json:"measurement"`
+}
+
+type workFoundNothingToImproveV1 struct {
+	WorkID       string             `json:"workId"`
+	Measurements []nfrMeasurementV1 `json:"measurements"`
 }
 
 type workInputV1 struct {
@@ -263,7 +292,18 @@ func encodeEvent(e domain.Event) (eventType string, stream Stream, payload any, 
 		return typeWorkStarted, WorkStream(e.WorkID), workStartedV1{
 			WorkID: e.WorkID.String(), WorkType: e.WorkType.String(), PathVersion: e.PathVersion.Int(),
 			Description: e.Description.String(), Branch: e.Branch.String(), Inputs: encodeInputs(e.Inputs),
+			TargetNFRs: nfrIDs(e.TargetNFRs),
 		}, nil
+	case domain.BaselineMeasured:
+		return typeBaselineMeasured, WorkStream(e.WorkID), baselineMeasuredV1{
+			WorkID: e.WorkID.String(), NFR: e.NFR.String(), Measurement: encodeMeasurement(e.Measurement),
+		}, nil
+	case domain.WorkFoundNothingToImprove:
+		p := workFoundNothingToImproveV1{WorkID: e.WorkID.String()}
+		for _, m := range e.Measurements {
+			p.Measurements = append(p.Measurements, nfrMeasurementV1{NFR: m.NFR.String(), Measurement: encodeMeasurement(m.Measurement)})
+		}
+		return typeWorkFoundNothingToImprove, WorkStream(e.WorkID), p, nil
 	case domain.StageEntered:
 		return typeStageEntered, WorkStream(e.WorkID), stageEnteredV1{
 			WorkID: e.WorkID.String(), Stage: e.Stage.String(), Visit: e.Visit.Int(),
@@ -361,7 +401,20 @@ func decodeEvent(eventType string, payload json.RawMessage) (domain.Event, Strea
 		event = domain.WorkStarted{
 			WorkID: d.workID(p.WorkID), WorkType: d.workType(p.WorkType), PathVersion: d.pathVersion(p.PathVersion),
 			Description: d.description(p.Description), Branch: d.branch(p.Branch), Inputs: d.inputs(p.Inputs),
+			TargetNFRs: d.nfrIDs(p.TargetNFRs),
 		}
+	case typeBaselineMeasured:
+		var p baselineMeasuredV1
+		d.unmarshal(payload, &p)
+		event = domain.BaselineMeasured{WorkID: d.workID(p.WorkID), NFR: d.nfrID(p.NFR), Measurement: d.measurement(p.Measurement)}
+	case typeWorkFoundNothingToImprove:
+		var p workFoundNothingToImproveV1
+		d.unmarshal(payload, &p)
+		found := domain.WorkFoundNothingToImprove{WorkID: d.workID(p.WorkID)}
+		for _, m := range p.Measurements {
+			found.Measurements = append(found.Measurements, domain.NFRMeasurement{NFR: d.nfrID(m.NFR), Measurement: d.measurement(m.Measurement)})
+		}
+		event = found
 	case typeStageEntered:
 		var p stageEnteredV1
 		d.unmarshal(payload, &p)
@@ -507,6 +560,11 @@ func nfrIDs(ids []domain.NFRID) []string {
 	return out
 }
 
+func encodeMeasurement(m domain.Measurement) measurementV1 {
+	v := m.Values()
+	return measurementV1{P95Ns: int64(v.P95), P99Ns: int64(v.P99), ErrorRate: v.ErrorRate, RPS: v.RPS, Requests: v.Requests}
+}
+
 func strictUnmarshal(data []byte, v any) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
@@ -604,6 +662,28 @@ func (d *decoder) stressChoice(decision, reason string, forcedBy []string) domai
 		ids = append(ids, id)
 	}
 	v, err := domain.NewStressChoice(dec, d.reason(reason), ids)
+	d.keep(err)
+	return v
+}
+
+func (d *decoder) nfrID(s string) domain.NFRID {
+	v, err := domain.NewNFRID(s)
+	d.keep(err)
+	return v
+}
+
+func (d *decoder) nfrIDs(in []string) []domain.NFRID {
+	var out []domain.NFRID
+	for _, s := range in {
+		out = append(out, d.nfrID(s))
+	}
+	return out
+}
+
+func (d *decoder) measurement(m measurementV1) domain.Measurement {
+	v, err := domain.NewMeasurement(domain.MeasurementValues{
+		P95: time.Duration(m.P95Ns), P99: time.Duration(m.P99Ns), ErrorRate: m.ErrorRate, RPS: m.RPS, Requests: m.Requests,
+	})
 	d.keep(err)
 	return v
 }

@@ -61,11 +61,14 @@ var (
 	// does: the owner settles what must not change, approves a plan, and the
 	// code moves only once its behaviour is pinned by tests.
 	WorkTypeRefactor = WorkType{name: "refactor"}
+	// WorkTypeImprovePerformance makes code meet the NFRs the owner targets,
+	// measured before and after, without changing what it does.
+	WorkTypeImprovePerformance = WorkType{name: "improve-performance"}
 )
 
 // WorkTypes lists every known work type.
 func WorkTypes() []WorkType {
-	return []WorkType{WorkTypeFixBug, WorkTypeNewFeature, WorkTypeModifyBehaviour, WorkTypeRefactor}
+	return []WorkType{WorkTypeFixBug, WorkTypeNewFeature, WorkTypeModifyBehaviour, WorkTypeRefactor, WorkTypeImprovePerformance}
 }
 
 func ParseWorkType(s string) (WorkType, error) {
@@ -100,13 +103,20 @@ var (
 	StagePlan = Stage{name: "plan"}
 	// StageCharacterize pins the current behaviour of the code about to move
 	// with passing tests, before any of it moves.
-	StageCharacterize       = Stage{name: "characterize"}
-	StageSpecify            = Stage{name: "specify"}
-	StageImplement          = Stage{name: "implement"}
+	StageCharacterize = Stage{name: "characterize"}
+	// StageMeasure records a baseline of the work's target NFRs and
+	// diagnoses the bottleneck. It writes artifacts only.
+	StageMeasure   = Stage{name: "measure"}
+	StageSpecify   = Stage{name: "specify"}
+	StageImplement = Stage{name: "implement"}
+	// StageOptimize changes the code to meet the target NFRs, guided by
+	// measure's diagnosis.
+	StageOptimize           = Stage{name: "optimize"}
 	StageReview             = Stage{name: "review"}
 	StageIntegrationTesting = Stage{name: "integration-testing"}
-	// StageStressTesting is optional: entered only when the work decided to
-	// include it.
+	// StageStressTesting is optional where review decides it: entered only
+	// when the work decided to include it. On improve-performance work it is
+	// mandatory.
 	StageStressTesting = Stage{name: "stress-testing"}
 	// StageFixer is on no path: a work enters it only when a stage that
 	// checks code hands it over, and leaves it for an earlier stage.
@@ -114,8 +124,8 @@ var (
 )
 
 func Stages() []Stage {
-	return []Stage{StageEventModelling, StageGrill, StageDiscovery, StageDesign, StagePlan, StageCharacterize,
-		StageSpecify, StageImplement, StageReview, StageIntegrationTesting, StageStressTesting, StageFixer}
+	return []Stage{StageEventModelling, StageGrill, StageDiscovery, StageDesign, StagePlan, StageCharacterize, StageMeasure,
+		StageSpecify, StageImplement, StageOptimize, StageReview, StageIntegrationTesting, StageStressTesting, StageFixer}
 }
 
 func ParseStage(s string) (Stage, error) {

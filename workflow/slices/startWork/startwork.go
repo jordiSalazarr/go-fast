@@ -27,6 +27,12 @@ type Log interface {
 // StartWork starts a work on a branch, from its inputs, unless the branch
 // has active work.
 func StartWork(log Log, actor eventlog.Actor, branch domain.Branch, id domain.WorkID, workType domain.WorkType, description domain.Description, inputs ...domain.WorkInput) ([]domain.WorkEvent, error) {
+	return StartWorkTargeting(log, actor, branch, id, workType, description, nil, nil, inputs...)
+}
+
+// StartWorkTargeting starts a work like StartWork, targeting NFRs of the
+// repository's, nfrs: improve-performance work needs at least one.
+func StartWorkTargeting(log Log, actor eventlog.Actor, branch domain.Branch, id domain.WorkID, workType domain.WorkType, description domain.Description, targets []domain.NFRID, nfrs []domain.NFR, inputs ...domain.WorkInput) ([]domain.WorkEvent, error) {
 	records, err := log.ReadAll()
 	if err != nil {
 		return nil, fmt.Errorf("start work: %w", err)
@@ -35,7 +41,7 @@ func StartWork(log Log, actor eventlog.Actor, branch domain.Branch, id domain.Wo
 	if err != nil {
 		return nil, fmt.Errorf("start work: %w", err)
 	}
-	events, err := domain.StartWork(id, workType, description, branch, active, inputs...)
+	events, err := domain.StartWorkTargeting(id, workType, description, branch, active, targets, nfrs, inputs...)
 	if err != nil {
 		return nil, err
 	}
@@ -84,16 +90,22 @@ func ReadInput(root string, workType domain.WorkType, kind domain.InputKind, fil
 	return domain.NewWorkInput(kind, path, domain.HashOf(content))
 }
 
-func NewCommand(openStore func() (*eventlog.Store, error), automate automations.Runner, resolveCaller func() (caller.Caller, error), currentBranch func() (domain.Branch, error), repositoryRoot func() (string, error)) *cobra.Command {
+// LoadNFRs reads the repository's NFRs.
+type LoadNFRs func(root string) ([]domain.NFR, error)
+
+func NewCommand(openStore func() (*eventlog.Store, error), automate automations.Runner, resolveCaller func() (caller.Caller, error), currentBranch func() (domain.Branch, error), repositoryRoot func() (string, error), loadNFRs LoadNFRs) *cobra.Command {
 	var typeName, spec, eventModel string
+	var nfrFlags []string
 	cmd := &cobra.Command{
-		Use:   `start --type <fix-bug|new-feature|modify-behaviour> "<description>" [--spec <path.md>] [--event-model <path>]`,
+		Use:   `start --type <type> "<description>" [--spec <path.md>] [--event-model <path>] [--nfr <id>…]`,
 		Short: "Start work on the first stage of its path",
 		Long: "Start work on the first stage of its path.\n\n" +
 			"Feature work (new-feature, modify-behaviour) can start from the owner's input: --spec, a markdown file (.md)\n" +
 			"describing the feature, and --event-model, the owner's event model in any form (JSON, markdown, an image or PDF\n" +
 			"of a board). Both are optional, for feature work only, and must be committed files of the repository. With an\n" +
-			"event model, the work enters event modelling first.",
+			"event model, the work enters event modelling first.\n\n" +
+			"Improve-performance work targets one or more NFRs of .gofast/nfrs.json, each with --nfr <id>: it is done when\n" +
+			"they are met. --nfr is for improve-performance work only.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			workType, err := domain.ParseWorkType(typeName)
@@ -126,6 +138,24 @@ func NewCommand(openStore func() (*eventlog.Store, error), automate automations.
 				}
 				inputs = append(inputs, input)
 			}
+			var targets []domain.NFRID
+			var nfrs []domain.NFR
+			for _, f := range nfrFlags {
+				target, err := domain.NewNFRID(f)
+				if err != nil {
+					return err
+				}
+				targets = append(targets, target)
+			}
+			if len(targets) > 0 || workType == domain.WorkTypeImprovePerformance {
+				root, err := repositoryRoot()
+				if err != nil {
+					return err
+				}
+				if nfrs, err = loadNFRs(root); err != nil {
+					return err
+				}
+			}
 			c, err := resolveCaller()
 			if err != nil {
 				return err
@@ -141,7 +171,7 @@ func NewCommand(openStore func() (*eventlog.Store, error), automate automations.
 			var events []domain.WorkEvent
 			err = store.Exclusive(func(s *eventlog.Session) error {
 				return automate.AroundCommand(s, func() error {
-					events, err = StartWork(s, c.Actor(), branch, id, workType, description, inputs...)
+					events, err = StartWorkTargeting(s, c.Actor(), branch, id, workType, description, targets, nfrs, inputs...)
 					return err
 				})
 			})
@@ -152,6 +182,9 @@ func NewCommand(openStore func() (*eventlog.Store, error), automate automations.
 			fmt.Fprintf(out, "Started %s work %q (%s) on branch %s.\n", workType, description, id, branch)
 			for _, in := range inputs {
 				fmt.Fprintf(out, "Input: %s %s (sha256 %s).\n", in.Kind(), in.Path(), in.Hash().String()[:12])
+			}
+			for _, t := range targets {
+				fmt.Fprintf(out, "Target NFR: %s.\n", t)
 			}
 			for _, e := range events {
 				if entered, ok := e.(domain.StageEntered); ok {
@@ -169,6 +202,7 @@ func NewCommand(openStore func() (*eventlog.Store, error), automate automations.
 	_ = cmd.MarkFlagRequired("type")
 	cmd.Flags().StringVar(&spec, "spec", "", "feature work only: a committed markdown file (.md) describing the feature")
 	cmd.Flags().StringVar(&eventModel, "event-model", "", "feature work only: the owner's committed event model, in any form")
+	cmd.Flags().StringArrayVar(&nfrFlags, "nfr", nil, "improve-performance work only: an NFR id of .gofast/nfrs.json the work must meet; repeat for several")
 	return cmd
 }
 
