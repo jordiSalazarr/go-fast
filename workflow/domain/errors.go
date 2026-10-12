@@ -33,6 +33,7 @@ var (
 	ErrInvalidMeasurement    = errors.New("invalid measurement")
 	ErrInvalidDesign         = errors.New("invalid design")
 	ErrInvalidInput          = errors.New("invalid work input")
+	ErrInvalidEventModel     = errors.New("invalid event model")
 )
 
 // Rejected commands.

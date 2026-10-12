@@ -27,7 +27,7 @@ func TestEachStageRequiresItsExitChecks(t *testing.T) {
 	design := []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckDesignValid, domain.CheckNFRProposalsValid}
 	designed := with(with(fixBug, domain.StageDesign, design),
 		domain.StageSpecify, []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckSpecsFail, domain.CheckSpecsCoverSlices})
-	feature := with(with(designed, domain.StageEventModelling, []domain.ExitCheck{domain.CheckArtifactWritten}),
+	feature := with(with(designed, domain.StageEventModelling, []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckEventModelValid}),
 		domain.StageGrill, []domain.ExitCheck{domain.CheckArtifactWritten})
 	behaviourDelta := []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckBehaviourDelta}
 	want := map[domain.WorkType]map[domain.PathVersion]map[domain.Stage][]domain.ExitCheck{
@@ -59,7 +59,7 @@ func TestExitChecksHaveStableNames(t *testing.T) {
 	}
 	assert.Equal(t, []string{"artifact-written", "specs-fail", "build-passes", "specs-pass",
 		"specs-untouched", "suite-passes", "formatted", "integration-passes", "stress-scripts-valid", "nfrs-met",
-		"design-valid", "nfr-proposals-valid", "behaviour-delta", "specs-cover-slices"}, names)
+		"design-valid", "nfr-proposals-valid", "behaviour-delta", "specs-cover-slices", "event-model-valid"}, names)
 }
 
 func TestCheckFailed_NeedsASummary(t *testing.T) {
@@ -179,7 +179,7 @@ func TestExitCheckOutcome_GivenAFailedClaim_ThenCheckResultsAreIgnored(t *testin
 func TestEveryCheckAboutCode_IsRequiredBeforeTheStagesThatCantChangeCode(t *testing.T) {
 	exempt := map[domain.ExitCheck]bool{
 		domain.CheckArtifactWritten: true, domain.CheckStressScriptsValid: true,
-		domain.CheckDesignValid: true, domain.CheckNFRProposalsValid: true, domain.CheckBehaviourDelta: true,
+		domain.CheckDesignValid: true, domain.CheckNFRProposalsValid: true, domain.CheckBehaviourDelta: true, domain.CheckEventModelValid: true,
 		domain.CheckIntegrationPasses: true, domain.CheckNFRsMet: true,
 	}
 	// Code is any Go file, tests included: specify writes test code.

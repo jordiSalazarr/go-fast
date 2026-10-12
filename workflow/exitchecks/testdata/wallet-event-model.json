@@ -1,0 +1,22 @@
+{
+  "events":     [{ "name": "TransactionPosted", "visibility": "internal" }],
+  "commands":   [{ "name": "PostTransaction", "events": ["TransactionPosted"], "rejections": ["InsufficientFunds"] }],
+  "readModels": [{ "name": "WalletBalance", "from": ["TransactionPosted"] }],
+  "slices": [
+    { "name": "PostTransaction", "kind": "command", "command": "PostTransaction", "change": "added" },
+    { "name": "WalletBalance", "kind": "query", "readModel": "WalletBalance", "change": "added" }
+  ],
+  "scenarios": [
+    { "id": "S1", "slice": "PostTransaction",
+      "given": ["WalletOpened"], "when": "PostTransaction",
+      "then": { "events": ["TransactionPosted"] } },
+    { "id": "S2", "slice": "PostTransaction",
+      "given": ["WalletOpened"], "when": "PostTransaction",
+      "then": { "rejection": "InsufficientFunds" },
+      "description": "a debit larger than the balance" },
+    { "id": "S3", "slice": "WalletBalance",
+      "given": ["WalletOpened", "TransactionPosted"],
+      "then": { "readModel": "WalletBalance", "state": "balance reflects the transaction" } }
+  ],
+  "existingEvents": ["WalletOpened"]
+}

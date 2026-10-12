@@ -51,6 +51,10 @@ var (
 	// specify cover every slice the latest accepted design adds or changes
 	// that handles a command or reacts to an event (Design.UncoveredSlices).
 	CheckSpecsCoverSlices = ExitCheck{name: "specs-cover-slices"}
+	// CheckEventModelValid: the event-modelling visit's canonical event
+	// model parses and has no problems (EventModel.Problems), and its
+	// assumptions have ids.
+	CheckEventModelValid = ExitCheck{name: "event-model-valid"}
 )
 
 // ExitChecks lists every exit check.
@@ -59,7 +63,7 @@ func ExitChecks() []ExitCheck {
 		CheckArtifactWritten, CheckSpecsFail, CheckBuildPasses, CheckSpecsPass,
 		CheckSpecsUntouched, CheckSuitePasses, CheckFormatted, CheckIntegrationPasses,
 		CheckStressScriptsValid, CheckNFRsMet, CheckDesignValid, CheckNFRProposalsValid, CheckBehaviourDelta,
-		CheckSpecsCoverSlices,
+		CheckSpecsCoverSlices, CheckEventModelValid,
 	}
 }
 
@@ -84,7 +88,9 @@ func RequiredChecks(stage Stage, path Path) []ExitCheck {
 // checks are the exit checks a stage requires on every path.
 func (s Stage) checks() []ExitCheck {
 	switch s {
-	case StageEventModelling, StageGrill, StageDiscovery:
+	case StageEventModelling:
+		return []ExitCheck{CheckArtifactWritten, CheckEventModelValid}
+	case StageGrill, StageDiscovery:
 		return []ExitCheck{CheckArtifactWritten}
 	case StageDesign:
 		return []ExitCheck{CheckArtifactWritten, CheckDesignValid, CheckNFRProposalsValid}
@@ -327,7 +333,7 @@ func ClassifyFailure(outcome ExitCheckOutcome) (kind FailureKind, ok bool) {
 func (c ExitCheck) judgesStageWork() bool {
 	switch c {
 	case CheckArtifactWritten, CheckStressScriptsValid, CheckDesignValid, CheckNFRProposalsValid, CheckBehaviourDelta,
-		CheckSpecsCoverSlices:
+		CheckSpecsCoverSlices, CheckEventModelValid:
 		return true
 	}
 	return false

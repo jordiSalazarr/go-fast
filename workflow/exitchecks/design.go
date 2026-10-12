@@ -2,8 +2,6 @@ package exitchecks
 
 import (
 	"bufio"
-	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -11,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/jordiSalazarr/go-fast/workflow/domain"
-	"github.com/jordiSalazarr/go-fast/workflow/worktree"
 )
 
 // designFile is the structured design's JSON form. Its field names are the
@@ -38,15 +35,7 @@ type designFile struct {
 		Name string   `json:"name"`
 		From []string `json:"from"`
 	} `json:"readModels"`
-	Slices []struct {
-		Name      string  `json:"name"`
-		Kind      string  `json:"kind"`
-		Command   *string `json:"command"`
-		ReadModel *string `json:"readModel"`
-		On        *string `json:"on"`
-		Publishes *string `json:"publishes"`
-		Change    string  `json:"change"`
-	} `json:"slices"`
+	Slices    []sliceFile `json:"slices"`
 	Contracts []struct {
 		Kind   string `json:"kind"`
 		Name   string `json:"name"`
@@ -91,13 +80,8 @@ func LoadDesign(root string, path domain.RepoPath) (domain.Design, error) {
 // is wrong with it: the JSON's own problems first, then the domain's.
 func parseDesign(data []byte) (domain.Design, []string) {
 	var file designFile
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&file); err != nil {
-		return domain.Design{}, []string{"not valid JSON for gf: " + err.Error()}
-	}
-	if dec.More() {
-		return domain.Design{}, []string{"not valid JSON for gf: more than one JSON value"}
+	if problem := decodeStrict(data, &file); problem != "" {
+		return domain.Design{}, []string{problem}
 	}
 	var problems []string
 	add := func(format string, args ...any) { problems = append(problems, fmt.Sprintf(format, args...)) }
@@ -132,27 +116,9 @@ func parseDesign(data []byte) (domain.Design, []string) {
 	for _, r := range file.ReadModels {
 		v.ReadModels = append(v.ReadModels, domain.NewReadModelDesign(r.Name, r.From))
 	}
-	for i, s := range file.Slices {
-		kind, err := domain.ParseSliceKind(s.Kind)
-		if err != nil {
-			add(`slices[%d] (%q): "kind" must be "command", "query" or "automation", not %q`, i, s.Name, s.Kind)
-		}
-		change, err2 := domain.ParseChange(s.Change)
-		if err2 != nil {
-			add(`slices[%d] (%q): "change" must be "added", "changed", "removed" or "unchanged", not %q`, i, s.Name, s.Change)
-		}
-		if err != nil || err2 != nil {
-			continue
-		}
-		slice, err := domain.NewSliceDesign(domain.SliceValues{
-			Name: s.Name, Kind: kind, Command: orEmpty(s.Command), ReadModel: orEmpty(s.ReadModel),
-			On: orEmpty(s.On), Publishes: orEmpty(s.Publishes), Change: change,
-		})
-		if err != nil {
-			return domain.Design{}, []string{err.Error()}
-		}
-		v.Slices = append(v.Slices, slice)
-	}
+	var sliceProblems []string
+	v.Slices, sliceProblems = parseSlices(file.Slices)
+	problems = append(problems, sliceProblems...)
 	for i, c := range file.Contracts {
 		kind, err := domain.ParseContractKind(c.Kind)
 		if err != nil {
@@ -285,24 +251,10 @@ func (c *checkRun) acceptedDesign() (domain.Design, *finding, error) {
 	if c.visit.Design == (domain.Visit{}) {
 		return noDesign("the work has no accepted design")
 	}
-	tree, ok, err := c.ownBaseline()
-	if err != nil {
-		return domain.Design{}, nil, err
-	}
-	if end := c.visit.DesignEnd; end != (domain.AssignmentID{}) && end != c.visit.Assignment {
-		tree, ok, err = c.baselines.Tree(end)
-		if err != nil {
-			return domain.Design{}, nil, err
-		}
-	}
-	if !ok {
-		f := missingBaseline(domain.StageDesign)
-		return domain.Design{}, &f, nil
-	}
 	path := domain.DesignFor(c.visit.Work, c.visit.Design)
-	data, exists, err := worktree.FileAt(c.Root, tree, path)
-	if err != nil {
-		return domain.Design{}, nil, err
+	data, exists, problem, err := c.acceptedFile(domain.StageDesign, path, c.visit.DesignEnd)
+	if err != nil || problem != nil {
+		return domain.Design{}, problem, err
 	}
 	if !exists {
 		return noDesign("the accepted design %s is missing", path)

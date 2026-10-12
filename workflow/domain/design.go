@@ -304,7 +304,9 @@ func (d Design) UncoveredSlices(tests []string) []SliceDesign {
 var pascalCase = regexp.MustCompile(`^[A-Z][A-Za-z0-9]*$`)
 
 // Problems lists what makes the design invalid, one sentence each, in a
-// stable order; none means it is valid.
+// stable order; none means it is valid. A design holds its own event model
+// (events, commands, read models, slices), which follows the event model's
+// structure rules, and places it in aggregates.
 func (d Design) Problems() []string {
 	var p problems
 	v := d.v
@@ -312,125 +314,64 @@ func (d Design) Problems() []string {
 		p.add("the bounded context has no name")
 	}
 	aggregates := names(v.Aggregates, AggregateDesign.Name)
-	commands := names(v.Commands, CommandDesign.Name)
-	events := names(v.Events, EventDesign.Name)
-	readModels := names(v.ReadModels, ReadModelDesign.Name)
-	sliceNames := names(v.Slices, SliceDesign.Name)
-
 	p.uniqueNames("aggregate", aggregates, false)
-	p.uniqueNames("command", commands, true)
-	p.uniqueNames("event", events, true)
-	p.uniqueNames("read model", readModels, false)
-	p.uniqueNames("slice", sliceNames, true)
-	p.uniqueNames("contract", names(v.Contracts, ContractDesign.Name), false)
-
 	for _, a := range v.Aggregates {
 		if len(a.invariants) == 0 {
 			p.add("aggregate %s has no invariant", a.name)
 		}
 	}
 
+	model := d.eventModel()
+	model.structureProblems(&p, "the design")
 	for _, c := range v.Commands {
 		if !slices.Contains(aggregates, c.aggregate) {
 			p.add("command %s names aggregate %q, which the design doesn't have", c.name, c.aggregate)
 		}
-		if len(c.events) == 0 {
-			p.add("command %s produces no event", c.name)
-		}
-		for _, e := range c.events {
-			if !slices.Contains(events, e) {
-				p.add("command %s produces event %q, which the design doesn't have", c.name, e)
-			}
-		}
-		if slices.Contains(c.rejections, "") {
-			p.add("command %s has a rejection without a name", c.name)
-		}
 	}
-
 	for _, e := range v.Events {
 		if !slices.Contains(aggregates, e.aggregate) {
 			p.add("event %s names aggregate %q, which the design doesn't have", e.name, e.aggregate)
 		}
-		if !d.produces(e.name) && !d.consumedFromOutside(e.name) {
-			p.add("event %s is produced by no command and published or consumed by no automation", e.name)
-		}
 	}
 
-	for _, r := range v.ReadModels {
-		if len(r.from) == 0 {
-			p.add("read model %s is built from no event", r.name)
-		}
-		for _, e := range r.from {
-			if !slices.Contains(events, e) {
-				p.add("read model %s is built from event %q, which the design doesn't have", r.name, e)
-			}
-		}
-	}
-
-	for _, s := range v.Slices {
-		d.checkSlice(&p, s, commands, events, readModels)
-	}
-
+	p.uniqueNames("contract", names(v.Contracts, ContractDesign.Name), false)
+	var external []string
 	for _, e := range v.Events {
-		if e.visibility == VisibilityExternal && !slices.ContainsFunc(v.Contracts, func(c ContractDesign) bool {
-			return c.kind == ContractEvent && c.name == e.name
-		}) {
-			p.add("external event %s has no event contract", e.name)
+		if e.visibility == VisibilityExternal {
+			external = append(external, e.name)
 		}
 	}
-	for _, c := range v.Contracts {
-		if c.kind == ContractHTTP && !slices.Contains(sliceNames, c.slice) {
-			p.add("http contract %q names slice %q, which the design doesn't have", c.name, c.slice)
-		}
-	}
-
-	if !slices.ContainsFunc(v.Slices, func(s SliceDesign) bool { return s.v.Change != ChangeUnchanged }) {
-		p.add("no slice is added, changed or removed")
-	}
+	p.contractProblems(v.Contracts, external, names(v.Slices, SliceDesign.Name), "the design")
+	model.structureEnd(&p)
 	return p.list
 }
 
-// checkSlice checks that a slice references what its kind needs.
-func (d Design) checkSlice(p *problems, s SliceDesign, commands, events, readModels []string) {
-	v := s.v
-	switch v.Kind {
-	case SliceCommand:
-		if !slices.Contains(commands, v.Command) {
-			p.add("command slice %s handles command %q, which the design doesn't have", v.Name, v.Command)
-		}
-	case SliceQuery:
-		if !slices.Contains(readModels, v.ReadModel) {
-			p.add("query slice %s reads read model %q, which the design doesn't have", v.Name, v.ReadModel)
-		}
-	case SliceAutomation:
-		if !slices.Contains(events, v.On) {
-			p.add("automation slice %s reacts to event %q, which the design doesn't have", v.Name, v.On)
-		}
-		switch {
-		case v.Command == "" && v.Publishes == "":
-			p.add("automation slice %s neither sends a command nor publishes an external event", v.Name)
-		case v.Command != "" && !slices.Contains(commands, v.Command):
-			p.add("automation slice %s sends command %q, which the design doesn't have", v.Name, v.Command)
-		}
-		if v.Publishes != "" && !slices.ContainsFunc(d.v.Events, func(e EventDesign) bool {
-			return e.name == v.Publishes && e.visibility == VisibilityExternal
-		}) {
-			p.add("automation slice %s publishes %q, which is not an external event of the design", v.Name, v.Publishes)
+// eventModel is the event model a design holds.
+func (d Design) eventModel() EventModel {
+	var v EventModelValues
+	for _, e := range d.v.Events {
+		v.Events = append(v.Events, ModelEvent{name: e.name, visibility: e.visibility})
+	}
+	for _, c := range d.v.Commands {
+		v.Commands = append(v.Commands, ModelCommand{name: c.name, events: c.events, rejections: c.rejections})
+	}
+	v.ReadModels, v.Slices = d.v.ReadModels, d.v.Slices
+	return EventModel{v: v}
+}
+
+// contractProblems checks that every external event has an event contract,
+// and that every http contract names an existing slice.
+func (p *problems) contractProblems(contracts []ContractDesign, externalEvents, sliceNames []string, owner string) {
+	for _, e := range externalEvents {
+		if !slices.ContainsFunc(contracts, func(c ContractDesign) bool { return c.kind == ContractEvent && c.name == e }) {
+			p.add("external event %s has no event contract", e)
 		}
 	}
-}
-
-// produces reports whether a command produces the event, or an automation
-// publishes it.
-func (d Design) produces(event string) bool {
-	return slices.ContainsFunc(d.v.Commands, func(c CommandDesign) bool { return slices.Contains(c.events, event) }) ||
-		slices.ContainsFunc(d.v.Slices, func(s SliceDesign) bool { return s.v.Kind == SliceAutomation && s.v.Publishes == event })
-}
-
-// consumedFromOutside reports whether an automation reacts to the event:
-// then it may come from outside the bounded context.
-func (d Design) consumedFromOutside(event string) bool {
-	return slices.ContainsFunc(d.v.Slices, func(s SliceDesign) bool { return s.v.Kind == SliceAutomation && s.v.On == event })
+	for _, c := range contracts {
+		if c.kind == ContractHTTP && !slices.Contains(sliceNames, c.slice) {
+			p.add("http contract %q names slice %q, which %s doesn't have", c.name, c.slice, owner)
+		}
+	}
 }
 
 // problems collects a design's problems in order.

@@ -63,6 +63,12 @@ func DesignFor(work WorkID, visit Visit) RepoPath {
 	return RepoPath{value: ArtifactDir(work).value + "/design-v" + strconv.Itoa(visit.n) + ".json"}
 }
 
+// EventModelFor is the canonical event model an event-modelling visit
+// writes next to its artifact.
+func EventModelFor(work WorkID, visit Visit) RepoPath {
+	return RepoPath{value: ArtifactDir(work).value + "/event-model-v" + strconv.Itoa(visit.n) + ".json"}
+}
+
 // NFRProposalsFor is where a design visit may propose NFR changes, in the
 // schema of the repository's NFRs.
 func NFRProposalsFor(work WorkID, visit Visit) RepoPath {

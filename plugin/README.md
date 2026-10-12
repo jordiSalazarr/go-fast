@@ -169,6 +169,7 @@ list them.
 
 | Stage | Required checks |
 |---|---|
+| event-modelling | artifact-written, event-model-valid |
 | discovery | artifact-written; on modify-behaviour also behaviour-delta |
 | design | artifact-written, design-valid, nfr-proposals-valid |
 | specify | artifact-written, specs-fail; on paths with design also specs-cover-slices |
@@ -183,6 +184,33 @@ about code it requires is also required by implement, which can: unformatted
 code fails implement, not review. The exceptions are integration-passes and
 nfrs-met, integration and stress testing's own purposes. Design's checks and
 behaviour-delta are about the stage's own artifacts, not code.
+
+## Event modelling
+
+When feature work starts with an event model, event modelling
+(`gofast:event-modelling`, auto gate, artifacts only) turns it into the
+canonical event model and completes it with scenarios. It may read the code,
+never write it. It writes, in the work's artifact directory:
+
+- `event-modelling-v<n>.md`: the model in prose, ending with
+  `## Assumptions`: one list item per thing it had to assume, each with a
+  stable id (`- M1: …`). Grill asks you about each one.
+- `event-model-v<n>.json`: `events` (with `visibility`), `commands` (with the
+  `events` they produce and their `rejections`), `readModels`, `slices` (as
+  in a design), `scenarios` and `existingEvents`. A scenario has an `id`, a
+  `slice`, `given` events, a `when` (the slice's command; absent for a query)
+  and a `then` with exactly one of `events` (produced by the command), a
+  `rejection` (declared on it) or a `readModel` (the slice's) with a `state`.
+  `existingEvents` lists events of the system outside the model that
+  `given`, `from` or `on` refer to.
+
+`event-model-valid` checks the JSON with the rules a design's event model
+follows (unique PascalCase names, every reference resolved, at least one
+slice that changes) plus the scenario rules: unique ids, an existing slice,
+the right `when`, a `then` the slice can produce, scenarios for every added
+or changed command or automation slice and for each rejection its command
+declares; and that every assumption has an id. `gf status` lists the
+problems as `current.eventModelProblems`.
 
 ## Design
 

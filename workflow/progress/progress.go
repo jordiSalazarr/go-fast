@@ -39,6 +39,9 @@ type Facts struct {
 	// Design reads a structured design; an *exitchecks.DesignError says
 	// what is wrong with it.
 	Design func(path domain.RepoPath) (domain.Design, error)
+	// EventModel reads a canonical event model; an
+	// *exitchecks.EventModelError says what is wrong with it.
+	EventModel func(path domain.RepoPath) (domain.EventModel, error)
 	// File reads a file of the working tree; ok is false when it doesn't
 	// exist.
 	File func(path domain.RepoPath) (content []byte, ok bool, err error)
@@ -186,6 +189,10 @@ type CurrentView struct {
 	// DesignProblems are what is wrong with this design visit's structured
 	// design, after an attempt failed; design only.
 	DesignProblems []string `json:"designProblems,omitempty"`
+	// EventModelProblems are what is wrong with this event-modelling
+	// visit's canonical event model, after an attempt failed;
+	// event-modelling only.
+	EventModelProblems []string `json:"eventModelProblems,omitempty"`
 	// SlicesNeedingSpecs are the slices of the latest accepted design that
 	// specify must cover with Test<SliceName> specs; specify on paths with
 	// design only.
@@ -322,6 +329,9 @@ func FactsAt(root string) Facts {
 			return plan.Adoption, err == nil, err
 		},
 		Design: func(path domain.RepoPath) (domain.Design, error) { return exitchecks.LoadDesign(root, path) },
+		EventModel: func(path domain.RepoPath) (domain.EventModel, error) {
+			return exitchecks.LoadEventModel(root, path)
+		},
 		File: func(path domain.RepoPath) ([]byte, bool, error) {
 			data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path.String())))
 			if errors.Is(err, os.ErrNotExist) {
@@ -466,6 +476,9 @@ func Read(log Reader, branch domain.Branch, facts Facts) (View, error) {
 		current.Assignment, current.AttemptsUsed, current.Budget = describeAssignment(state)
 	}
 	current.LastProblem = lastProblem(history.Records(eventlog.AssignmentStream(assignmentID)))
+	if stage == domain.StageEventModelling && current.LastProblem != nil && facts.EventModel != nil {
+		current.EventModelProblems = eventModelProblems(domain.EventModelFor(work.ID(), work.CurrentVisit()), facts)
+	}
 	if facts.Design != nil {
 		switch {
 		case stage == domain.StageDesign && current.LastProblem != nil:
@@ -579,6 +592,22 @@ func describeDesign(d *DesignView, work domain.WorkID, facts Facts) {
 func designProblems(path domain.RepoPath, facts Facts) []string {
 	_, err := facts.Design(path)
 	var invalid *exitchecks.DesignError
+	switch {
+	case errors.As(err, &invalid) && invalid.Missing:
+		return []string{path.String() + " is missing"}
+	case errors.As(err, &invalid):
+		return invalid.Problems
+	case err != nil:
+		return []string{"gf could not read " + path.String() + ": " + err.Error()}
+	}
+	return nil
+}
+
+// eventModelProblems are what is wrong with an event-modelling visit's
+// canonical event model; none when it is valid.
+func eventModelProblems(path domain.RepoPath, facts Facts) []string {
+	_, err := facts.EventModel(path)
+	var invalid *exitchecks.EventModelError
 	switch {
 	case errors.As(err, &invalid) && invalid.Missing:
 		return []string{path.String() + " is missing"}
@@ -858,6 +887,12 @@ func RenderText(w io.Writer, v View) {
 	if len(c.DesignProblems) > 0 {
 		fmt.Fprintln(w, "Design problems (design-valid):")
 		for _, p := range c.DesignProblems {
+			fmt.Fprintf(w, "  - %s\n", p)
+		}
+	}
+	if len(c.EventModelProblems) > 0 {
+		fmt.Fprintln(w, "Event model problems (event-model-valid):")
+		for _, p := range c.EventModelProblems {
 			fmt.Fprintf(w, "  - %s\n", p)
 		}
 	}

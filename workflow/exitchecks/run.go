@@ -43,6 +43,11 @@ type Visit struct {
 	// none.
 	Design    domain.Visit
 	DesignEnd domain.AssignmentID
+	// EventModel is the work's latest accepted event-modelling visit, and
+	// EventModelEnd the stage visit entered when it was accepted. Zero when
+	// the work has none.
+	EventModel    domain.Visit
+	EventModelEnd domain.AssignmentID
 	// Changed is what the visit changed since its baseline.
 	Changed domain.ChangedFiles
 	// BaselineStarted: the visit had no baseline until this submission, so
@@ -174,6 +179,8 @@ func (c *checkRun) check(check domain.ExitCheck) (finding, error) {
 		return c.behaviourDelta()
 	case domain.CheckSpecsCoverSlices:
 		return c.specsCoverSlices()
+	case domain.CheckEventModelValid:
+		return c.eventModelValid()
 	}
 	return finding{}, fmt.Errorf("gf does not know how to run %q", check)
 }
