@@ -4,8 +4,10 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/jordiSalazarr/go-fast/workflow/domain"
@@ -35,7 +37,12 @@ type designFile struct {
 		Name string   `json:"name"`
 		From []string `json:"from"`
 	} `json:"readModels"`
-	Slices    []sliceFile `json:"slices"`
+	Slices     []sliceFile `json:"slices"`
+	Placements []struct {
+		Command    string            `json:"command"`
+		Aggregate  string            `json:"aggregate"`
+		Rejections map[string]string `json:"rejections"`
+	} `json:"placements"`
 	Contracts []struct {
 		Kind   string `json:"kind"`
 		Name   string `json:"name"`
@@ -60,8 +67,9 @@ func (e *DesignError) Error() string {
 }
 
 // LoadDesign reads a structured design, by its path relative to root, and
-// returns it only if it is valid; otherwise a *DesignError says why.
-func LoadDesign(root string, path domain.RepoPath) (domain.Design, error) {
+// returns it only if it is valid, given the work's canonical event model
+// (nil when it has none); otherwise a *DesignError says why.
+func LoadDesign(root string, path domain.RepoPath, eventModel *domain.EventModel) (domain.Design, error) {
 	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path.String())))
 	if errors.Is(err, os.ErrNotExist) {
 		return domain.Design{}, &DesignError{Path: path.String(), Missing: true}
@@ -69,7 +77,7 @@ func LoadDesign(root string, path domain.RepoPath) (domain.Design, error) {
 	if err != nil {
 		return domain.Design{}, fmt.Errorf("read design: %w", err)
 	}
-	design, problems := parseDesign(data)
+	design, problems := parseDesign(data, eventModel)
 	if len(problems) > 0 {
 		return domain.Design{}, &DesignError{Path: path.String(), Problems: problems}
 	}
@@ -77,8 +85,9 @@ func LoadDesign(root string, path domain.RepoPath) (domain.Design, error) {
 }
 
 // parseDesign turns a design's JSON into a domain design, and lists what
-// is wrong with it: the JSON's own problems first, then the domain's.
-func parseDesign(data []byte) (domain.Design, []string) {
+// is wrong with it, given the work's event model: the JSON's own problems
+// first, then the domain's.
+func parseDesign(data []byte, eventModel *domain.EventModel) (domain.Design, []string) {
 	var file designFile
 	if problem := decodeStrict(data, &file); problem != "" {
 		return domain.Design{}, []string{problem}
@@ -119,6 +128,13 @@ func parseDesign(data []byte) (domain.Design, []string) {
 	var sliceProblems []string
 	v.Slices, sliceProblems = parseSlices(file.Slices)
 	problems = append(problems, sliceProblems...)
+	for _, pl := range file.Placements {
+		var causes []domain.RejectionCause
+		for _, rejection := range slices.Sorted(maps.Keys(pl.Rejections)) {
+			causes = append(causes, domain.RejectionCause{Rejection: rejection, Invariant: pl.Rejections[rejection]})
+		}
+		v.Placements = append(v.Placements, domain.NewPlacementDesign(pl.Command, pl.Aggregate, causes))
+	}
 	for i, c := range file.Contracts {
 		kind, err := domain.ParseContractKind(c.Kind)
 		if err != nil {
@@ -135,7 +151,7 @@ func parseDesign(data []byte) (domain.Design, []string) {
 		return domain.Design{}, problems
 	}
 	design := domain.NewDesign(v)
-	return design, design.Problems()
+	return design, design.Problems(eventModel)
 }
 
 func orEmpty(p *string) string {
@@ -146,7 +162,17 @@ func orEmpty(p *string) string {
 }
 
 func (c *checkRun) designValid() (finding, error) {
-	_, err := LoadDesign(c.Root, domain.DesignFor(c.visit.Work, c.visit.Visit))
+	eventModel, ok, problem, err := c.acceptedEventModel()
+	if err != nil || problem != nil {
+		return deref(problem), err
+	}
+	var model *domain.EventModel
+	if ok {
+		model = &eventModel
+	} else if c.visit.HasEventModel {
+		return fail("the work has an event model but no accepted event-modelling visit"), nil
+	}
+	_, err = LoadDesign(c.Root, domain.DesignFor(c.visit.Work, c.visit.Visit), model)
 	var invalid *DesignError
 	switch {
 	case errors.As(err, &invalid) && invalid.Missing:
@@ -259,7 +285,7 @@ func (c *checkRun) acceptedDesign() (domain.Design, *finding, error) {
 	if !exists {
 		return noDesign("the accepted design %s is missing", path)
 	}
-	design, problems := parseDesign(data)
+	design, problems := parseDesign(data, nil)
 	if len(problems) > 0 {
 		return noDesign("the accepted design %s is invalid: %s", path, strings.Join(problems, "; "))
 	}

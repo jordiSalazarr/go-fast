@@ -279,24 +279,33 @@ Commit it with the rest of your changes.
 ## Design
 
 On new-feature and modify-behaviour work, design (`gofast:design`, human
-gate, artifacts only) models the change before any spec is written. On
-modify-behaviour, discovery first states both sides of the change: its
+gate, artifacts only) models the domain before any spec is written: the
+aggregates, their invariants and states, and the contracts other teams see.
+On modify-behaviour, discovery first states both sides of the change: its
 artifact needs a non-empty `## Current behaviour` and `## Expected behaviour`
 section (`behaviour-delta`).
 
 Design writes two files describing the same design, both in the work's
 artifact directory:
 
-- `design-v<n>.md`: the event model, the aggregates with their invariants and
-  states, the commands with their events and rejections, the read models,
-  the slices and the contracts. When valid options change behaviour or
-  boundaries, it lists them under `## Decisions for the owner`, with
-  trade-offs and a recommendation, and designs the recommended one.
-- `design-v<n>.json`: the structured design. `design-valid` parses it and
-  checks the domain's rules: unique names, PascalCase slices, commands and
-  events, an invariant per aggregate, every reference resolved, every
-  external event under an event contract, at least one slice that changes.
-  The failure lists every problem; so does `gf status` (`current.designProblems`).
+- `design-v<n>.md`: the design in prose. When valid options change
+  behaviour or boundaries, it lists them under `## Decisions for the owner`,
+  with trade-offs and a recommendation, and designs the recommended one.
+- `design-v<n>.json`: the structured design, always with `boundedContext`,
+  `aggregates` (each with an invariant) and `contracts` (an event contract
+  per external event, http contracts naming slices).
+  - **With an event model** it is domain modelling only, checked against the
+    accepted event model: `placements` put every command of a slice the
+    model adds or changes in an aggregate, `{ "command", "aggregate",
+    "rejections": { "<Rejection>": "<invariant>" } }`, mapping each declared
+    rejection to one of that aggregate's invariants. It must not repeat the
+    model's events, commands, read models or slices.
+  - **Without an event model** it is brief #6's full schema: also
+    `commands`, `events`, `readModels` and `slices`, checked with the event
+    model's structure rules plus each command's and event's aggregate.
+
+`design-valid` lists every problem; so does `gf status`
+(`current.designProblems`).
 
 After you approve, specify must cover every `command` and `automation` slice
 the design adds or changes with a new test named `Test<SliceName>…`

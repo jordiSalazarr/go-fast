@@ -1,0 +1,13 @@
+{
+  "boundedContext": "wallets",
+  "aggregates": [
+    { "name": "Wallet", "invariants": ["balance never goes below zero"], "states": ["Open", "Frozen"] }
+  ],
+  "placements": [
+    { "command": "PostTransaction", "aggregate": "Wallet",
+      "rejections": { "InsufficientFunds": "balance never goes below zero" } }
+  ],
+  "contracts": [
+    { "kind": "http", "name": "POST /wallets/{id}/transactions", "slice": "PostTransaction" }
+  ]
+}

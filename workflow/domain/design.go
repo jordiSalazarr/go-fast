@@ -7,11 +7,15 @@ import (
 	"strings"
 )
 
-// A design is the structured half of the design stage's output: the event
-// model and the domain model of one bounded context, its read models, the
-// slices the change adds or changes, and the contracts other teams see.
-// Parsing it is the boundary's job; the domain receives typed values and
-// says what is wrong with them (Design.Problems).
+// A design is the structured half of the design stage's output: the domain
+// model of one bounded context and the contracts other teams see. When the
+// work has a canonical event model, the design is domain modelling only:
+// aggregates with their invariants, and the placement of each of the model's
+// commands in an aggregate, with the invariant behind each rejection.
+// Without one, the design also holds its own event model (events, commands,
+// read models, slices), as on path v1. Parsing it is the boundary's job; the
+// domain receives typed values and says what is wrong with them
+// (Design.Problems).
 
 // Invariant is a rule an aggregate always keeps, in prose.
 type Invariant struct{ text string }
@@ -247,7 +251,39 @@ func (c ContractDesign) Name() string       { return c.name }
 func (c ContractDesign) Slice() string      { return c.slice }
 func (c ContractDesign) Schema() string     { return c.schema }
 
-// DesignValues are a design's parts.
+// RejectionCause is the invariant of its aggregate that makes a command
+// answer with a rejection.
+type RejectionCause struct {
+	Rejection string
+	Invariant string
+}
+
+// PlacementDesign places a command of the event model in the aggregate that
+// handles it, and says which of the aggregate's invariants each of the
+// command's rejections protects.
+type PlacementDesign struct {
+	command    string
+	aggregate  string
+	rejections []RejectionCause
+}
+
+// NewPlacementDesign keeps the rejections in the order given; the boundary
+// sorts them when they come from an unordered map.
+func NewPlacementDesign(command, aggregate string, rejections []RejectionCause) PlacementDesign {
+	p := PlacementDesign{command: strings.TrimSpace(command), aggregate: strings.TrimSpace(aggregate)}
+	for _, r := range rejections {
+		p.rejections = append(p.rejections, RejectionCause{Rejection: strings.TrimSpace(r.Rejection), Invariant: strings.TrimSpace(r.Invariant)})
+	}
+	return p
+}
+
+func (p PlacementDesign) Command() string              { return p.command }
+func (p PlacementDesign) Aggregate() string            { return p.aggregate }
+func (p PlacementDesign) Rejections() []RejectionCause { return slices.Clone(p.rejections) }
+
+// DesignValues are a design's parts. Placements are only for a design of
+// work with an event model; Commands, Events, ReadModels and Slices only
+// for one without.
 type DesignValues struct {
 	BoundedContext string
 	Aggregates     []AggregateDesign
@@ -255,6 +291,7 @@ type DesignValues struct {
 	Events         []EventDesign
 	ReadModels     []ReadModelDesign
 	Slices         []SliceDesign
+	Placements     []PlacementDesign
 	Contracts      []ContractDesign
 }
 
@@ -266,7 +303,8 @@ func NewDesign(v DesignValues) Design {
 	return Design{v: DesignValues{
 		BoundedContext: strings.TrimSpace(v.BoundedContext),
 		Aggregates:     slices.Clone(v.Aggregates), Commands: slices.Clone(v.Commands), Events: slices.Clone(v.Events),
-		ReadModels: slices.Clone(v.ReadModels), Slices: slices.Clone(v.Slices), Contracts: slices.Clone(v.Contracts),
+		ReadModels: slices.Clone(v.ReadModels), Slices: slices.Clone(v.Slices), Placements: slices.Clone(v.Placements),
+		Contracts: slices.Clone(v.Contracts),
 	}}
 }
 
@@ -277,6 +315,7 @@ func (d Design) Events() []EventDesign         { return slices.Clone(d.v.Events)
 func (d Design) ReadModels() []ReadModelDesign { return slices.Clone(d.v.ReadModels) }
 func (d Design) Slices() []SliceDesign         { return slices.Clone(d.v.Slices) }
 func (d Design) Contracts() []ContractDesign   { return slices.Clone(d.v.Contracts) }
+func (d Design) Placements() []PlacementDesign { return slices.Clone(d.v.Placements) }
 
 // SlicesNeedingSpecs are the slices specify must write specs for, in order.
 func (d Design) SlicesNeedingSpecs() []SliceDesign {
@@ -304,10 +343,12 @@ func (d Design) UncoveredSlices(tests []string) []SliceDesign {
 var pascalCase = regexp.MustCompile(`^[A-Z][A-Za-z0-9]*$`)
 
 // Problems lists what makes the design invalid, one sentence each, in a
-// stable order; none means it is valid. A design holds its own event model
-// (events, commands, read models, slices), which follows the event model's
-// structure rules, and places it in aggregates.
-func (d Design) Problems() []string {
+// stable order; none means it is valid. Given the work's canonical event
+// model, the design is domain modelling only, cross-checked against the
+// model (see modellingProblems). Without one, a design holds its own event
+// model (events, commands, read models, slices), which follows the event
+// model's structure rules, and places it in aggregates.
+func (d Design) Problems(eventModel *EventModel) []string {
 	var p problems
 	v := d.v
 	if v.BoundedContext == "" {
@@ -319,6 +360,13 @@ func (d Design) Problems() []string {
 		if len(a.invariants) == 0 {
 			p.add("aggregate %s has no invariant", a.name)
 		}
+	}
+	if eventModel != nil {
+		d.modellingProblems(&p, *eventModel)
+		return p.list
+	}
+	if len(v.Placements) > 0 {
+		p.add("without an event model, the design names each command's aggregate in commands, not in placements")
 	}
 
 	model := d.eventModel()
@@ -344,6 +392,73 @@ func (d Design) Problems() []string {
 	p.contractProblems(v.Contracts, external, names(v.Slices, SliceDesign.Name), "the design")
 	model.structureEnd(&p)
 	return p.list
+}
+
+// modellingProblems checks a design against the work's event model: it
+// holds no events, commands, read models or slices of its own; every
+// command of a slice the model adds or changes is placed, once, in one of
+// its aggregates; every rejection the command declares is caused by one of
+// that aggregate's invariants; every external event of the model has an
+// event contract, and every http contract names a slice of the model.
+func (d Design) modellingProblems(p *problems, model EventModel) {
+	v := d.v
+	for _, part := range []struct {
+		name string
+		n    int
+	}{{"events", len(v.Events)}, {"commands", len(v.Commands)}, {"read models", len(v.ReadModels)}, {"slices", len(v.Slices)}} {
+		if part.n > 0 {
+			p.add("the design repeats %s of the event model: with an event model, it holds only aggregates, placements and contracts", part.name)
+		}
+	}
+	placed := map[string]bool{}
+	for _, pl := range v.Placements {
+		command, ok := model.Command(pl.command)
+		switch {
+		case !ok:
+			p.add("placement of command %q, which the event model doesn't have", pl.command)
+			continue
+		case placed[pl.command]:
+			p.add("command %s is placed more than once", pl.command)
+			continue
+		}
+		placed[pl.command] = true
+		i := slices.IndexFunc(v.Aggregates, func(a AggregateDesign) bool { return a.name == pl.aggregate })
+		if i < 0 {
+			p.add("command %s is placed in aggregate %q, which the design doesn't have", pl.command, pl.aggregate)
+			continue
+		}
+		aggregate := v.Aggregates[i]
+		for _, r := range command.rejections {
+			j := slices.IndexFunc(pl.rejections, func(c RejectionCause) bool { return c.Rejection == r })
+			switch {
+			case j < 0:
+				p.add("rejection %s of command %s is mapped to no invariant of aggregate %s", r, pl.command, aggregate.name)
+			case !slices.ContainsFunc(aggregate.invariants, func(inv Invariant) bool { return inv.text == pl.rejections[j].Invariant }):
+				p.add("rejection %s of command %s is mapped to %q, which is not an invariant of aggregate %s", r, pl.command, pl.rejections[j].Invariant, aggregate.name)
+			}
+		}
+		for _, c := range pl.rejections {
+			if !slices.Contains(command.rejections, c.Rejection) {
+				p.add("command %s doesn't declare rejection %q", pl.command, c.Rejection)
+			}
+		}
+	}
+	for _, s := range model.v.Slices {
+		sv := s.v
+		if (sv.Kind == SliceCommand || sv.Kind == SliceAutomation) && sv.Command != "" &&
+			(sv.Change == ChangeAdded || sv.Change == ChangeChanged) && !placed[sv.Command] {
+			placed[sv.Command] = true // report each command once
+			p.add("command %s of slice %s is placed in no aggregate", sv.Command, sv.Name)
+		}
+	}
+	p.uniqueNames("contract", names(v.Contracts, ContractDesign.Name), false)
+	var external []string
+	for _, e := range model.v.Events {
+		if e.visibility == VisibilityExternal {
+			external = append(external, e.name)
+		}
+	}
+	p.contractProblems(v.Contracts, external, names(model.v.Slices, SliceDesign.Name), "the event model")
 }
 
 // eventModel is the event model a design holds.

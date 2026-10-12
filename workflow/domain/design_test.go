@@ -58,7 +58,7 @@ func contract(kind domain.ContractKind, name, slice, schema string) domain.Contr
 }
 
 func TestDesign_TheBriefsExample_IsValid(t *testing.T) {
-	assert.Empty(t, domain.NewDesign(walletDesign()).Problems())
+	assert.Empty(t, domain.NewDesign(walletDesign()).Problems(nil))
 }
 
 // Given a valid design changed one way, when it is checked, then it has
@@ -221,7 +221,7 @@ func TestDesign_Problems(t *testing.T) {
 			v := walletDesign()
 			c.change(&v)
 
-			problems := domain.NewDesign(v).Problems()
+			problems := domain.NewDesign(v).Problems(nil)
 
 			assert.Equal(t, c.want, problems)
 		})
@@ -234,7 +234,7 @@ func TestDesign_ProblemsAreListedTogether(t *testing.T) {
 	v.Aggregates[0] = domain.NewAggregateDesign("Wallet", nil, nil)
 	v.Contracts = nil
 
-	problems := domain.NewDesign(v).Problems()
+	problems := domain.NewDesign(v).Problems(nil)
 
 	assert.Equal(t, []string{
 		"the bounded context has no name",
@@ -293,4 +293,94 @@ func TestDesign_ValuesRejectWhatCantBeADesign(t *testing.T) {
 	require.ErrorIs(t, err, domain.ErrMissingValue)
 	_, err = domain.NewContractDesign(domain.ContractKind{}, "X", "", "")
 	require.ErrorIs(t, err, domain.ErrMissingValue)
+}
+
+// walletModelling is a design of work with the brief's event model: domain
+// modelling only. Valid as it is against walletModel.
+func walletModelling() domain.DesignValues {
+	return domain.DesignValues{
+		BoundedContext: "wallets",
+		Aggregates: []domain.AggregateDesign{
+			domain.NewAggregateDesign("Wallet", invariants("balance never goes below zero"), []string{"Open"}),
+		},
+		Placements: []domain.PlacementDesign{
+			domain.NewPlacementDesign("PostTransaction", "Wallet", []domain.RejectionCause{{Rejection: "InsufficientFunds", Invariant: "balance never goes below zero"}}),
+		},
+		Contracts: []domain.ContractDesign{contract(domain.ContractHTTP, "POST /wallets/{id}/transactions", "PostTransaction", "")},
+	}
+}
+
+func TestDesign_WithAnEventModel_TheExample_IsValid(t *testing.T) {
+	model := domain.NewEventModel(walletModel())
+	assert.Empty(t, domain.NewDesign(walletModelling()).Problems(&model))
+}
+
+// Given a design of work with an event model, changed one way, when it is
+// checked against the model, then it has exactly these problems.
+func TestDesign_WithAnEventModel_Problems(t *testing.T) {
+	cases := []struct {
+		name   string
+		change func(d *domain.DesignValues, m *domain.EventModelValues)
+		want   []string
+	}{
+		{"a design repeating the model", func(d *domain.DesignValues, m *domain.EventModelValues) {
+			d.Events = []domain.EventDesign{eventDesign("TransactionPosted", "Wallet", domain.VisibilityInternal)}
+			d.Slices = []domain.SliceDesign{slice(domain.SliceValues{Name: "PostTransaction", Kind: domain.SliceCommand, Command: "PostTransaction", Change: domain.ChangeAdded})}
+		}, []string{
+			"the design repeats events of the event model: with an event model, it holds only aggregates, placements and contracts",
+			"the design repeats slices of the event model: with an event model, it holds only aggregates, placements and contracts",
+		}},
+		{"an added command placed nowhere", func(d *domain.DesignValues, m *domain.EventModelValues) { d.Placements = nil },
+			[]string{"command PostTransaction of slice PostTransaction is placed in no aggregate"}},
+		{"an unchanged command placed nowhere", func(d *domain.DesignValues, m *domain.EventModelValues) {
+			d.Placements = nil
+			m.Slices[0] = slice(domain.SliceValues{Name: "PostTransaction", Kind: domain.SliceCommand, Command: "PostTransaction", Change: domain.ChangeUnchanged})
+		}, nil},
+		{"a command placed in an unknown aggregate", func(d *domain.DesignValues, m *domain.EventModelValues) {
+			d.Placements[0] = domain.NewPlacementDesign("PostTransaction", "Account", nil)
+		}, []string{`command PostTransaction is placed in aggregate "Account", which the design doesn't have`}},
+		{"a placement of an unknown command", func(d *domain.DesignValues, m *domain.EventModelValues) {
+			d.Placements = append(d.Placements, domain.NewPlacementDesign("FreezeWallet", "Wallet", nil))
+		}, []string{`placement of command "FreezeWallet", which the event model doesn't have`}},
+		{"a command placed twice", func(d *domain.DesignValues, m *domain.EventModelValues) {
+			d.Placements = append(d.Placements, d.Placements[0])
+		}, []string{"command PostTransaction is placed more than once"}},
+		{"a rejection mapped to no invariant", func(d *domain.DesignValues, m *domain.EventModelValues) {
+			d.Placements[0] = domain.NewPlacementDesign("PostTransaction", "Wallet", nil)
+		}, []string{"rejection InsufficientFunds of command PostTransaction is mapped to no invariant of aggregate Wallet"}},
+		{"a rejection mapped to another text", func(d *domain.DesignValues, m *domain.EventModelValues) {
+			d.Placements[0] = domain.NewPlacementDesign("PostTransaction", "Wallet", []domain.RejectionCause{{Rejection: "InsufficientFunds", Invariant: "no overdrafts"}})
+		}, []string{`rejection InsufficientFunds of command PostTransaction is mapped to "no overdrafts", which is not an invariant of aggregate Wallet`}},
+		{"a cause for a rejection the command doesn't declare", func(d *domain.DesignValues, m *domain.EventModelValues) {
+			d.Placements[0] = domain.NewPlacementDesign("PostTransaction", "Wallet", []domain.RejectionCause{
+				{Rejection: "InsufficientFunds", Invariant: "balance never goes below zero"}, {Rejection: "WalletFrozen", Invariant: "balance never goes below zero"}})
+		}, []string{`command PostTransaction doesn't declare rejection "WalletFrozen"`}},
+		{"an external event without a contract", func(d *domain.DesignValues, m *domain.EventModelValues) {
+			m.Events = append(m.Events, modelEvent("WalletDebited", domain.VisibilityExternal))
+		}, []string{"external event WalletDebited has no event contract"}},
+		{"an http contract of a slice the model doesn't have", func(d *domain.DesignValues, m *domain.EventModelValues) {
+			d.Contracts[0] = contract(domain.ContractHTTP, "POST /refunds", "Refund", "")
+		}, []string{`http contract "POST /refunds" names slice "Refund", which the event model doesn't have`}},
+		{"an aggregate without invariants", func(d *domain.DesignValues, m *domain.EventModelValues) {
+			d.Aggregates = append(d.Aggregates, domain.NewAggregateDesign("Ledger", nil, nil))
+		}, []string{"aggregate Ledger has no invariant"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			d, m := walletModelling(), walletModel()
+			c.change(&d, &m)
+			model := domain.NewEventModel(m)
+
+			assert.Equal(t, c.want, domain.NewDesign(d).Problems(&model))
+		})
+	}
+}
+
+// Without an event model, placements have no place: commands name their
+// aggregate.
+func TestDesign_WithoutAnEventModel_RefusesPlacements(t *testing.T) {
+	v := walletDesign()
+	v.Placements = walletModelling().Placements
+	assert.Equal(t, []string{"without an event model, the design names each command's aggregate in commands, not in placements"},
+		domain.NewDesign(v).Problems(nil))
 }

@@ -90,7 +90,7 @@ func TestLoadDesign_ReturnsTheValidDesign(t *testing.T) {
 	m := newModule(t)
 	m.write(designPath, walletDesign(t))
 
-	design, err := exitchecks.LoadDesign(m.root, domain.DesignFor(WorkID, Visit1))
+	design, err := exitchecks.LoadDesign(m.root, domain.DesignFor(WorkID, Visit1), nil)
 
 	require.NoError(t, err)
 	assert.Equal(t, "wallets", design.BoundedContext())
@@ -234,4 +234,31 @@ func TestSpecsCoverSlices_IsRequiredOnlyOnPathsWithDesign(t *testing.T) {
 	m.write("server/server_test.go", failingSpec)
 
 	assert.NotContains(t, m.check(domain.StageSpecify, exitchecks.Config{}), domain.CheckSpecsCoverSlices)
+}
+
+// With an event model, design is domain modelling, checked against the
+// event model as it was accepted.
+func TestDesignValid_WithAnEventModel_ChecksThePlacements(t *testing.T) {
+	m := newModule(t)
+	m.eventModel = true
+	m.write(domain.EventModelFor(WorkID, Visit1).String(), walletEventModel(t))
+	m.begin(domain.StageGrill) // entered when event modelling was accepted
+	m.begin(domain.StageDesign)
+	m.writeArtifact(domain.StageDesign)
+	modelling, err := os.ReadFile("testdata/wallet-modelling.json")
+	require.NoError(t, err)
+	m.write(designPath, strings.Replace(string(modelling), `"InsufficientFunds": "balance never goes below zero"`, `"InsufficientFunds": "no overdrafts"`, 1))
+
+	check := func() map[domain.ExitCheck]domain.CheckResult {
+		return m.checkOn(Must(domain.PathFor(domain.WorkTypeNewFeature)), domain.StageDesign, exitchecks.Config{})
+	}
+	fails(t, check()[domain.CheckDesignValid],
+		designPath+` has 1 problem: rejection InsufficientFunds of command PostTransaction is mapped to "no overdrafts", which is not an invariant of aggregate Wallet`)
+
+	m.write(designPath, string(modelling))
+	passes(t, check()[domain.CheckDesignValid])
+
+	// The full schema of a design without an event model repeats the model.
+	m.write(designPath, walletDesign(t))
+	fails(t, check()[domain.CheckDesignValid], "the design repeats events of the event model")
 }

@@ -36,9 +36,10 @@ type Facts struct {
 	// NFRProposals returns what adopting a design visit's NFR proposals
 	// would change; ok is false when it proposes none.
 	NFRProposals func(proposals domain.RepoPath) (adoption domain.NFRAdoption, ok bool, err error)
-	// Design reads a structured design; an *exitchecks.DesignError says
-	// what is wrong with it.
-	Design func(path domain.RepoPath) (domain.Design, error)
+	// Design reads a structured design, checked against the work's event
+	// model (nil when it has none); an *exitchecks.DesignError says what is
+	// wrong with it.
+	Design func(path domain.RepoPath, eventModel *domain.EventModel) (domain.Design, error)
 	// DecisionsDir is the repository's decisions directory.
 	DecisionsDir func() (domain.DecisionsDir, error)
 	// Grill reads a grill visit's structured outcome; an
@@ -154,6 +155,9 @@ type DesignView struct {
 	File       string `json:"file"`     // the structured design
 	Aggregates int    `json:"aggregates"`
 	Commands   int    `json:"commands"`
+	// Placements counts the event model's commands the design places in
+	// aggregates, on work with an event model.
+	Placements int `json:"placements,omitempty"`
 	// Slices counts the slices by change: added, changed, removed,
 	// unchanged; never null.
 	Slices map[string]int `json:"slices"`
@@ -353,7 +357,9 @@ func FactsAt(root string) Facts {
 			}
 			return plan.Adoption, err == nil, err
 		},
-		Design: func(path domain.RepoPath) (domain.Design, error) { return exitchecks.LoadDesign(root, path) },
+		Design: func(path domain.RepoPath, eventModel *domain.EventModel) (domain.Design, error) {
+			return exitchecks.LoadDesign(root, path, eventModel)
+		},
 		EventModel: func(path domain.RepoPath) (domain.EventModel, error) {
 			return exitchecks.LoadEventModel(root, path)
 		},
@@ -435,6 +441,13 @@ func Read(log Reader, branch domain.Branch, facts Facts) (View, error) {
 				FixerArtifact: domain.ArtifactFor(work.ID(), domain.StageFixer, lastVisit[domain.StageFixer]).String(),
 				Reason:        e.Reason.String(), Target: e.Target.String(), TargetVisit: e.Visit.Int(),
 			}
+		}
+	}
+	if facts.Design != nil {
+		eventModel := acceptedEventModel(history, work, facts)
+		design := facts.Design
+		facts.Design = func(path domain.RepoPath, _ *domain.EventModel) (domain.Design, error) {
+			return design(path, eventModel)
 		}
 	}
 	if d := view.Work.Design; d != nil && facts.Design != nil {
@@ -656,14 +669,49 @@ func designAwaitsApproval(current *CurrentView, proposals *NFRProposalsView) Nex
 	}
 }
 
+// acceptedEventModel is the work's latest accepted canonical event model,
+// as the working tree has it; nil when there is none, or gf can't read it.
+func acceptedEventModel(history eventlog.History, work domain.ActiveWork, facts Facts) *domain.EventModel {
+	if facts.EventModel == nil {
+		return nil
+	}
+	visit, ok := latestAccepted(history, work.ID(), domain.StageEventModelling)
+	if !ok {
+		return nil
+	}
+	model, err := facts.EventModel(domain.EventModelFor(work.ID(), visit))
+	if err != nil {
+		return nil
+	}
+	return &model
+}
+
+// latestAccepted is the latest accepted visit of a stage of the work.
+func latestAccepted(history eventlog.History, work domain.WorkID, stage domain.Stage) (domain.Visit, bool) {
+	var visit domain.Visit
+	found := false
+	for _, r := range history.Records(eventlog.WorkStream(work)) {
+		entered, ok := r.Event.(domain.StageEntered)
+		if !ok || entered.Stage != stage {
+			continue
+		}
+		if state, _, err := history.Assignment(domain.AssignmentIDFor(work, stage, entered.Visit)); err == nil {
+			if _, accepted := state.(domain.Accepted); accepted {
+				visit, found = entered.Visit, true
+			}
+		}
+	}
+	return visit, found
+}
+
 // describeDesign counts what the latest accepted design holds.
 func describeDesign(d *DesignView, work domain.WorkID, facts Facts) {
-	design, err := facts.Design(domain.DesignFor(work, mustVisit(d.Visit)))
+	design, err := facts.Design(domain.DesignFor(work, mustVisit(d.Visit)), nil)
 	if err != nil {
 		d.Problem = "gf could not read the design: " + err.Error()
 		return
 	}
-	d.Aggregates, d.Commands = len(design.Aggregates()), len(design.Commands())
+	d.Aggregates, d.Commands, d.Placements = len(design.Aggregates()), len(design.Commands()), len(design.Placements())
 	for _, s := range design.Slices() {
 		d.Slices[s.Change().String()]++
 	}
@@ -672,7 +720,7 @@ func describeDesign(d *DesignView, work domain.WorkID, facts Facts) {
 // designProblems are what is wrong with a design visit's structured design;
 // none when it is valid.
 func designProblems(path domain.RepoPath, facts Facts) []string {
-	_, err := facts.Design(path)
+	_, err := facts.Design(path, nil)
 	var invalid *exitchecks.DesignError
 	switch {
 	case errors.As(err, &invalid) && invalid.Missing:
@@ -704,7 +752,7 @@ func eventModelProblems(path domain.RepoPath, facts Facts) []string {
 // slicesNeedingSpecs names the latest accepted design's slices that need
 // specs.
 func slicesNeedingSpecs(d *DesignView, work domain.WorkID, facts Facts) []string {
-	design, err := facts.Design(domain.DesignFor(work, mustVisit(d.Visit)))
+	design, err := facts.Design(domain.DesignFor(work, mustVisit(d.Visit)), nil)
 	if err != nil {
 		return nil // DesignView.Problem says why
 	}
@@ -1017,6 +1065,10 @@ func renderDesign(w io.Writer, d *DesignView) {
 		if n := d.Slices[c.String()]; n > 0 {
 			slices = append(slices, fmt.Sprintf("%d %s", n, c))
 		}
+	}
+	if d.Placements > 0 {
+		fmt.Fprintf(w, "  %d aggregates, %d of the event model's commands placed\n", d.Aggregates, d.Placements)
+		return
 	}
 	fmt.Fprintf(w, "  %d aggregates, %d commands, slices: %s\n", d.Aggregates, d.Commands, strings.Join(slices, ", "))
 }
