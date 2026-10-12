@@ -39,6 +39,11 @@ type Facts struct {
 	// Design reads a structured design; an *exitchecks.DesignError says
 	// what is wrong with it.
 	Design func(path domain.RepoPath) (domain.Design, error)
+	// DecisionsDir is the repository's decisions directory.
+	DecisionsDir func() (domain.DecisionsDir, error)
+	// Grill reads a grill visit's structured outcome; an
+	// *exitchecks.GrillError says why it can't.
+	Grill func(path domain.RepoPath) (domain.Grill, error)
 	// EventModel reads a canonical event model; an
 	// *exitchecks.EventModelError says what is wrong with it.
 	EventModel func(path domain.RepoPath) (domain.EventModel, error)
@@ -88,6 +93,9 @@ type WorkView struct {
 	Description string `json:"description"`
 	Branch      string `json:"branch"`
 	ArtifactDir string `json:"artifactDir"` // relative to the repository root, ends in "/"
+	// DecisionsDir is where grill writes the work's decision document,
+	// relative to the repository root; absent on paths without grill.
+	DecisionsDir string `json:"decisionsDir,omitempty"`
 	// Inputs are the files the owner started the work from; never null.
 	Inputs []InputView `json:"inputs"`
 	Stages []StageView `json:"stages"`
@@ -97,9 +105,26 @@ type WorkView struct {
 	// Design is the latest accepted design, on a path with design; absent
 	// before one is accepted, and on paths without design.
 	Design *DesignView `json:"design,omitempty"`
+	// Grill is the latest grill visit's outcome: its decision document and
+	// what it settled; absent before grill writes one.
+	Grill *GrillView `json:"grill,omitempty"`
 	// NFRProposals are the NFRs the latest design visit proposes that
 	// .gofast/nfrs.json doesn't contain yet; absent when there are none.
 	NFRProposals *NFRProposalsView `json:"nfrProposals,omitempty"`
+}
+
+// GrillView is a grill visit's outcome.
+type GrillView struct {
+	Visit int    `json:"visit"`
+	File  string `json:"file"` // the structured outcome
+	// DocPath is the decision document, the plan the owner approves.
+	DocPath             string `json:"docPath,omitempty"`
+	Decisions           int    `json:"decisions"`
+	AcceptanceScenarios int    `json:"acceptanceScenarios"`
+	// Accepted is set once the owner approved this visit.
+	Accepted bool `json:"accepted"`
+	// Problem says why gf couldn't read the outcome.
+	Problem string `json:"problem,omitempty"`
 }
 
 // InputView is a file the owner started the work from.
@@ -332,6 +357,11 @@ func FactsAt(root string) Facts {
 		EventModel: func(path domain.RepoPath) (domain.EventModel, error) {
 			return exitchecks.LoadEventModel(root, path)
 		},
+		Grill: func(path domain.RepoPath) (domain.Grill, error) { return exitchecks.LoadGrill(root, path) },
+		DecisionsDir: func() (domain.DecisionsDir, error) {
+			config, err := exitchecks.LoadConfig(root)
+			return config.Decisions, err
+		},
 		File: func(path domain.RepoPath) ([]byte, bool, error) {
 			data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(path.String())))
 			if errors.Is(err, os.ErrNotExist) {
@@ -409,6 +439,14 @@ func Read(log Reader, branch domain.Branch, facts Facts) (View, error) {
 	}
 	if d := view.Work.Design; d != nil && facts.Design != nil {
 		describeDesign(d, work.ID(), facts)
+	}
+	if work.Path().Includes(domain.StageGrill) && facts.DecisionsDir != nil {
+		if dir, err := facts.DecisionsDir(); err == nil {
+			view.Work.DecisionsDir = dir.Path().String()
+		}
+	}
+	if visit, ok := lastVisit[domain.StageGrill]; ok && facts.Grill != nil {
+		view.Work.Grill = grillView(history, work.ID(), visit, facts)
 	}
 	if visit, ok := lastVisit[domain.StageDesign]; ok && facts.NFRProposals != nil {
 		view.Work.NFRProposals = nfrProposalsView(domain.NFRProposalsFor(work.ID(), visit), facts)
@@ -500,6 +538,8 @@ func Read(log Reader, branch domain.Branch, facts Facts) (View, error) {
 		}
 	case current.Assignment == AssignmentAwaitingApproval && stage == domain.StageDesign:
 		view.Next = designAwaitsApproval(current, view.Work.NFRProposals)
+	case current.Assignment == AssignmentAwaitingApproval && stage == domain.StageGrill:
+		view.Next = grillAwaitsApproval(current, view.Work.Grill)
 	case current.Assignment == AssignmentAwaitingApproval:
 		view.Next = NextView{
 			Actor:    NextOwner,
@@ -514,6 +554,13 @@ func Read(log Reader, branch domain.Branch, facts Facts) (View, error) {
 		}
 	case stage == domain.StressDecider():
 		view.Next = reviewNext(current.Stress)
+	case stage == domain.StageGrill:
+		view.Next = NextView{
+			Actor: NextAgent,
+			Message: "Grill with the owner in this session, not in a subagent: load the gofast:grill skill, ask in rounds until no question is open, " +
+				"write the decision document and " + strings.TrimSuffix(current.Artifact, ".md") + ".json, then run `gf submit --passed` or `gf submit --failed \"<reason>\"`.",
+			Commands: []string{"gf submit --passed", `gf submit --failed "<reason>"`},
+		}
 	case inFixer:
 		submit := fmt.Sprintf(`gf submit --passed --route <%s> "<reason>"`, strings.Join(current.Fixer.Targets, "|"))
 		view.Next = NextView{
@@ -552,6 +599,41 @@ func inputViews(work domain.ActiveWork, facts Facts) []InputView {
 		views = append(views, v)
 	}
 	return views
+}
+
+// grillView is a grill visit's outcome, as its structured file says.
+func grillView(history eventlog.History, work domain.WorkID, visit domain.Visit, facts Facts) *GrillView {
+	file := domain.GrillFor(work, visit)
+	v := &GrillView{Visit: visit.Int(), File: file.String()}
+	if state, _, err := history.Assignment(domain.AssignmentIDFor(work, domain.StageGrill, visit)); err == nil {
+		_, v.Accepted = state.(domain.Accepted)
+	}
+	grill, err := facts.Grill(file)
+	var invalid *exitchecks.GrillError
+	switch {
+	case errors.As(err, &invalid) && invalid.Missing:
+		return nil
+	case err != nil:
+		v.Problem = "gf could not read it: " + err.Error()
+		return v
+	}
+	v.DocPath, v.Decisions, v.AcceptanceScenarios = grill.DocPath().String(), len(grill.Decisions()), len(grill.AcceptanceScenarios())
+	return v
+}
+
+// grillAwaitsApproval tells the owner to read the decision document: its
+// approval is the owner's approval of the plan.
+func grillAwaitsApproval(current *CurrentView, grill *GrillView) NextView {
+	doc := current.Artifact
+	if grill != nil && grill.DocPath != "" {
+		doc = grill.DocPath
+	}
+	return NextView{
+		Actor: NextOwner,
+		Message: fmt.Sprintf("Waiting for the owner to approve 'grill': read the decision document %s. Approving it approves the plan: run `gf approve`, or `gf reject \"<feedback>\"` for another round.",
+			doc),
+		Commands: []string{"gf approve", `gf reject "<feedback>"`},
+	}
 }
 
 // designAwaitsApproval tells the owner what to read in the design, and to
@@ -878,6 +960,14 @@ func RenderText(w io.Writer, v View) {
 	}
 	if r := c.Returned; r != nil {
 		fmt.Fprintf(w, "Returned: the owner sent the work back from %s (visit %d) to %s (visit %d): %s\n", r.From, r.FromVisit, r.Target, r.TargetVisit, r.Reason)
+	}
+	if g := v.Work.Grill; g != nil {
+		switch {
+		case g.Problem != "":
+			fmt.Fprintf(w, "Grill (visit %d): %s: %s\n", g.Visit, g.File, g.Problem)
+		default:
+			fmt.Fprintf(w, "Grill (visit %d): %s, %d decisions, %d acceptance scenarios (%s)\n", g.Visit, g.DocPath, g.Decisions, g.AcceptanceScenarios, g.File)
+		}
 	}
 	if d := v.Work.Design; d != nil {
 		renderDesign(w, d)

@@ -44,9 +44,13 @@ func TestArtifactPaths(t *testing.T) {
 	assert.Equal(t, ".gofast/works/w1/specify-v1.md", domain.ArtifactFor(workID, domain.StageSpecify, visit1).String())
 	assert.Equal(t, ".gofast/works/w1/design-v2.json", domain.DesignFor(workID, must(domain.NewVisit(2))).String())
 	assert.Equal(t, ".gofast/works/w1/nfrs.proposed-v1.json", domain.NFRProposalsFor(workID, visit1).String())
+	assert.Equal(t, ".gofast/works/w1/event-model-v1.json", domain.EventModelFor(workID, visit1).String())
+	assert.Equal(t, ".gofast/works/w1/grill-v2.json", domain.GrillFor(workID, must(domain.NewVisit(2))).String())
 }
 
 func TestEachStageHasItsWriteScope(t *testing.T) {
+	assert.Equal(t, domain.WriteScopeArtifacts, domain.StageEventModelling.WriteScope())
+	assert.Equal(t, domain.WriteScopeArtifactsAndDecision, domain.StageGrill.WriteScope())
 	assert.Equal(t, domain.WriteScopeArtifacts, domain.StageDiscovery.WriteScope())
 	assert.Equal(t, domain.WriteScopeArtifacts, domain.StageDesign.WriteScope())
 	assert.Equal(t, domain.WriteScopeTestsAndArtifacts, domain.StageSpecify.WriteScope())
@@ -57,40 +61,62 @@ func TestEachStageHasItsWriteScope(t *testing.T) {
 
 func TestWriteScopeAllows(t *testing.T) {
 	paths := []string{
-		".gofast/works/w1/discovery-v1.md", // 0: this work's artifact
-		".gofast/works/w1/notes/extra.md",  // 1: inside this work's artifact dir
-		".gofast/works/w0/discovery-v1.md", // 2: another work's artifact
-		".gofast/events.jsonl",             // 3
-		".gofast/events.lock",              // 4
-		".gofast/gf.log",                   // 5
-		".gofast/.gitignore",               // 6
-		".gofast/runtime/driving/x",        // 7
-		".gofast/works/w1",                 // 8: the artifact dir itself, not a file in it
-		"login/login_test.go",              // 9
-		"login/testdata/broken.json",       // 10
-		"testdata/top.txt",                 // 11
-		"login/login.go",                   // 12
-		"login/test_helpers.go",            // 13
-		"login/testdata",                   // 14: a file named testdata, not a dir
-		".gofastish/notes.md",              // 15: not .gofast/
+		".gofast/works/w1/discovery-v1.md",            // 0: this work's artifact
+		".gofast/works/w1/notes/extra.md",             // 1: inside this work's artifact dir
+		".gofast/works/w0/discovery-v1.md",            // 2: another work's artifact
+		".gofast/events.jsonl",                        // 3
+		".gofast/events.lock",                         // 4
+		".gofast/gf.log",                              // 5
+		".gofast/.gitignore",                          // 6
+		".gofast/runtime/driving/x",                   // 7
+		".gofast/works/w1",                            // 8: the artifact dir itself, not a file in it
+		"login/login_test.go",                         // 9
+		"login/testdata/broken.json",                  // 10
+		"testdata/top.txt",                            // 11
+		"login/login.go",                              // 12
+		"login/test_helpers.go",                       // 13
+		"login/testdata",                              // 14: a file named testdata, not a dir
+		".gofastish/notes.md",                         // 15: not .gofast/
+		"docs/decisions/README.md",                    // 16: the index gf generates
+		"docs/decisions/2026-10-12-w1-wallets.md",     // 17: this work's decision document
+		"docs/decisions/2026-10-12-w0-wallets.md",     // 18: another work's
+		"docs/decisions/notes.md",                     // 19
+		"docs/decisions/old/2026-10-12-w1-wallets.md", // 20: not directly in the directory
+		"docs/decisions/2026-10-12-w1-Wallets_v2.md",  // 21: not a slug
+		"docs/decisions/12-10-2026-w1-wallets.md",     // 22: not a date first
 	}
 	want := map[domain.WriteScope][]bool{
-		//                                  0     1     2      3      4      5      6      7      8      9      10     11     12     13     14     15
-		domain.WriteScopeArtifacts:         {true, true, false, false, false, false, false, false, false, false, false, false, false, false, false, false},
-		domain.WriteScopeTestsAndArtifacts: {true, true, false, false, false, false, false, false, false, true, true, true, false, false, false, false},
-		domain.WriteScopeAnything:          {true, true, false, false, false, false, false, false, false, true, true, true, true, true, true, true},
+		//                                  0     1     2      3      4      5      6      7      8      9      10     11     12     13     14     15     16     17     18     19     20     21     22
+		domain.WriteScopeArtifacts:            {true, true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false},
+		domain.WriteScopeArtifactsAndDecision: {true, true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, true, false, false, false, false, false},
+		domain.WriteScopeTestsAndArtifacts:    {true, true, false, false, false, false, false, false, false, true, true, true, false, false, false, false, false, false, false, false, false, false, false},
+		domain.WriteScopeAnything:             {true, true, false, false, false, false, false, false, false, true, true, true, true, true, true, true, false, true, true, true, true, true, true},
 	}
 	for scope, allowed := range want {
 		for i, p := range paths {
-			assert.Equalf(t, allowed[i], scope.Allows(repoPath(t, p), workID), "%s allows %s", scope, p)
+			assert.Equalf(t, allowed[i], scope.Allows(repoPath(t, p), workID, decisions), "%s allows %s", scope, p)
 		}
 	}
 }
 
+// The decisions directory is the owner's to choose, but never inside
+// gofast's own files.
+func TestDecisionsDir(t *testing.T) {
+	dir := must(domain.NewDecisionsDir(repoPath(t, "adr")))
+	assert.Equal(t, "adr/README.md", dir.Index().String())
+	assert.True(t, dir.IsDecisionOf(repoPath(t, "adr/2026-10-12-w1-wallets.md"), workID))
+	assert.False(t, dir.IsDecisionOf(repoPath(t, "docs/decisions/2026-10-12-w1-wallets.md"), workID))
+	assert.Equal(t, "docs/decisions", domain.DefaultDecisionsDir().Path().String())
+	for _, p := range []string{".gofast", ".gofast/decisions"} {
+		_, err := domain.NewDecisionsDir(repoPath(t, p))
+		assert.ErrorIs(t, err, domain.ErrInvalidRepoPath, p)
+	}
+}
+
 func TestWriteScopeAllows_ZeroValuesAllowNothing(t *testing.T) {
-	assert.False(t, domain.WriteScope{}.Allows(repoPath(t, "a.go"), workID))
-	assert.False(t, domain.WriteScopeAnything.Allows(domain.RepoPath{}, workID))
-	assert.False(t, domain.WriteScopeAnything.Allows(repoPath(t, "a.go"), domain.WorkID{}))
+	assert.False(t, domain.WriteScope{}.Allows(repoPath(t, "a.go"), workID, decisions))
+	assert.False(t, domain.WriteScopeAnything.Allows(domain.RepoPath{}, workID, decisions))
+	assert.False(t, domain.WriteScopeAnything.Allows(repoPath(t, "a.go"), domain.WorkID{}, decisions))
 }
 
 func TestWriteScopeViolations_OfEachScope(t *testing.T) {
@@ -109,7 +135,7 @@ func TestWriteScopeViolations_OfEachScope(t *testing.T) {
 	}
 	for scope, want := range cases {
 		var got []string
-		for _, p := range scope.Violations(changed, workID) {
+		for _, p := range scope.Violations(changed, workID, decisions) {
 			got = append(got, p.String())
 		}
 		assert.Equal(t, want, got, scope.String())
@@ -117,7 +143,7 @@ func TestWriteScopeViolations_OfEachScope(t *testing.T) {
 }
 
 func TestWriteScopeViolations_NothingChanged_NoViolations(t *testing.T) {
-	assert.Empty(t, domain.WriteScopeArtifacts.Violations(domain.ChangedFiles{}, workID))
+	assert.Empty(t, domain.WriteScopeArtifacts.Violations(domain.ChangedFiles{}, workID, decisions))
 }
 
 func TestNewChangedFiles_IsASortedSet(t *testing.T) {

@@ -83,19 +83,20 @@ func OpenAssignment(work WorkID, stage Stage, visit Visit, gate Gate, budget Att
 }
 
 // SubmitForAcceptance interprets the stage's exit: the agent's claim, the
-// files the stage visit changed checked against its write scope, and the
+// files the stage visit changed checked against its write scope (which
+// depends on the repository's decisions directory), and the
 // results of the exit checks the stage requires on the work's path (needed
 // only when the claim is a pass). A failure of the stage's own work uses an attempt; a failure of
 // the code hands the work to the fixer instead, using none. A passing exit is
 // accepted on an auto gate and waits for the owner on a human gate.
-func (a Open) SubmitForAcceptance(path Path, claim AgentClaim, changed ChangedFiles, results []CheckResult) ([]AssignmentEvent, error) {
+func (a Open) SubmitForAcceptance(path Path, decisions DecisionsDir, claim AgentClaim, changed ChangedFiles, results []CheckResult) ([]AssignmentEvent, error) {
 	if err := a.CheckClaim(claim); err != nil {
 		return nil, fmt.Errorf("submit assignment %s for acceptance: %w", a.id, err)
 	}
-	if err := requirePresent(required{"path", path}); err != nil {
+	if err := requirePresent(required{"path", path}, required{"decisions directory", decisions}); err != nil {
 		return nil, fmt.Errorf("submit assignment %s for acceptance: %w", a.id, err)
 	}
-	outcome, err := NewExitCheckOutcome(path, claim, CheckWriteScope(a.stage, a.work, changed), results)
+	outcome, err := NewExitCheckOutcome(path, claim, CheckWriteScope(a.stage, a.work, decisions, changed), results)
 	if err != nil {
 		return nil, fmt.Errorf("submit assignment %s for acceptance: %w", a.id, err)
 	}

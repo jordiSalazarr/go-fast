@@ -55,6 +55,10 @@ var (
 	// model parses and has no problems (EventModel.Problems), and its
 	// assumptions have ids.
 	CheckEventModelValid = ExitCheck{name: "event-model-valid"}
+	// CheckGrillValid: the grill visit's structured outcome parses and has
+	// no problems (Grill.Problems), and its decision document has the
+	// required sections.
+	CheckGrillValid = ExitCheck{name: "grill-valid"}
 )
 
 // ExitChecks lists every exit check.
@@ -63,7 +67,7 @@ func ExitChecks() []ExitCheck {
 		CheckArtifactWritten, CheckSpecsFail, CheckBuildPasses, CheckSpecsPass,
 		CheckSpecsUntouched, CheckSuitePasses, CheckFormatted, CheckIntegrationPasses,
 		CheckStressScriptsValid, CheckNFRsMet, CheckDesignValid, CheckNFRProposalsValid, CheckBehaviourDelta,
-		CheckSpecsCoverSlices, CheckEventModelValid,
+		CheckSpecsCoverSlices, CheckEventModelValid, CheckGrillValid,
 	}
 }
 
@@ -90,7 +94,9 @@ func (s Stage) checks() []ExitCheck {
 	switch s {
 	case StageEventModelling:
 		return []ExitCheck{CheckArtifactWritten, CheckEventModelValid}
-	case StageGrill, StageDiscovery:
+	case StageGrill:
+		return []ExitCheck{CheckArtifactWritten, CheckGrillValid}
+	case StageDiscovery:
 		return []ExitCheck{CheckArtifactWritten}
 	case StageDesign:
 		return []ExitCheck{CheckArtifactWritten, CheckDesignValid, CheckNFRProposalsValid}
@@ -195,8 +201,8 @@ type ScopeCheck struct {
 }
 
 // CheckWriteScope checks the files changed during a stage visit of work.
-func CheckWriteScope(stage Stage, work WorkID, changed ChangedFiles) ScopeCheck {
-	return ScopeCheck{stage: stage, violations: stage.WriteScope().Violations(changed, work)}
+func CheckWriteScope(stage Stage, work WorkID, decisions DecisionsDir, changed ChangedFiles) ScopeCheck {
+	return ScopeCheck{stage: stage, violations: stage.WriteScope().Violations(changed, work, decisions)}
 }
 
 func (c ScopeCheck) Violations() []RepoPath { return append([]RepoPath(nil), c.violations...) }
@@ -333,7 +339,7 @@ func ClassifyFailure(outcome ExitCheckOutcome) (kind FailureKind, ok bool) {
 func (c ExitCheck) judgesStageWork() bool {
 	switch c {
 	case CheckArtifactWritten, CheckStressScriptsValid, CheckDesignValid, CheckNFRProposalsValid, CheckBehaviourDelta,
-		CheckSpecsCoverSlices, CheckEventModelValid:
+		CheckSpecsCoverSlices, CheckEventModelValid, CheckGrillValid:
 		return true
 	}
 	return false

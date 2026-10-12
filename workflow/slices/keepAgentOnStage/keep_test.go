@@ -219,6 +219,27 @@ func TestStop_DrivingAtTheReworkLimit_IsAllowedTellingTheOwnerTheOptions_AndStop
 	assert.True(t, clear)
 }
 
+// Grill runs in the main session with the owner: the session stops to wait
+// for the owner's answers, but only on a second try, and stays driving.
+func TestStop_DrivingOnAnOpenGrill_IsBlockedOnce_ThenWaitsForTheOwnerStillDriving(t *testing.T) {
+	out, clear := sessionStop(mainStops(false), on(t, domain.StageGrill, true), true)
+	assert.Equal(t, "block", out.Decision)
+	assert.Contains(t, out.Reason, "'grill' is still open. If you just asked the owner a round of questions, end your turn again to wait for the answers.")
+	assert.Contains(t, out.Reason, "`gf submit --passed`")
+	assert.False(t, clear)
+
+	out, clear = sessionStop(mainStops(true), on(t, domain.StageGrill, true), true)
+	assert.Empty(t, out.Decision)
+	assert.Equal(t, "'grill' is waiting for your answers. Reply in this session to continue.", out.SystemMessage)
+	assert.False(t, clear, "the owner's answers continue the drive")
+}
+
+func TestStop_DrivingWithGrillAwaitingApproval_PointsTheOwnerToTheDecisionDocument_AndStopsDriving(t *testing.T) {
+	out, clear := sessionStop(mainStops(false), on(t, domain.StageGrill, true, SubmittedForApproval(domain.StageGrill, 1)), true)
+	assert.Contains(t, out.SystemMessage, "'grill' is waiting for your approval. Read the decision document `.gofast/works/w1/grill-v1.md` names: approving it approves the plan.")
+	assert.True(t, clear)
+}
+
 func TestStop_DrivingWithNoActiveWork_IsAllowedAndStopsDriving(t *testing.T) {
 	out, clear := sessionStop(mainStops(false), noActiveWork, true)
 

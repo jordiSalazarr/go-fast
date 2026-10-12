@@ -170,6 +170,7 @@ list them.
 | Stage | Required checks |
 |---|---|
 | event-modelling | artifact-written, event-model-valid |
+| grill | artifact-written, grill-valid |
 | discovery | artifact-written; on modify-behaviour also behaviour-delta |
 | design | artifact-written, design-valid, nfr-proposals-valid |
 | specify | artifact-written, specs-fail; on paths with design also specs-cover-slices |
@@ -211,6 +212,40 @@ the right `when`, a `then` the slice can produce, scenarios for every added
 or changed command or automation slice and for each rejection its command
 declares; and that every assumption has an id. `gf status` lists the
 problems as `current.eventModelProblems`.
+
+## Grill
+
+Grill (human gate) always runs on feature work, **in the main session,
+live with you**, not in a subagent: `/gofast:drive` loads the
+`gofast:grill` skill. It asks in rounds, each with every open question whose
+prerequisites are settled, numbered, with a recommended answer you accept
+with "yes", and waits for your answers before the next round. It covers
+intent, scope, the event model's assumptions and gaps, behaviour choices,
+and anything a later stage would otherwise guess, and stops when no question
+is open. While it waits for your answers the session stops; your reply
+continues the round.
+
+It writes, within its write scope (its artifacts and this work's decision
+document, nothing else):
+
+- the **decision document** `docs/decisions/<YYYY-MM-DD>-<work>-<slug>.md`,
+  with `## Intent`, `## Scope` (in / out), `## Decisions` (`D1`, `D2`, …:
+  question, answer, rationale), `## Glossary`, `## Acceptance scenarios`
+  (required without an event model: `A1`, `A2`, … given / when / then in
+  prose) and `## Open questions`, which says "None";
+- `grill-v<n>.json`, the same content structured: `decisions` (with
+  `addresses`, the ids of the event model's assumptions each settles),
+  `acceptanceScenarios`, `openQuestions` and `docPath`;
+- `grill-v<n>.md`, a pointer to the document and a summary.
+
+`grill-valid` checks that the JSON parses, no question is open, decision ids
+are unique, the document is this work's and has its sections, acceptance
+scenarios exist without an event model, and, with one, that every
+assumption is addressed by a decision naming its id (`addresses`). The main
+session submits with `gf submit --passed`; you read the document and approve
+it from your terminal: **approving grill approves the plan**. A rejection
+starts another round on the next `/gofast:drive`, and `gf return grill
+"<reason>"` sends the work back to grill from a later stage.
 
 ## Design
 

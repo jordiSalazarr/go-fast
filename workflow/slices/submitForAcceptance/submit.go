@@ -39,6 +39,10 @@ type Changes func(domain.AssignmentID) (changed domain.ChangedFiles, started boo
 // each as it finishes.
 type Checks func(v exitchecks.Visit, progress io.Writer) ([]domain.CheckResult, error)
 
+// Decisions returns the repository's decisions directory, which grill's
+// write scope includes.
+type Decisions func() (domain.DecisionsDir, error)
+
 // StressFacts returns the repository's NFRs and the files the work changed
 // since it started.
 type StressFacts func(work domain.ActiveWork) ([]domain.NFR, domain.ChangedFiles, error)
@@ -60,7 +64,8 @@ type Target struct {
 
 // Checked is what gf found out about the stage visit before deciding.
 type Checked struct {
-	Changed domain.ChangedFiles
+	Changed   domain.ChangedFiles
+	Decisions domain.DecisionsDir
 	// BaselineStarted: the visit had no baseline, so its write-scope check
 	// starts now and this submission's changes were not checked.
 	BaselineStarted bool
@@ -78,7 +83,7 @@ type Submission struct {
 // SubmitForAcceptance submits the active work's current assignment in one
 // go. The command does the same in three steps, so the checks run without
 // holding the event log.
-func SubmitForAcceptance(log Log, actor eventlog.Actor, branch domain.Branch, claim domain.AgentClaim, changes Changes, checks Checks) (Submission, error) {
+func SubmitForAcceptance(log Log, actor eventlog.Actor, branch domain.Branch, claim domain.AgentClaim, changes Changes, decisions Decisions, checks Checks) (Submission, error) {
 	target, err := Find(log, branch)
 	if err != nil {
 		return Submission{}, err
@@ -86,7 +91,7 @@ func SubmitForAcceptance(log Log, actor eventlog.Actor, branch domain.Branch, cl
 	if err := CheckClaim(target, claim); err != nil {
 		return Submission{}, err
 	}
-	checked, err := Check(target, claim, changes, checks, io.Discard)
+	checked, err := Check(target, claim, changes, decisions, checks, io.Discard)
 	if err != nil {
 		return Submission{}, err
 	}
@@ -189,13 +194,17 @@ func DecideStress(target Target, decision domain.StressDecision, reason domain.R
 // Check finds the files the visit changed and, when the agent claims a
 // pass, runs the stage's exit checks. A failed claim is the agent's own
 // verdict, so its checks are not run.
-func Check(target Target, claim domain.AgentClaim, changes Changes, checks Checks, progress io.Writer) (Checked, error) {
+func Check(target Target, claim domain.AgentClaim, changes Changes, decisions Decisions, checks Checks, progress io.Writer) (Checked, error) {
 	open := target.Open
 	changed, started, err := changes(open.ID())
 	if err != nil {
 		return Checked{}, fmt.Errorf("submit for acceptance: %w", err)
 	}
-	checked := Checked{Changed: changed, BaselineStarted: started}
+	dir, err := decisions()
+	if err != nil {
+		return Checked{}, fmt.Errorf("submit for acceptance: %w", err)
+	}
+	checked := Checked{Changed: changed, Decisions: dir, BaselineStarted: started}
 	if !claim.Passed() {
 		return checked, nil
 	}
@@ -203,13 +212,18 @@ func Check(target Target, claim domain.AgentClaim, changes Changes, checks Check
 		Assignment: open.ID(), Work: open.Work(), Path: target.work.Path(), Stage: open.Stage(), Visit: open.Visit(),
 		Attempt: currentAttempt(open), Specify: target.specify, SpecifyEnd: target.specifyEnd,
 		Design: target.designVisit, DesignEnd: target.designEnd,
-		EventModel: target.eventModelVisit, EventModelEnd: target.eventModelEnd,
+		EventModel: target.eventModelVisit, EventModelEnd: target.eventModelEnd, HasEventModel: hasEventModel(target.work),
 		Changed: changed, BaselineStarted: started, FirstAssignment: target.work.FirstAssignment(),
 	}, progress)
 	if err != nil {
 		return Checked{}, fmt.Errorf("submit for acceptance: %w", err)
 	}
 	return checked, nil
+}
+
+func hasEventModel(work domain.ActiveWork) bool {
+	_, ok := work.Input(domain.InputEventModel)
+	return ok
 }
 
 func currentAttempt(open domain.Open) domain.Attempt {
@@ -222,7 +236,7 @@ func currentAttempt(open domain.Open) domain.Attempt {
 // it must be made again.
 func Submit(log Log, actor eventlog.Actor, target Target, claim domain.AgentClaim, checked Checked) (Submission, error) {
 	open := target.Open
-	events, err := open.SubmitForAcceptance(target.work.Path(), claim, checked.Changed, checked.Results)
+	events, err := open.SubmitForAcceptance(target.work.Path(), checked.Decisions, claim, checked.Changed, checked.Results)
 	if err != nil {
 		return Submission{}, err
 	}
@@ -232,7 +246,7 @@ func Submit(log Log, actor eventlog.Actor, target Target, claim domain.AgentClai
 	return Submission{Assignment: open, Events: events, Checked: checked}, nil
 }
 
-func NewCommand(openStore func() (*eventlog.Store, error), automate automations.Runner, resolveCaller func() (caller.Caller, error), currentBranch func() (domain.Branch, error), changes Changes, checks Checks, stressFacts StressFacts) *cobra.Command {
+func NewCommand(openStore func() (*eventlog.Store, error), automate automations.Runner, resolveCaller func() (caller.Caller, error), currentBranch func() (domain.Branch, error), changes Changes, decisions Decisions, checks Checks, stressFacts StressFacts) *cobra.Command {
 	var passed bool
 	var failed, routeTo, stress string
 	cmd := &cobra.Command{
@@ -333,7 +347,7 @@ func NewCommand(openStore func() (*eventlog.Store, error), automate automations.
 			if claim.Passed() {
 				fmt.Fprintf(out, "Running the exit checks of '%s': %s\n", target.Open.Stage(), checkNames(target.Open.Stage(), target.work.Path()))
 			}
-			checked, err := Check(target, claim, changes, checks, out)
+			checked, err := Check(target, claim, changes, decisions, checks, out)
 			if err != nil {
 				return err
 			}

@@ -28,7 +28,7 @@ func TestEachStageRequiresItsExitChecks(t *testing.T) {
 	designed := with(with(fixBug, domain.StageDesign, design),
 		domain.StageSpecify, []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckSpecsFail, domain.CheckSpecsCoverSlices})
 	feature := with(with(designed, domain.StageEventModelling, []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckEventModelValid}),
-		domain.StageGrill, []domain.ExitCheck{domain.CheckArtifactWritten})
+		domain.StageGrill, []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckGrillValid})
 	behaviourDelta := []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckBehaviourDelta}
 	want := map[domain.WorkType]map[domain.PathVersion]map[domain.Stage][]domain.ExitCheck{
 		domain.WorkTypeFixBug:          {domain.PathV1: fixBug},
@@ -59,7 +59,7 @@ func TestExitChecksHaveStableNames(t *testing.T) {
 	}
 	assert.Equal(t, []string{"artifact-written", "specs-fail", "build-passes", "specs-pass",
 		"specs-untouched", "suite-passes", "formatted", "integration-passes", "stress-scripts-valid", "nfrs-met",
-		"design-valid", "nfr-proposals-valid", "behaviour-delta", "specs-cover-slices", "event-model-valid"}, names)
+		"design-valid", "nfr-proposals-valid", "behaviour-delta", "specs-cover-slices", "event-model-valid", "grill-valid"}, names)
 }
 
 func TestCheckFailed_NeedsASummary(t *testing.T) {
@@ -78,8 +78,8 @@ func TestCheckFailed_NeedsASummary(t *testing.T) {
 // then it passes or fails with this reason.
 
 var (
-	inScope      = domain.CheckWriteScope(domain.StageSpecify, workID, domain.NewChangedFiles(must(domain.NewRepoPath("/repo", "a_test.go"))))
-	outOfScope   = domain.CheckWriteScope(domain.StageSpecify, workID, domain.NewChangedFiles(must(domain.NewRepoPath("/repo", "a.go"))))
+	inScope      = domain.CheckWriteScope(domain.StageSpecify, workID, decisions, domain.NewChangedFiles(must(domain.NewRepoPath("/repo", "a_test.go"))))
+	outOfScope   = domain.CheckWriteScope(domain.StageSpecify, workID, decisions, domain.NewChangedFiles(must(domain.NewRepoPath("/repo", "a.go"))))
 	specifyPass  = []domain.CheckResult{domain.CheckPassed(domain.CheckArtifactWritten), domain.CheckPassed(domain.CheckSpecsFail)}
 	specsNotFail = []domain.CheckResult{
 		domain.CheckPassed(domain.CheckArtifactWritten),
@@ -120,7 +120,7 @@ func TestExitCheckOutcome(t *testing.T) {
 }
 
 func TestExitCheckOutcome_GivenFailingChecks_ThenTheReasonListsThemInTheStageOrder(t *testing.T) {
-	implement := domain.CheckWriteScope(domain.StageImplement, workID, domain.ChangedFiles{})
+	implement := domain.CheckWriteScope(domain.StageImplement, workID, decisions, domain.ChangedFiles{})
 	results := []domain.CheckResult{ // in a different order than the stage requires them
 		checkFailed(domain.CheckSuitePasses, "2 tests failed (TestServer_Listens, TestConfig_Port)."),
 		domain.CheckPassed(domain.CheckSpecsPass),
@@ -180,12 +180,13 @@ func TestEveryCheckAboutCode_IsRequiredBeforeTheStagesThatCantChangeCode(t *test
 	exempt := map[domain.ExitCheck]bool{
 		domain.CheckArtifactWritten: true, domain.CheckStressScriptsValid: true,
 		domain.CheckDesignValid: true, domain.CheckNFRProposalsValid: true, domain.CheckBehaviourDelta: true, domain.CheckEventModelValid: true,
+		domain.CheckGrillValid:        true,
 		domain.CheckIntegrationPasses: true, domain.CheckNFRsMet: true,
 	}
 	// Code is any Go file, tests included: specify writes test code.
 	code := []domain.RepoPath{must(domain.NewRepoPath("/repo", "server/server.go")), must(domain.NewRepoPath("/repo", "server/server_test.go"))}
 	canChangeCode := func(stage domain.Stage) bool {
-		return slices.ContainsFunc(code, func(p domain.RepoPath) bool { return stage.WriteScope().Allows(p, workID) })
+		return slices.ContainsFunc(code, func(p domain.RepoPath) bool { return stage.WriteScope().Allows(p, workID, decisions) })
 	}
 	for _, path := range domain.Paths() {
 		var requiredByCodeStages []domain.ExitCheck
@@ -216,7 +217,7 @@ func TestClassifyFailure(t *testing.T) {
 		for _, p := range paths {
 			changed = append(changed, must(domain.NewRepoPath("/repo", p)))
 		}
-		return domain.CheckWriteScope(stage, workID, domain.NewChangedFiles(changed...))
+		return domain.CheckWriteScope(stage, workID, decisions, domain.NewChangedFiles(changed...))
 	}
 	passedAll := func(stage domain.Stage, failing ...domain.CheckResult) []domain.CheckResult {
 		var results []domain.CheckResult
@@ -306,7 +307,7 @@ func TestChecksCode(t *testing.T) {
 // behaviour-delta's result too, and a missing section fails the attempt as
 // the stage's own work.
 func TestExitCheckOutcome_DependsOnTheWorkTypesPath(t *testing.T) {
-	discovery := domain.CheckWriteScope(domain.StageDiscovery, workID, domain.NewChangedFiles())
+	discovery := domain.CheckWriteScope(domain.StageDiscovery, workID, decisions, domain.NewChangedFiles())
 	written := []domain.CheckResult{domain.CheckPassed(domain.CheckArtifactWritten)}
 
 	outcome, err := domain.NewExitCheckOutcome(fixBugPath, domain.ClaimPassed(), discovery, written)
@@ -327,7 +328,7 @@ func TestExitCheckOutcome_DependsOnTheWorkTypesPath(t *testing.T) {
 // Given design's exit, when its structured design has problems, then the
 // failure is design's own work: the same stage tries again.
 func TestExitCheckOutcome_AnInvalidDesign_IsTheStagesOwnWork(t *testing.T) {
-	scope := domain.CheckWriteScope(domain.StageDesign, workID, domain.NewChangedFiles(must(domain.NewRepoPath("/repo", ".gofast/works/w1/design-v1.json"))))
+	scope := domain.CheckWriteScope(domain.StageDesign, workID, decisions, domain.NewChangedFiles(must(domain.NewRepoPath("/repo", ".gofast/works/w1/design-v1.json"))))
 	outcome, err := domain.NewExitCheckOutcome(pathOf(domain.WorkTypeNewFeature, domain.PathV1), domain.ClaimPassed(), scope, []domain.CheckResult{
 		domain.CheckPassed(domain.CheckArtifactWritten),
 		checkFailed(domain.CheckDesignValid, "aggregate Wallet has no invariant"),
@@ -341,7 +342,7 @@ func TestExitCheckOutcome_AnInvalidDesign_IsTheStagesOwnWork(t *testing.T) {
 	assert.Equal(t, domain.StageWorkFailure, kind)
 	assert.Equal(t, "design-valid: aggregate Wallet has no invariant.", outcome.Reason().String())
 
-	code := domain.CheckWriteScope(domain.StageDesign, workID, domain.NewChangedFiles(must(domain.NewRepoPath("/repo", "wallet/wallet.go"))))
+	code := domain.CheckWriteScope(domain.StageDesign, workID, decisions, domain.NewChangedFiles(must(domain.NewRepoPath("/repo", "wallet/wallet.go"))))
 	outcome, err = domain.NewExitCheckOutcome(pathOf(domain.WorkTypeNewFeature, domain.PathV1), domain.ClaimPassed(), code, []domain.CheckResult{
 		domain.CheckPassed(domain.CheckArtifactWritten), domain.CheckPassed(domain.CheckDesignValid), domain.CheckPassed(domain.CheckNFRProposalsValid),
 	})

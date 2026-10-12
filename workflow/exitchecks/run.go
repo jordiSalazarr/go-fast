@@ -48,6 +48,8 @@ type Visit struct {
 	// the work has none.
 	EventModel    domain.Visit
 	EventModelEnd domain.AssignmentID
+	// HasEventModel: the work started from an event model.
+	HasEventModel bool
 	// Changed is what the visit changed since its baseline.
 	Changed domain.ChangedFiles
 	// BaselineStarted: the visit had no baseline until this submission, so
@@ -181,6 +183,8 @@ func (c *checkRun) check(check domain.ExitCheck) (finding, error) {
 		return c.specsCoverSlices()
 	case domain.CheckEventModelValid:
 		return c.eventModelValid()
+	case domain.CheckGrillValid:
+		return c.grillValid()
 	}
 	return finding{}, fmt.Errorf("gf does not know how to run %q", check)
 }

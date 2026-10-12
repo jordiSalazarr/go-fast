@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/jordiSalazarr/go-fast/workflow/domain"
 )
 
 // ConfigPath is the per-repository check configuration, relative to the
@@ -33,6 +35,9 @@ type Config struct {
 	// stress-testing stage then fails closed.
 	Stress  *Stress
 	Timeout time.Duration
+	// Decisions is where grill writes its decision documents and gf their
+	// index.
+	Decisions domain.DecisionsDir
 	// Configured is false when there is no ConfigPath; the defaults apply.
 	Configured bool
 }
@@ -86,7 +91,7 @@ type configFile struct {
 // LoadConfig reads the check configuration of the repository at root. A
 // missing file is the default configuration, with no integration command.
 func LoadConfig(root string) (Config, error) {
-	config := Config{Timeout: DefaultTimeout}
+	config := Config{Timeout: DefaultTimeout, Decisions: domain.DefaultDecisionsDir()}
 	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(ConfigPath)))
 	if errors.Is(err, os.ErrNotExist) {
 		return config, nil

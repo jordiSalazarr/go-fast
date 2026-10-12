@@ -85,7 +85,7 @@ func TestOpenAssignment_WithMissingValue_IsRejected(t *testing.T) {
 func TestSubmitForAcceptance_Failed_UsesAnAttempt(t *testing.T) {
 	open := stateIs[domain.Open](t, givenAssignment(t, openedOnAutoGate()...))
 
-	got, err := open.SubmitForAcceptance(fixBugPath, domain.ClaimFailed(reason), noChanges, nil)
+	got, err := open.SubmitForAcceptance(fixBugPath, decisions, domain.ClaimFailed(reason), noChanges, nil)
 
 	thenEvents(t, got, err, failed(autoAssignmentID, 1))
 	after := stateIs[domain.Open](t, thenAssignmentState(t, openedOnAutoGate(), got))
@@ -96,7 +96,7 @@ func TestSubmitForAcceptance_FailedReachingTheBudget_Escalates(t *testing.T) {
 	given := history(openedOnAutoGate(), events(failed(autoAssignmentID, 1), failed(autoAssignmentID, 2)))
 	open := stateIs[domain.Open](t, givenAssignment(t, given...))
 
-	got, err := open.SubmitForAcceptance(fixBugPath, domain.ClaimFailed(reason), noChanges, nil)
+	got, err := open.SubmitForAcceptance(fixBugPath, decisions, domain.ClaimFailed(reason), noChanges, nil)
 
 	thenEvents(t, got, err, failed(autoAssignmentID, 3), escalated(autoAssignmentID, 3, 3))
 	stateIs[domain.Escalated](t, thenAssignmentState(t, given, got))
@@ -105,7 +105,7 @@ func TestSubmitForAcceptance_FailedReachingTheBudget_Escalates(t *testing.T) {
 func TestSubmitForAcceptance_WithoutClaim_IsRejected(t *testing.T) {
 	open := stateIs[domain.Open](t, givenAssignment(t, openedOnAutoGate()...))
 
-	got, err := open.SubmitForAcceptance(fixBugPath, domain.AgentClaim{}, noChanges, nil)
+	got, err := open.SubmitForAcceptance(fixBugPath, decisions, domain.AgentClaim{}, noChanges, nil)
 
 	thenRejected(t, got, err, domain.ErrMissingValue)
 }
@@ -114,7 +114,7 @@ func TestSubmitForAcceptance_PassedOnAutoGate_IsAccepted(t *testing.T) {
 	given := history(openedOnAutoGate(), events(failed(autoAssignmentID, 1)))
 	open := stateIs[domain.Open](t, givenAssignment(t, given...))
 
-	got, err := open.SubmitForAcceptance(fixBugPath, domain.ClaimPassed(), noChanges, passedChecks(open))
+	got, err := open.SubmitForAcceptance(fixBugPath, decisions, domain.ClaimPassed(), noChanges, passedChecks(open))
 
 	thenEvents(t, got, err, domain.AssignmentEvent(domain.AssignmentAccepted{
 		AssignmentID: autoAssignmentID, WorkID: workID, Stage: domain.StageImplement, Visit: visit1,
@@ -126,7 +126,7 @@ func TestSubmitForAcceptance_PassedOnHumanGate_AwaitsApproval(t *testing.T) {
 	given := history(openedOnHumanGate(), events(failed(humanAssignmentID, 1)))
 	open := stateIs[domain.Open](t, givenAssignment(t, given...))
 
-	got, err := open.SubmitForAcceptance(fixBugPath, domain.ClaimPassed(), noChanges, passedChecks(open))
+	got, err := open.SubmitForAcceptance(fixBugPath, decisions, domain.ClaimPassed(), noChanges, passedChecks(open))
 
 	thenEvents(t, got, err, awaitingApproval(2))
 	waiting := stateIs[domain.AwaitingApproval](t, thenAssignmentState(t, given, got))
@@ -138,7 +138,7 @@ func TestSubmitForAcceptance_PassedWithChangesOutsideTheWriteScope_FailsTheAttem
 	changed := domain.NewChangedFiles(
 		repoPath(t, "main.go"), repoPath(t, ".gofast/works/w1/discovery-v1.md"), repoPath(t, "internal/x.go"))
 
-	got, err := open.SubmitForAcceptance(fixBugPath, domain.ClaimPassed(), changed, passedChecks(open))
+	got, err := open.SubmitForAcceptance(fixBugPath, decisions, domain.ClaimPassed(), changed, passedChecks(open))
 
 	thenEvents(t, got, err, domain.AssignmentEvent(domain.AttemptFailed{
 		AssignmentID: humanAssignmentID, Attempt: attempt(1),
@@ -152,7 +152,7 @@ func TestSubmitForAcceptance_PassedWithChangesOutsideTheWriteScope_CanEscalate(t
 	given := history(openedOnHumanGate(), events(failed(humanAssignmentID, 1), failed(humanAssignmentID, 2)))
 	open := stateIs[domain.Open](t, givenAssignment(t, given...))
 
-	got, err := open.SubmitForAcceptance(fixBugPath, domain.ClaimPassed(), domain.NewChangedFiles(repoPath(t, "main.go")), passedChecks(open))
+	got, err := open.SubmitForAcceptance(fixBugPath, decisions, domain.ClaimPassed(), domain.NewChangedFiles(repoPath(t, "main.go")), passedChecks(open))
 
 	thenEvents(t, got, err,
 		domain.AssignmentEvent(domain.AttemptFailed{
@@ -166,7 +166,7 @@ func TestSubmitForAcceptance_PassedWithChangesOutsideTheWriteScope_CanEscalate(t
 func TestSubmitForAcceptance_FailedWithChangesOutsideTheWriteScope_GivesBothReasons(t *testing.T) {
 	open := stateIs[domain.Open](t, givenAssignment(t, openedOnHumanGate()...))
 
-	got, err := open.SubmitForAcceptance(fixBugPath, domain.ClaimFailed(reasonOf("cannot reproduce")), domain.NewChangedFiles(repoPath(t, "main.go")), nil)
+	got, err := open.SubmitForAcceptance(fixBugPath, decisions, domain.ClaimFailed(reasonOf("cannot reproduce")), domain.NewChangedFiles(repoPath(t, "main.go")), nil)
 
 	thenEvents(t, got, err, domain.AssignmentEvent(domain.AttemptFailed{
 		AssignmentID: humanAssignmentID, Attempt: attempt(1),
@@ -177,7 +177,7 @@ func TestSubmitForAcceptance_FailedWithChangesOutsideTheWriteScope_GivesBothReas
 func TestSubmitForAcceptance_PassedWithChangesInsideTheWriteScope_Passes(t *testing.T) {
 	open := stateIs[domain.Open](t, givenAssignment(t, openedOnHumanGate()...))
 
-	got, err := open.SubmitForAcceptance(fixBugPath, domain.ClaimPassed(), domain.NewChangedFiles(repoPath(t, ".gofast/works/w1/discovery-v1.md")), passedChecks(open))
+	got, err := open.SubmitForAcceptance(fixBugPath, decisions, domain.ClaimPassed(), domain.NewChangedFiles(repoPath(t, ".gofast/works/w1/discovery-v1.md")), passedChecks(open))
 
 	thenEvents(t, got, err, awaitingApproval(1))
 }
@@ -187,7 +187,7 @@ func TestSubmitForAcceptance_PassedWithAFailingExitCheck_FailsTheAttempt(t *test
 	results := passedChecks(open)
 	results[len(results)-1] = checkFailed(domain.CheckSuitePasses, "1 test failed (TestLogin)")
 
-	got, err := open.SubmitForAcceptance(fixBugPath, domain.ClaimPassed(), noChanges, results)
+	got, err := open.SubmitForAcceptance(fixBugPath, decisions, domain.ClaimPassed(), noChanges, results)
 
 	thenEvents(t, got, err, domain.AssignmentEvent(domain.AttemptFailed{
 		AssignmentID: autoAssignmentID, Attempt: attempt(1), Reason: reasonOf("suite-passes: 1 test failed (TestLogin)."),
@@ -216,7 +216,7 @@ func TestSubmitForAcceptance_CodeFailureOfAFailingCheck_HandsTheWorkToTheFixer(t
 	results := passedChecks(open)
 	results[len(results)-1] = checkFailed(domain.CheckSuitePasses, "1 test failed (TestLogin)")
 
-	got, err := open.SubmitForAcceptance(fixBugPath, domain.ClaimStressDecided(skipStress), noChanges, results)
+	got, err := open.SubmitForAcceptance(fixBugPath, decisions, domain.ClaimStressDecided(skipStress), noChanges, results)
 
 	thenEvents(t, got, err, handedToFixer(2, "suite-passes: 1 test failed (TestLogin)."))
 	handed := stateIs[domain.HandedToFixer](t, thenAssignmentState(t, given, got))
@@ -227,7 +227,7 @@ func TestSubmitForAcceptance_CodeFailureOfAFailingCheck_HandsTheWorkToTheFixer(t
 func TestSubmitForAcceptance_CodeFailureClaimedByTheAgent_HandsTheWorkToTheFixer(t *testing.T) {
 	open := stateIs[domain.Open](t, givenAssignment(t, openedOnReview()...))
 
-	got, err := open.SubmitForAcceptance(fixBugPath, domain.ClaimFailed(reasonOf("the fix ignores negative ports")), noChanges, nil)
+	got, err := open.SubmitForAcceptance(fixBugPath, decisions, domain.ClaimFailed(reasonOf("the fix ignores negative ports")), noChanges, nil)
 
 	thenEvents(t, got, err, handedToFixer(1, "the fix ignores negative ports"))
 }
@@ -236,7 +236,7 @@ func TestSubmitForAcceptance_CodeFailureOnTheLastAttempt_HandsOverWithoutEscalat
 	given := history(openedOnReview(), events(failed(reviewAssignmentID, 1), failed(reviewAssignmentID, 2)))
 	open := stateIs[domain.Open](t, givenAssignment(t, given...))
 
-	got, err := open.SubmitForAcceptance(fixBugPath, domain.ClaimFailed(reasonOf("blocking finding")), noChanges, nil)
+	got, err := open.SubmitForAcceptance(fixBugPath, decisions, domain.ClaimFailed(reasonOf("blocking finding")), noChanges, nil)
 
 	thenEvents(t, got, err, handedToFixer(3, "blocking finding"))
 	stateIs[domain.HandedToFixer](t, thenAssignmentState(t, given, got))
@@ -247,7 +247,7 @@ func TestSubmitForAcceptance_StageWorkFailureOfAStageThatChecksCode_UsesAnAttemp
 	results := passedChecks(open)
 	results[0] = checkFailed(domain.CheckArtifactWritten, ".gofast/works/w1/review-v1.md is missing")
 
-	got, err := open.SubmitForAcceptance(fixBugPath, domain.ClaimStressDecided(skipStress), noChanges, results)
+	got, err := open.SubmitForAcceptance(fixBugPath, decisions, domain.ClaimStressDecided(skipStress), noChanges, results)
 
 	thenEvents(t, got, err, domain.AssignmentEvent(domain.AttemptFailed{
 		AssignmentID: reviewAssignmentID, Attempt: attempt(1), Reason: reasonOf("artifact-written: .gofast/works/w1/review-v1.md is missing."),
@@ -257,7 +257,7 @@ func TestSubmitForAcceptance_StageWorkFailureOfAStageThatChecksCode_UsesAnAttemp
 func TestSubmitForAcceptance_PassedWithoutAllCheckResults_IsRejected(t *testing.T) {
 	open := stateIs[domain.Open](t, givenAssignment(t, openedOnAutoGate()...))
 
-	got, err := open.SubmitForAcceptance(fixBugPath, domain.ClaimPassed(), noChanges, passedChecks(open)[1:])
+	got, err := open.SubmitForAcceptance(fixBugPath, decisions, domain.ClaimPassed(), noChanges, passedChecks(open)[1:])
 
 	thenRejected(t, got, err, domain.ErrMissingValue)
 }
@@ -326,7 +326,7 @@ func TestExtendBudget_ReopensWithTheNewBudget(t *testing.T) {
 	// The extension gives exactly the additional attempts.
 	full := append(append(given, got...), failed(autoAssignmentID, 4))
 	open = stateIs[domain.Open](t, givenAssignment(t, full...))
-	got, err = open.SubmitForAcceptance(fixBugPath, domain.ClaimFailed(reason), noChanges, nil)
+	got, err = open.SubmitForAcceptance(fixBugPath, decisions, domain.ClaimFailed(reason), noChanges, nil)
 	thenEvents(t, got, err, failed(autoAssignmentID, 5), escalated(autoAssignmentID, 5, 5))
 }
 
@@ -404,7 +404,7 @@ var toImplement = must(domain.NewRoute(domain.StageImplement, reasonOf("the fix 
 func TestSubmitForAcceptance_FixerPassWithARoute_IsAcceptedWithTheRoute(t *testing.T) {
 	open := stateIs[domain.Open](t, givenAssignment(t, openedOnFixer()...))
 
-	got, err := open.SubmitForAcceptance(fixBugPath, domain.ClaimRouted(toImplement), noChanges, passedChecks(open))
+	got, err := open.SubmitForAcceptance(fixBugPath, decisions, domain.ClaimRouted(toImplement), noChanges, passedChecks(open))
 
 	thenEvents(t, got, err, domain.AssignmentEvent(domain.AssignmentAccepted{
 		AssignmentID: fixerAssignmentID, WorkID: workID, Stage: domain.StageFixer, Visit: visit1, Route: toImplement,
@@ -415,7 +415,7 @@ func TestSubmitForAcceptance_FixerPassWithARoute_IsAcceptedWithTheRoute(t *testi
 func TestSubmitForAcceptance_FixerPassWithoutARoute_IsRejected(t *testing.T) {
 	open := stateIs[domain.Open](t, givenAssignment(t, openedOnFixer()...))
 
-	got, err := open.SubmitForAcceptance(fixBugPath, domain.ClaimPassed(), noChanges, passedChecks(open))
+	got, err := open.SubmitForAcceptance(fixBugPath, decisions, domain.ClaimPassed(), noChanges, passedChecks(open))
 
 	thenRejected(t, got, err, domain.ErrMissingRoute)
 }
@@ -423,7 +423,7 @@ func TestSubmitForAcceptance_FixerPassWithoutARoute_IsRejected(t *testing.T) {
 func TestSubmitForAcceptance_ARouteOutsideTheFixer_IsRejected(t *testing.T) {
 	open := stateIs[domain.Open](t, givenAssignment(t, openedOnReview()...))
 
-	got, err := open.SubmitForAcceptance(fixBugPath, domain.ClaimRouted(toImplement), noChanges, passedChecks(open))
+	got, err := open.SubmitForAcceptance(fixBugPath, decisions, domain.ClaimRouted(toImplement), noChanges, passedChecks(open))
 
 	thenRejected(t, got, err, domain.ErrRouteOutsideFixer)
 }
@@ -431,7 +431,7 @@ func TestSubmitForAcceptance_ARouteOutsideTheFixer_IsRejected(t *testing.T) {
 func TestSubmitForAcceptance_FixerFailure_IsItsOwnWorkAndUsesAnAttempt(t *testing.T) {
 	open := stateIs[domain.Open](t, givenAssignment(t, openedOnFixer()...))
 
-	got, err := open.SubmitForAcceptance(fixBugPath, domain.ClaimFailed(reasonOf("can't find the cause yet")), noChanges, nil)
+	got, err := open.SubmitForAcceptance(fixBugPath, decisions, domain.ClaimFailed(reasonOf("can't find the cause yet")), noChanges, nil)
 
 	thenEvents(t, got, err, domain.AssignmentEvent(domain.AttemptFailed{
 		AssignmentID: fixerAssignmentID, Attempt: attempt(1), Reason: reasonOf("can't find the cause yet"),

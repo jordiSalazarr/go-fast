@@ -24,7 +24,7 @@ func submitting(claim domain.AgentClaim, changed ...string) func(*eventlog.Sessi
 
 func submittingChecked(claim domain.AgentClaim, checks submitforacceptance.Checks, changed ...string) func(*eventlog.Session) error {
 	return func(log *eventlog.Session) error {
-		_, err := submitforacceptance.SubmitForAcceptance(log, agent, Branch, claim, changes(changed...), checks)
+		_, err := submitforacceptance.SubmitForAcceptance(log, agent, Branch, claim, changes(changed...), defaultDecisions, checks)
 		return err
 	}
 }
@@ -167,7 +167,7 @@ func TestGivenAFoundAssignment_WhenItChangesBeforeSubmitting_ThenTheSubmissionCo
 			if target, err = submitforacceptance.Find(log, Branch); err != nil {
 				return err
 			}
-			checked, err = submitforacceptance.Check(target, passed, changes(), checksPassing, io.Discard)
+			checked, err = submitforacceptance.Check(target, passed, changes(), defaultDecisions, checksPassing, io.Discard)
 			return err
 		}).
 		Then()
@@ -324,7 +324,7 @@ func decidingStress(decision domain.StressDecision, facts submitforacceptance.St
 		if err := submitforacceptance.CheckClaim(target, claim); err != nil {
 			return err
 		}
-		checked, err := submitforacceptance.Check(target, claim, changes(), checks, io.Discard)
+		checked, err := submitforacceptance.Check(target, claim, changes(), defaultDecisions, checks, io.Discard)
 		if err != nil {
 			return err
 		}
@@ -367,3 +367,5 @@ func TestGivenAnotherStage_WhenDecidingStressTesting_ThenItIsRejected(t *testing
 		When(decidingStress(domain.StressInclude, workChanged(), checksMustNotRun(t))).
 		ThenRejected(domain.ErrStressOutsideReview)
 }
+
+func defaultDecisions() (domain.DecisionsDir, error) { return domain.DefaultDecisionsDir(), nil }

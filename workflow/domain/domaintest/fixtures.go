@@ -28,16 +28,20 @@ func AssignmentOn(s domain.Stage) domain.AssignmentID {
 	return domain.AssignmentIDFor(WorkID, s, Visit1)
 }
 
+// step is a stage's step: on the fix-bug path, or on the first path that
+// has it.
 func step(stage domain.Stage) domain.PathStep {
 	if stage == domain.StageFixer {
 		return domain.FixerStep()
 	}
-	for _, s := range Must(domain.PathFor(domain.WorkTypeFixBug)).Steps() {
-		if s.Stage() == stage {
-			return s
+	for _, p := range domain.Paths() {
+		for _, s := range p.Steps() {
+			if s.Stage() == stage {
+				return s
+			}
 		}
 	}
-	panic("stage not on the fix-bug path: " + stage.String())
+	panic("stage on no path: " + stage.String())
 }
 
 func WorkStarted() domain.WorkStarted {

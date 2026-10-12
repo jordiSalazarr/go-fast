@@ -23,6 +23,9 @@ import (
 type module struct {
 	t    *testing.T
 	root string
+	// eventModel: the work started from an event model, whose first
+	// event-modelling visit was accepted before grill's first visit.
+	eventModel bool
 }
 
 func newModule(t *testing.T) *module {
@@ -86,6 +89,9 @@ func (m *module) checkOn(path domain.Path, stage domain.Stage, config exitchecks
 	if config.Timeout == 0 {
 		config.Timeout = time.Minute
 	}
+	if config.Decisions == (domain.DecisionsDir{}) {
+		config.Decisions = domain.DefaultDecisionsDir()
+	}
 	runner := exitchecks.Runner{Root: m.root, Config: config, Env: append(os.Environ(), "GF_ACTOR=agent")}
 	visit := exitchecks.Visit{
 		Assignment: AssignmentOn(stage), Work: WorkID, Path: path, Stage: stage, Visit: Visit1, Attempt: Attempt(1),
@@ -94,6 +100,9 @@ func (m *module) checkOn(path domain.Path, stage domain.Stage, config exitchecks
 	if path.Includes(domain.StageDesign) {
 		// The design's first visit was accepted before specify's first.
 		visit.Design, visit.DesignEnd = Visit1, AssignmentOn(domain.StageSpecify)
+	}
+	if m.eventModel {
+		visit.HasEventModel, visit.EventModel, visit.EventModelEnd = true, Visit1, AssignmentOn(domain.StageGrill)
 	}
 	results, err := runner.Run(visit)
 	require.NoError(m.t, err)

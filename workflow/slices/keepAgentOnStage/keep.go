@@ -108,6 +108,9 @@ func sessionStop(in claudehooks.Input, facts assignmentFacts, driving bool) (out
 	}
 	switch s := facts.state.(type) {
 	case nil, domain.Open:
+		if facts.stage == domain.StageGrill {
+			return grillStop(in), false
+		}
 		if in.StopHookActive {
 			return claudehooks.Tell(fmt.Sprintf("Stopped while '%s' is open; run /gofast:drive to continue.", facts.stage)), false
 		}
@@ -118,6 +121,10 @@ func sessionStop(in claudehooks.Input, facts assignmentFacts, driving bool) (out
 		return claudehooks.Block(fmt.Sprintf("'%s' is still open (attempt %d of %d). Run the %s%s agent.",
 			facts.stage, attempt, budget, agentPrefix, facts.stage)), false
 	case domain.AwaitingApproval:
+		if facts.stage == domain.StageGrill {
+			return claudehooks.Tell(fmt.Sprintf("'grill' is waiting for your approval. Read the decision document `%s` names: approving it approves the plan. Then run `gf approve` or `gf reject \"<feedback>\"` in your own terminal. %s",
+				facts.artifact, resumeHint)), true
+		}
 		return claudehooks.Tell(fmt.Sprintf("'%s' is waiting for your approval. Review `%s`, then run `gf approve` or `gf reject \"<feedback>\"` in your own terminal. %s",
 			facts.stage, facts.artifact, resumeHint)), true
 	case domain.Escalated:
@@ -130,6 +137,20 @@ func sessionStop(in claudehooks.Input, facts assignmentFacts, driving bool) (out
 			facts.stage, facts.artifact, resumeHint)), true
 	}
 	return claudehooks.Nothing(), false
+}
+
+// grillStop: grill runs in the main session, with the owner, so the session
+// stops to wait for the owner's answers. The first stop is blocked, to make
+// sure it is waiting and not leaving grill without submitting; the second
+// is let through, and drive mode stays on: the owner's answers continue the
+// round.
+func grillStop(in claudehooks.Input) claudehooks.Output {
+	if in.StopHookActive {
+		return claudehooks.Tell("'grill' is waiting for your answers. Reply in this session to continue.")
+	}
+	return claudehooks.Block("'grill' is still open. If you just asked the owner a round of questions, end your turn again to wait for the answers. " +
+		"Otherwise, continue the rounds following the gofast:grill skill; once no question is open, write the decision document and the grill JSON, " +
+		"then run `gf submit --passed` or `gf submit --failed \"<reason>\"`.")
 }
 
 // resumeHint ends the message when drive mode ends because the owner is needed.

@@ -84,7 +84,7 @@ func (a *app) rootCommand() *cobra.Command {
 	root.PersistentFlags().StringVar(&a.dir, "dir", "", "repository root (default: the git repository containing the working directory)")
 	root.AddCommand(
 		startwork.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch, a.repositoryRoot),
-		submitforacceptance.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch, a.changedFiles, a.runChecks, a.stressFacts),
+		submitforacceptance.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch, a.changedFiles, a.decisionsDir, a.runChecks, a.stressFacts),
 		approve.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch),
 		reject.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch),
 		extendbudget.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch),
@@ -210,6 +210,20 @@ func (a *app) changedFiles(id domain.AssignmentID) (domain.ChangedFiles, bool, e
 		return domain.ChangedFiles{}, false, err
 	}
 	return worktree.OpenBaselines(root).ChangedSince(id)
+}
+
+// decisionsDir is the repository's decisions directory, as its check
+// configuration says.
+func (a *app) decisionsDir() (domain.DecisionsDir, error) {
+	root, err := a.repositoryRoot()
+	if err != nil {
+		return domain.DecisionsDir{}, err
+	}
+	config, err := exitchecks.LoadConfig(root)
+	if err != nil {
+		return domain.DecisionsDir{}, err
+	}
+	return config.Decisions, nil
 }
 
 // stressFacts reads the repository's NFRs and the files the work changed

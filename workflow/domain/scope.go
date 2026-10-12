@@ -69,6 +69,12 @@ func EventModelFor(work WorkID, visit Visit) RepoPath {
 	return RepoPath{value: ArtifactDir(work).value + "/event-model-v" + strconv.Itoa(visit.n) + ".json"}
 }
 
+// GrillFor is the structured outcome a grill visit writes next to its
+// artifact.
+func GrillFor(work WorkID, visit Visit) RepoPath {
+	return RepoPath{value: ArtifactDir(work).value + "/grill-v" + strconv.Itoa(visit.n) + ".json"}
+}
+
 // NFRProposalsFor is where a design visit may propose NFR changes, in the
 // schema of the repository's NFRs.
 func NFRProposalsFor(work WorkID, visit Visit) RepoPath {
@@ -86,6 +92,9 @@ type WriteScope struct{ name string }
 var (
 	// WriteScopeArtifacts allows only the work's artifact directory.
 	WriteScopeArtifacts = WriteScope{name: "artifacts"}
+	// WriteScopeArtifactsAndDecision also allows the work's decision
+	// document in the decisions directory.
+	WriteScopeArtifactsAndDecision = WriteScope{name: "artifacts and the decision document"}
 	// WriteScopeTestsAndArtifacts also allows *_test.go and files under testdata/.
 	WriteScopeTestsAndArtifacts = WriteScope{name: "tests and artifacts"}
 	// WriteScopeAnything allows everything outside gofast's own files.
@@ -106,25 +115,30 @@ func (s Stage) WriteScope() WriteScope {
 		return WriteScopeTestsAndArtifacts
 	case StageImplement:
 		return WriteScopeAnything
-	case StageEventModelling, StageGrill, StageDiscovery, StageDesign, StageReview, StageIntegrationTesting, StageStressTesting, StageFixer:
+	case StageGrill:
+		return WriteScopeArtifactsAndDecision
+	case StageEventModelling, StageDiscovery, StageDesign, StageReview, StageIntegrationTesting, StageStressTesting, StageFixer:
 		return WriteScopeArtifacts
 	}
 	return WriteScope{}
 }
 
 // Allows reports whether path may be written during a stage of work. The
-// work's artifact directory is always allowed; the rest of .gofast/ never is.
-func (s WriteScope) Allows(path RepoPath, work WorkID) bool {
+// work's artifact directory is always allowed; the rest of .gofast/ never
+// is, nor the index gf generates in the decisions directory.
+func (s WriteScope) Allows(path RepoPath, work WorkID, decisions DecisionsDir) bool {
 	if path.isZero() || work.isZero() {
 		return false
 	}
 	if path.within(ArtifactDir(work)) {
 		return true
 	}
-	if path == gofastDir || path.within(gofastDir) {
+	if path == gofastDir || path.within(gofastDir) || path == decisions.Index() {
 		return false
 	}
 	switch s {
+	case WriteScopeArtifactsAndDecision:
+		return decisions.IsDecisionOf(path, work)
 	case WriteScopeTestsAndArtifacts:
 		return isTestFile(path)
 	case WriteScopeAnything:
@@ -134,10 +148,10 @@ func (s WriteScope) Allows(path RepoPath, work WorkID) bool {
 }
 
 // Violations returns the changed paths the scope does not allow, in path order.
-func (s WriteScope) Violations(changed ChangedFiles, work WorkID) []RepoPath {
+func (s WriteScope) Violations(changed ChangedFiles, work WorkID, decisions DecisionsDir) []RepoPath {
 	var violations []RepoPath
 	for _, p := range changed.paths {
-		if !s.Allows(p, work) {
+		if !s.Allows(p, work, decisions) {
 			violations = append(violations, p)
 		}
 	}

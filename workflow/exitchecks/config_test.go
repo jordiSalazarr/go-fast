@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/jordiSalazarr/go-fast/workflow/domain"
 	"github.com/jordiSalazarr/go-fast/workflow/exitchecks"
 )
 
@@ -23,7 +24,7 @@ func TestLoadConfig_WithoutAFile_IsTheDefaultWithoutIntegration(t *testing.T) {
 	config, err := exitchecks.LoadConfig(t.TempDir())
 
 	require.NoError(t, err)
-	assert.Equal(t, exitchecks.Config{Timeout: 10 * time.Minute}, config)
+	assert.Equal(t, exitchecks.Config{Timeout: 10 * time.Minute, Decisions: domain.DefaultDecisionsDir()}, config)
 }
 
 func TestLoadConfig_ReadsTheIntegrationCommandAndTimeouts(t *testing.T) {
@@ -39,6 +40,7 @@ func TestLoadConfig_ReadsTheIntegrationCommandAndTimeouts(t *testing.T) {
 	assert.Equal(t, exitchecks.Config{
 		Integration: &exitchecks.Command{Argv: []string{"go", "test", "-tags=integration", "./..."}, Timeout: 15 * time.Minute},
 		Timeout:     2 * time.Minute,
+		Decisions:   domain.DefaultDecisionsDir(),
 		Configured:  true,
 	}, config)
 }

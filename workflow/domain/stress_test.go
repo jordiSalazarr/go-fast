@@ -314,7 +314,7 @@ func TestCheckClaim_StressDecision(t *testing.T) {
 	require.NoError(t, review.CheckClaim(domain.ClaimFailed(reasonOf("blocking finding"))), "a failed claim decides nothing")
 	require.ErrorIs(t, implement.CheckClaim(domain.ClaimStressDecided(skipStress)), domain.ErrStressOutsideReview)
 
-	events, err := review.SubmitForAcceptance(fixBugPath, domain.ClaimPassed(), domain.NewChangedFiles(), passedChecks(review))
+	events, err := review.SubmitForAcceptance(fixBugPath, decisions, domain.ClaimPassed(), domain.NewChangedFiles(), passedChecks(review))
 	thenRejected(t, events, err, domain.ErrMissingStressDecision)
 }
 
@@ -322,7 +322,7 @@ func TestReviewAccepted_CarriesItsStressDecision(t *testing.T) {
 	given := must(domain.OpenAssignment(workID, domain.StageReview, visit1, domain.GateAuto, budget3))
 	review := stateIs[domain.Open](t, givenAssignment(t, given...))
 
-	events, err := review.SubmitForAcceptance(fixBugPath, domain.ClaimStressDecided(forcedInclude), domain.NewChangedFiles(), passedChecks(review))
+	events, err := review.SubmitForAcceptance(fixBugPath, decisions, domain.ClaimStressDecided(forcedInclude), domain.NewChangedFiles(), passedChecks(review))
 
 	thenEvents(t, events, err, domain.AssignmentEvent(domain.AssignmentAccepted{
 		AssignmentID: review.ID(), WorkID: workID, Stage: domain.StageReview, Visit: visit1, Stress: forcedInclude,
@@ -376,5 +376,5 @@ func TestRebuildWork_RejectsAFixerFromStressTestingInCorrectnessMode(t *testing.
 func TestStressScripts_LiveInTheWorksArtifactDirectory(t *testing.T) {
 	assert.Equal(t, ".gofast/works/w1/stress", domain.StressScriptsDir(workID).String())
 	assert.Equal(t, ".gofast/works/w1/stress/wallet-transaction-latency.js", domain.StressScriptFor(workID, walletID).String())
-	assert.True(t, domain.StageStressTesting.WriteScope().Allows(domain.StressScriptFor(workID, walletID), workID))
+	assert.True(t, domain.StageStressTesting.WriteScope().Allows(domain.StressScriptFor(workID, walletID), workID, decisions))
 }

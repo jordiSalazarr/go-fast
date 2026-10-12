@@ -105,3 +105,6 @@ var fixBugPath = must(domain.PathFor(domain.WorkTypeFixBug))
 
 // pathOf is one version of a work type's path.
 func pathOf(t domain.WorkType, v domain.PathVersion) domain.Path { return must(domain.PathOf(t, v)) }
+
+// decisions is the default decisions directory.
+var decisions = domain.DefaultDecisionsDir()
