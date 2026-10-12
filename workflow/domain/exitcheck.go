@@ -66,16 +66,16 @@ func ExitChecks() []ExitCheck {
 func (c ExitCheck) String() string { return c.name }
 func (c ExitCheck) isZero() bool   { return c.name == "" }
 
-// RequiredChecks are the exit checks a stage visit must pass on a work
-// type's path, in the order their failures are reported: the stage's own,
-// and those the path adds. Everything a path adds is about the stage's own
-// work, never about code.
-func RequiredChecks(stage Stage, workType WorkType) []ExitCheck {
+// RequiredChecks are the exit checks a stage visit must pass on a path, in
+// the order their failures are reported: the stage's own, and those the
+// path adds. Everything a path adds is about the stage's own work, never
+// about code.
+func RequiredChecks(stage Stage, path Path) []ExitCheck {
 	checks := stage.checks()
 	switch {
-	case stage == StageDiscovery && workType == WorkTypeModifyBehaviour:
+	case stage == StageDiscovery && path.workType == WorkTypeModifyBehaviour:
 		checks = append(checks, CheckBehaviourDelta)
-	case stage == StageSpecify && workType.HasDesign():
+	case stage == StageSpecify && path.Includes(StageDesign):
 		checks = append(checks, CheckSpecsCoverSlices)
 	}
 	return checks
@@ -84,7 +84,7 @@ func RequiredChecks(stage Stage, workType WorkType) []ExitCheck {
 // checks are the exit checks a stage requires on every path.
 func (s Stage) checks() []ExitCheck {
 	switch s {
-	case StageDiscovery:
+	case StageEventModelling, StageGrill, StageDiscovery:
 		return []ExitCheck{CheckArtifactWritten}
 	case StageDesign:
 		return []ExitCheck{CheckArtifactWritten, CheckDesignValid, CheckNFRProposalsValid}
@@ -223,7 +223,7 @@ type ExitCheckOutcome struct {
 // stage requires, so a check can never be skipped silently. The reason of a
 // failed outcome lists every failure: the claim, then the scope, then the
 // checks in the order the stage requires them.
-func NewExitCheckOutcome(workType WorkType, claim AgentClaim, scope ScopeCheck, results []CheckResult) (ExitCheckOutcome, error) {
+func NewExitCheckOutcome(path Path, claim AgentClaim, scope ScopeCheck, results []CheckResult) (ExitCheckOutcome, error) {
 	var failures []string
 	var failedChecks []ExitCheck
 	if !claim.passed {
@@ -235,7 +235,7 @@ func NewExitCheckOutcome(workType WorkType, claim AgentClaim, scope ScopeCheck, 
 	if claim.passed {
 		var failed []string
 		var err error
-		failedChecks, failed, err = failingChecks(scope.stage, workType, results)
+		failedChecks, failed, err = failingChecks(scope.stage, path, results)
 		if err != nil {
 			return ExitCheckOutcome{}, err
 		}
@@ -258,10 +258,10 @@ func NewExitCheckOutcome(workType WorkType, claim AgentClaim, scope ScopeCheck, 
 // failingChecks returns the stage's required checks that failed, and a
 // description of each, in the stage's order. Results of checks the stage
 // does not require are ignored.
-func failingChecks(stage Stage, workType WorkType, results []CheckResult) ([]ExitCheck, []string, error) {
+func failingChecks(stage Stage, path Path, results []CheckResult) ([]ExitCheck, []string, error) {
 	var checks []ExitCheck
 	var described []string
-	for _, check := range RequiredChecks(stage, workType) {
+	for _, check := range RequiredChecks(stage, path) {
 		result, ok := resultOf(check, results)
 		if !ok {
 			return nil, nil, fmt.Errorf("exit check %s of stage %s has no result: %w", check, stage, ErrMissingValue)

@@ -95,6 +95,9 @@ type ActiveWork interface {
 	// FirstAssignment is the work's first stage visit: its baseline is the
 	// working tree before the work changed anything.
 	FirstAssignment() AssignmentID
+	// Skips reports whether the work leaves out an optional stage of its
+	// path.
+	Skips(stage Stage) bool
 	Reworks() ReworkCount
 	ReworkBudget() ReworkBudget
 	// StressDecision is the work's stress decision on its current pass along
@@ -114,6 +117,7 @@ type active struct {
 	reworks      ReworkCount
 	reworkBudget ReworkBudget
 	stress       *stressDecision // nil until decided on this pass; never mutated
+	eventModel   bool            // the work started with an event model
 }
 
 func (w active) Path() Path                 { return w.path }
@@ -126,7 +130,7 @@ func (w active) CurrentAssignment() AssignmentID {
 	return AssignmentIDFor(w.id, w.stage, w.visit)
 }
 func (w active) FirstAssignment() AssignmentID {
-	return AssignmentIDFor(w.id, w.path.step(0).stage, FirstVisit())
+	return AssignmentIDFor(w.id, w.firstStep().stage, FirstVisit())
 }
 
 func (w active) StressDecision() (StressChoice, Owner, bool) {
@@ -145,7 +149,7 @@ func (w active) next() (next Stage, done bool, err error) {
 		return Stage{}, false, ErrStressUndecided
 	}
 	for _, step := range w.path.steps[i+1:] {
-		if step.includedBy(w.stress) {
+		if w.includes(step) {
 			return step.stage, false, nil
 		}
 	}
@@ -259,17 +263,17 @@ func (AbandonedWork) isWorkState()          {}
 
 // StartWork starts a work on a branch, on the first stage of its type's path,
 // unless the branch already has active work.
-func StartWork(id WorkID, workType WorkType, description Description, branch Branch, active ActiveWorkFact) ([]WorkEvent, error) {
+func StartWork(id WorkID, workType WorkType, description Description, branch Branch, fact ActiveWorkFact) ([]WorkEvent, error) {
 	if err := requirePresent(
 		required{"work id", id}, required{"work type", workType}, required{"description", description},
-		required{"branch", branch}, required{"active work fact", active},
+		required{"branch", branch}, required{"active work fact", fact},
 	); err != nil {
 		return nil, fmt.Errorf("start work: %w", err)
 	}
-	if active.branch != branch {
-		return nil, fmt.Errorf("start work %s on %s: active work fact is for branch %s: %w", id, branch, active.branch, ErrMissingValue)
+	if fact.branch != branch {
+		return nil, fmt.Errorf("start work %s on %s: active work fact is for branch %s: %w", id, branch, fact.branch, ErrMissingValue)
 	}
-	if a := active.work; active.kind == activeSome {
+	if a := fact.work; fact.kind == activeSome {
 		return nil, fmt.Errorf("start work %s: %w", id, &WorkAlreadyActiveError{
 			ID: a.ID(), Type: a.Type(), Description: a.Description(), Branch: a.Branch(),
 		})
@@ -278,9 +282,9 @@ func StartWork(id WorkID, workType WorkType, description Description, branch Bra
 	if err != nil {
 		return nil, fmt.Errorf("start work %s: %w", id, err)
 	}
-	first := path.step(0)
+	first := active{path: path}.firstStep()
 	return []WorkEvent{
-		WorkStarted{WorkID: id, WorkType: workType, Description: description, Branch: branch},
+		WorkStarted{WorkID: id, WorkType: workType, PathVersion: path.version, Description: description, Branch: branch},
 		StageEntered{WorkID: id, Stage: first.stage, Visit: FirstVisit(), Gate: first.gate, Budget: first.budget},
 	}, nil
 }
@@ -467,7 +471,7 @@ func RebuildWork(history []WorkEvent) (WorkState, error) {
 	if !ok {
 		return nil, fmt.Errorf("rebuild work: first event is %T, want WorkStarted: %w", history[0], ErrInconsistentHistory)
 	}
-	path, err := PathFor(start.WorkType)
+	path, err := PathOf(start.WorkType, start.PathVersion)
 	if err != nil {
 		return nil, fmt.Errorf("rebuild work %s: %w: %w", start.WorkID, ErrInconsistentHistory, err)
 	}
@@ -512,11 +516,11 @@ func evolveWork(w work, path Path, state WorkState, e WorkEvent) (next WorkState
 	switch s := state.(type) {
 	case nil:
 		entered, ok := e.(StageEntered)
-		first := path.step(0)
+		a := active{work: w, path: path, reworkBudget: DefaultReworkBudget()}
+		first := a.firstStep()
 		if !ok || entered != (StageEntered{WorkID: w.id, Stage: first.stage, Visit: FirstVisit(), Gate: first.gate, Budget: first.budget}) {
 			return nil, nil, false
 		}
-		a := active{work: w, path: path, reworkBudget: DefaultReworkBudget()}
 		return InProgressWork{a.onStage(entered)}, nil, true
 	case InProgressWork:
 		switch e := e.(type) {

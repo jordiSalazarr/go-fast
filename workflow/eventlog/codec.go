@@ -62,8 +62,11 @@ type ownerV1 struct {
 }
 
 type workStartedV1 struct {
-	WorkID      string `json:"workId"`
-	WorkType    string `json:"workType"`
+	WorkID   string `json:"workId"`
+	WorkType string `json:"workType"`
+	// The version of the work type's path; absent for works started before
+	// paths had versions, which follow v1.
+	PathVersion int    `json:"pathVersion,omitempty"`
 	Description string `json:"description"`
 	Branch      string `json:"branch"` // required; logs from before work belonged to a branch are not supported
 }
@@ -250,7 +253,8 @@ func encodeEvent(e domain.Event) (eventType string, stream Stream, payload any, 
 	switch e := e.(type) {
 	case domain.WorkStarted:
 		return typeWorkStarted, WorkStream(e.WorkID), workStartedV1{
-			WorkID: e.WorkID.String(), WorkType: e.WorkType.String(), Description: e.Description.String(), Branch: e.Branch.String(),
+			WorkID: e.WorkID.String(), WorkType: e.WorkType.String(), PathVersion: e.PathVersion.Int(),
+			Description: e.Description.String(), Branch: e.Branch.String(),
 		}, nil
 	case domain.StageEntered:
 		return typeStageEntered, WorkStream(e.WorkID), stageEnteredV1{
@@ -347,8 +351,8 @@ func decodeEvent(eventType string, payload json.RawMessage) (domain.Event, Strea
 		var p workStartedV1
 		d.unmarshal(payload, &p)
 		event = domain.WorkStarted{
-			WorkID: d.workID(p.WorkID), WorkType: d.workType(p.WorkType), Description: d.description(p.Description),
-			Branch: d.branch(p.Branch),
+			WorkID: d.workID(p.WorkID), WorkType: d.workType(p.WorkType), PathVersion: d.pathVersion(p.PathVersion),
+			Description: d.description(p.Description), Branch: d.branch(p.Branch),
 		}
 	case typeStageEntered:
 		var p stageEnteredV1
@@ -518,6 +522,12 @@ func (d *decoder) assignmentID(s string) domain.AssignmentID {
 
 func (d *decoder) workType(s string) domain.WorkType {
 	v, err := domain.ParseWorkType(s)
+	d.keep(err)
+	return v
+}
+
+func (d *decoder) pathVersion(n int) domain.PathVersion {
+	v, err := domain.NewPathVersion(n)
 	d.keep(err)
 	return v
 }

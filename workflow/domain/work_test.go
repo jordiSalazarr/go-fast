@@ -11,7 +11,7 @@ import (
 
 func started() []domain.WorkEvent {
 	return []domain.WorkEvent{
-		domain.WorkStarted{WorkID: workID, WorkType: domain.WorkTypeFixBug, Description: description, Branch: mainBranch},
+		domain.WorkStarted{WorkID: workID, WorkType: domain.WorkTypeFixBug, PathVersion: domain.PathV1, Description: description, Branch: mainBranch},
 		domain.StageEntered{WorkID: workID, Stage: domain.StageDiscovery, Visit: visit1, Gate: domain.GateHuman, Budget: budget3},
 	}
 }
@@ -254,23 +254,63 @@ func TestActiveWorkOn_WithoutABranch_IsRejected(t *testing.T) {
 	require.ErrorIs(t, err, domain.ErrMissingValue)
 }
 
-// Given a designed work type, when work starts, then it walks discovery,
-// design (human gate) and the rest of the path.
-func TestStartWork_OfADesignedType_GoesThroughDesign(t *testing.T) {
+// advance moves the work past its current stage visit, and returns the
+// history with the events it recorded.
+func advance(t *testing.T, history []domain.WorkEvent) []domain.WorkEvent {
+	t.Helper()
+	w := asInProgress(t, givenWork(t, history...))
+	events, err := w.AdvancePastStage(w.CurrentStage(), w.CurrentVisit(), domain.StressChoice{})
+	require.NoError(t, err)
+	return append(history, events...)
+}
+
+// Given a feature work type, when work starts, then it follows path v2:
+// without an event model, grill (human gate), discovery (auto gate), design
+// (human gate), then the rest of the path.
+func TestStartWork_OfAFeatureType_FollowsPathV2(t *testing.T) {
 	for _, workType := range []domain.WorkType{domain.WorkTypeNewFeature, domain.WorkTypeModifyBehaviour} {
-		started := must(domain.StartWork(workID, workType, must(domain.NewDescription("wallets")), mainBranch, activeOn(t, mainBranch)))
-		w := must(domain.RebuildWork(started)).(domain.InProgressWork)
-		assert.Equal(t, domain.StageDiscovery, w.CurrentStage())
+		history := must(domain.StartWork(workID, workType, must(domain.NewDescription("wallets")), mainBranch, activeOn(t, mainBranch)))
+		assert.Equal(t, domain.PathV2, history[0].(domain.WorkStarted).PathVersion, workType.String())
+		w := asInProgress(t, givenWork(t, history...))
+		assert.Equal(t, domain.StageGrill, w.CurrentStage())
+		assert.Equal(t, domain.GateHuman, w.CurrentStep().Gate())
+		assert.Equal(t, domain.AssignmentIDFor(workID, domain.StageGrill, visit1), w.FirstAssignment())
+		assert.True(t, w.Skips(domain.StageEventModelling))
 
-		next := must(w.AdvancePastStage(domain.StageDiscovery, domain.FirstVisit(), domain.StressChoice{}))
-		require.Len(t, next, 1)
-		entered := next[0].(domain.StageEntered)
-		assert.Equal(t, domain.StageDesign, entered.Stage, workType.String())
-		assert.Equal(t, domain.GateHuman, entered.Gate)
-		assert.Equal(t, 3, entered.Budget.Int())
+		var stages []domain.Stage
+		var gates []domain.Gate
+		for range 3 {
+			history = advance(t, history)
+			entered := history[len(history)-1].(domain.StageEntered)
+			stages, gates = append(stages, entered.Stage), append(gates, entered.Gate)
+		}
+		assert.Equal(t, []domain.Stage{domain.StageDiscovery, domain.StageDesign, domain.StageSpecify}, stages, workType.String())
+		assert.Equal(t, []domain.Gate{domain.GateAuto, domain.GateHuman, domain.GateHuman}, gates, workType.String())
+	}
+}
 
-		w = must(domain.RebuildWork(append(started, next...))).(domain.InProgressWork)
-		next = must(w.AdvancePastStage(domain.StageDesign, domain.FirstVisit(), domain.StressChoice{}))
-		assert.Equal(t, domain.StageSpecify, next[0].(domain.StageEntered).Stage)
+// Given a feature work started before paths had versions, when it is
+// rebuilt, then it keeps path v1: discovery (human gate), design, specify.
+func TestAWorkStartedBeforePathVersions_KeepsPathV1(t *testing.T) {
+	for _, workType := range []domain.WorkType{domain.WorkTypeNewFeature, domain.WorkTypeModifyBehaviour} {
+		history := []domain.WorkEvent{
+			domain.WorkStarted{WorkID: workID, WorkType: workType, Description: description, Branch: mainBranch},
+			domain.StageEntered{WorkID: workID, Stage: domain.StageDiscovery, Visit: visit1, Gate: domain.GateHuman, Budget: budget3},
+		}
+		w := asInProgress(t, givenWork(t, history...))
+		assert.Equal(t, domain.PathV1, w.Path().Version(), workType.String())
+		assert.Equal(t, domain.AssignmentIDFor(workID, domain.StageDiscovery, visit1), w.FirstAssignment())
+		assert.False(t, w.Path().Includes(domain.StageGrill))
+
+		history = advance(t, history)
+		assert.Equal(t, domain.StageEntered{WorkID: workID, Stage: domain.StageDesign, Visit: visit1, Gate: domain.GateHuman, Budget: budget3},
+			history[len(history)-1], workType.String())
+		history = advance(t, history)
+		assert.Equal(t, domain.StageSpecify, history[len(history)-1].(domain.StageEntered).Stage, workType.String())
+
+		// Its v1 history doesn't fit path v2, nor v2's first stage path v1.
+		v2 := append([]domain.WorkEvent{domain.WorkStarted{WorkID: workID, WorkType: workType, PathVersion: domain.PathV2, Description: description, Branch: mainBranch}}, history[1:]...)
+		_, err := domain.RebuildWork(v2)
+		assert.ErrorIs(t, err, domain.ErrInconsistentHistory)
 	}
 }

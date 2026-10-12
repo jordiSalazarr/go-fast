@@ -90,7 +90,7 @@ func reasonOf(s string) domain.Reason    { return must(domain.NewReason(s)) }
 // passedChecks is every exit check the assignment's stage requires, passed.
 func passedChecks(open domain.Open) []domain.CheckResult {
 	var results []domain.CheckResult
-	for _, c := range domain.RequiredChecks(open.Stage(), domain.WorkTypeFixBug) {
+	for _, c := range domain.RequiredChecks(open.Stage(), fixBugPath) {
 		results = append(results, domain.CheckPassed(c))
 	}
 	return results
@@ -99,3 +99,9 @@ func passedChecks(open domain.Open) []domain.CheckResult {
 func checkFailed(c domain.ExitCheck, summary string) domain.CheckResult {
 	return must(domain.CheckFailed(c, summary))
 }
+
+// fixBugPath is the path every fix-bug work follows.
+var fixBugPath = must(domain.PathFor(domain.WorkTypeFixBug))
+
+// pathOf is one version of a work type's path.
+func pathOf(t domain.WorkType, v domain.PathVersion) domain.Path { return must(domain.PathOf(t, v)) }

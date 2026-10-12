@@ -18,9 +18,12 @@ type AssignmentEvent interface {
 
 // Work events.
 
+// WorkStarted records the version of its type's path the work follows; a
+// zero PathVersion (works started before paths had versions) is v1.
 type WorkStarted struct {
 	WorkID      WorkID
 	WorkType    WorkType
+	PathVersion PathVersion
 	Description Description
 	Branch      Branch
 }

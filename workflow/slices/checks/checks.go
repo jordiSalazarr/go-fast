@@ -118,7 +118,7 @@ func stageChecks(stage domain.Stage) (common []string, extra []pathChecks) {
 			continue
 		}
 		types = append(types, t)
-		for _, c := range domain.RequiredChecks(stage, t) {
+		for _, c := range domain.RequiredChecks(stage, path) {
 			byType[t] = append(byType[t], c.String())
 		}
 	}

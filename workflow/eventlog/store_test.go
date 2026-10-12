@@ -2,6 +2,7 @@ package eventlog
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -42,6 +43,7 @@ var (
 func allEvents() []domain.Event {
 	return []domain.Event{
 		domain.WorkStarted{WorkID: workID, WorkType: domain.WorkTypeFixBug, Description: must(domain.NewDescription("login broken")), Branch: must(domain.NewBranch("main"))},
+		domain.WorkStarted{WorkID: workID, WorkType: domain.WorkTypeNewFeature, PathVersion: domain.PathV2, Description: must(domain.NewDescription("wallets")), Branch: must(domain.NewBranch("main"))},
 		domain.StageEntered{WorkID: workID, Stage: domain.StageDiscovery, Visit: domain.FirstVisit(), Gate: domain.GateHuman, Budget: budget3},
 		domain.WorkCompleted{WorkID: workID},
 		domain.WorkAbandoned{WorkID: workID, Owner: owner, Reason: reason},
@@ -105,6 +107,24 @@ func TestCodec_RoundTripsEveryEventType(t *testing.T) {
 			assert.Equal(t, in, out)
 		})
 	}
+}
+
+// A work started before paths had versions has no pathVersion: it follows
+// v1, and is written back as it was.
+func TestCodec_AWorkStartedWithoutAPathVersion_FollowsV1(t *testing.T) {
+	payload := `{"workId":"w1","workType":"new-feature","description":"wallets","branch":"main"}`
+	e, _, err := decodeEvent("WorkStarted", []byte(payload))
+	require.NoError(t, err)
+	started := e.(domain.WorkStarted)
+	assert.Equal(t, domain.PathVersion{}, started.PathVersion)
+	assert.Equal(t, domain.PathV1, must(domain.PathOf(started.WorkType, started.PathVersion)).Version())
+
+	_, _, p, err := encodeEvent(e)
+	require.NoError(t, err)
+	assert.JSONEq(t, payload, string(must(json.Marshal(p))))
+
+	_, _, err = decodeEvent("WorkStarted", []byte(`{"workId":"w1","workType":"fix-bug","pathVersion":9,"description":"x","branch":"main"}`))
+	assert.ErrorIs(t, err, domain.ErrUnknownPathVersion)
 }
 
 func TestCodec_RejectsEventOnTheWrongStream(t *testing.T) {

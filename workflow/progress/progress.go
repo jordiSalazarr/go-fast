@@ -382,7 +382,6 @@ func Read(log Reader, branch domain.Branch, facts Facts) (View, error) {
 	if inFixer {
 		onPath = fixer.From()
 	}
-	stress, _, decided := work.StressDecision()
 	stageStatus := StageDone
 	for _, step := range work.Path().Steps() {
 		sv := StageView{Stage: step.Stage().String(), Gate: step.Gate().String(), Budget: step.Budget().Int(), Status: stageStatus, Optional: step.Optional()}
@@ -392,7 +391,7 @@ func Read(log Reader, branch domain.Branch, facts Facts) (View, error) {
 				sv.Status = StagePending
 			}
 		}
-		if step.Optional() && sv.Status == StagePending && decided && stress.Decision() == domain.StressSkip {
+		if step.Optional() && sv.Status != StageCurrent && work.Skips(step.Stage()) {
 			sv.Status = StageSkipped
 		}
 		if sv.Status == StageDone {
@@ -411,7 +410,7 @@ func Read(log Reader, branch domain.Branch, facts Facts) (View, error) {
 		Stage: work.CurrentStage().String(), Visit: work.CurrentVisit().Int(),
 		Gate: currentStep.Gate().String(), Assignment: AssignmentOpen, Budget: currentStep.Budget().Int(),
 		Artifact: domain.ArtifactFor(work.ID(), work.CurrentStage(), work.CurrentVisit()).String(),
-		Checks:   checkNames(work.CurrentStage(), work.Type()),
+		Checks:   checkNames(work.CurrentStage(), work.Path()),
 	}
 	if inFixer {
 		current.Fixer, err = fixerView(history, fixer, facts)
@@ -687,9 +686,9 @@ func nfrProposalsView(path domain.RepoPath, facts Facts) *NFRProposalsView {
 	return v
 }
 
-func checkNames(stage domain.Stage, workType domain.WorkType) []string {
+func checkNames(stage domain.Stage, path domain.Path) []string {
 	names := []string{}
-	for _, c := range domain.RequiredChecks(stage, workType) {
+	for _, c := range domain.RequiredChecks(stage, path) {
 		names = append(names, c.String())
 	}
 	return names

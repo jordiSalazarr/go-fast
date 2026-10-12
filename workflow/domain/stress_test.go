@@ -56,16 +56,17 @@ func TestStressTesting_IsAnOptionalStageAfterIntegrationTesting_DecidedByReview(
 
 // Review's choice travels on its own submission, so its gate must be auto:
 // an approval carries no choice.
-func TestTheStressDecider_IsOnEveryPathBeforeItsOptionalStages_WithAnAutoGate(t *testing.T) {
-	for _, workType := range domain.WorkTypes() {
+func TestTheStressDecider_IsOnEveryPathBeforeStressTesting_WithAnAutoGate(t *testing.T) {
+	for _, path := range domain.Paths() {
 		decider := -1
-		for i, s := range must(domain.PathFor(workType)).Steps() {
+		for i, s := range path.Steps() {
 			if s.Stage() == domain.StressDecider() {
 				decider = i
-				assert.Equal(t, domain.GateAuto, s.Gate(), workType.String())
+				assert.Equal(t, domain.GateAuto, s.Gate(), path.WorkType().String())
 			}
-			if s.Optional() {
-				assert.True(t, decider >= 0 && decider < i, "%s: %s is optional but comes before the stress decider", workType, s.Stage())
+			if s.Stage() == domain.StageStressTesting {
+				assert.True(t, s.Optional())
+				assert.True(t, decider >= 0 && decider < i, "%s %s: stress testing comes before the stress decider", path.WorkType(), path.Version())
 			}
 		}
 	}
@@ -313,7 +314,7 @@ func TestCheckClaim_StressDecision(t *testing.T) {
 	require.NoError(t, review.CheckClaim(domain.ClaimFailed(reasonOf("blocking finding"))), "a failed claim decides nothing")
 	require.ErrorIs(t, implement.CheckClaim(domain.ClaimStressDecided(skipStress)), domain.ErrStressOutsideReview)
 
-	events, err := review.SubmitForAcceptance(domain.WorkTypeFixBug, domain.ClaimPassed(), domain.NewChangedFiles(), passedChecks(review))
+	events, err := review.SubmitForAcceptance(fixBugPath, domain.ClaimPassed(), domain.NewChangedFiles(), passedChecks(review))
 	thenRejected(t, events, err, domain.ErrMissingStressDecision)
 }
 
@@ -321,7 +322,7 @@ func TestReviewAccepted_CarriesItsStressDecision(t *testing.T) {
 	given := must(domain.OpenAssignment(workID, domain.StageReview, visit1, domain.GateAuto, budget3))
 	review := stateIs[domain.Open](t, givenAssignment(t, given...))
 
-	events, err := review.SubmitForAcceptance(domain.WorkTypeFixBug, domain.ClaimStressDecided(forcedInclude), domain.NewChangedFiles(), passedChecks(review))
+	events, err := review.SubmitForAcceptance(fixBugPath, domain.ClaimStressDecided(forcedInclude), domain.NewChangedFiles(), passedChecks(review))
 
 	thenEvents(t, events, err, domain.AssignmentEvent(domain.AssignmentAccepted{
 		AssignmentID: review.ID(), WorkID: workID, Stage: domain.StageReview, Visit: visit1, Stress: forcedInclude,

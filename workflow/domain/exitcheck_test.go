@@ -10,9 +10,9 @@ import (
 	"github.com/jordiSalazarr/go-fast/workflow/domain"
 )
 
-// Given a stage and a work type, when its required checks are listed, then
-// they are the stage's own and those the path adds. Fix-bug's are those of
-// brief #5.
+// Given a stage and a path, when its required checks are listed, then they
+// are the stage's own and those the path adds. Fix-bug's are those of brief
+// #5.
 func TestEachStageRequiresItsExitChecks(t *testing.T) {
 	fixBug := map[domain.Stage][]domain.ExitCheck{
 		domain.StageDiscovery: {domain.CheckArtifactWritten},
@@ -27,16 +27,18 @@ func TestEachStageRequiresItsExitChecks(t *testing.T) {
 	design := []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckDesignValid, domain.CheckNFRProposalsValid}
 	designed := with(with(fixBug, domain.StageDesign, design),
 		domain.StageSpecify, []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckSpecsFail, domain.CheckSpecsCoverSlices})
-	want := map[domain.WorkType]map[domain.Stage][]domain.ExitCheck{
-		domain.WorkTypeFixBug:     fixBug,
-		domain.WorkTypeNewFeature: designed,
-		domain.WorkTypeModifyBehaviour: with(designed,
-			domain.StageDiscovery, []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckBehaviourDelta}),
+	feature := with(with(designed, domain.StageEventModelling, []domain.ExitCheck{domain.CheckArtifactWritten}),
+		domain.StageGrill, []domain.ExitCheck{domain.CheckArtifactWritten})
+	behaviourDelta := []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckBehaviourDelta}
+	want := map[domain.WorkType]map[domain.PathVersion]map[domain.Stage][]domain.ExitCheck{
+		domain.WorkTypeFixBug:          {domain.PathV1: fixBug},
+		domain.WorkTypeNewFeature:      {domain.PathV1: designed, domain.PathV2: feature},
+		domain.WorkTypeModifyBehaviour: {domain.PathV1: with(designed, domain.StageDiscovery, behaviourDelta), domain.PathV2: with(feature, domain.StageDiscovery, behaviourDelta)},
 	}
-	for _, workType := range domain.WorkTypes() {
-		for _, step := range append(must(domain.PathFor(workType)).Steps(), domain.FixerStep()) {
+	for _, path := range domain.Paths() {
+		for _, step := range append(path.Steps(), domain.FixerStep()) {
 			stage := step.Stage()
-			assert.Equal(t, want[workType][stage], domain.RequiredChecks(stage, workType), "%s on %s", stage, workType)
+			assert.Equal(t, want[path.WorkType()][path.Version()][stage], domain.RequiredChecks(stage, path), "%s on %s %s", stage, path.WorkType(), path.Version())
 		}
 	}
 }
@@ -109,7 +111,7 @@ func TestExitCheckOutcome(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			outcome, err := domain.NewExitCheckOutcome(domain.WorkTypeFixBug, c.claim, c.scope, c.results)
+			outcome, err := domain.NewExitCheckOutcome(fixBugPath, c.claim, c.scope, c.results)
 			require.NoError(t, err)
 			assert.Equal(t, c.passed, outcome.Passed())
 			assert.Equal(t, c.reason, outcome.Reason().String())
@@ -129,7 +131,7 @@ func TestExitCheckOutcome_GivenFailingChecks_ThenTheReasonListsThemInTheStageOrd
 		checkFailed(domain.CheckIntegrationPasses, "not required on implement, so ignored"),
 	}
 
-	outcome, err := domain.NewExitCheckOutcome(domain.WorkTypeFixBug, domain.ClaimPassed(), implement, results)
+	outcome, err := domain.NewExitCheckOutcome(fixBugPath, domain.ClaimPassed(), implement, results)
 
 	require.NoError(t, err)
 	assert.False(t, outcome.Passed())
@@ -144,13 +146,13 @@ func TestExitCheckOutcome_GivenAPassingClaim_WhenARequiredResultIsMissing_ThenIt
 		{domain.CheckPassed(domain.CheckArtifactWritten)},
 		{domain.CheckPassed(domain.CheckArtifactWritten), domain.CheckPassed(domain.CheckBuildPasses)},
 	} {
-		_, err := domain.NewExitCheckOutcome(domain.WorkTypeFixBug, domain.ClaimPassed(), inScope, results)
+		_, err := domain.NewExitCheckOutcome(fixBugPath, domain.ClaimPassed(), inScope, results)
 		require.ErrorIs(t, err, domain.ErrMissingValue)
 	}
 }
 
 func TestExitCheckOutcome_GivenAFailedClaim_ThenNoCheckResultsAreNeeded(t *testing.T) {
-	outcome, err := domain.NewExitCheckOutcome(domain.WorkTypeFixBug, domain.ClaimFailed(reasonOf("cannot reproduce")), inScope, nil)
+	outcome, err := domain.NewExitCheckOutcome(fixBugPath, domain.ClaimFailed(reasonOf("cannot reproduce")), inScope, nil)
 
 	require.NoError(t, err)
 	assert.False(t, outcome.Passed())
@@ -158,7 +160,7 @@ func TestExitCheckOutcome_GivenAFailedClaim_ThenNoCheckResultsAreNeeded(t *testi
 }
 
 func TestExitCheckOutcome_GivenAFailedClaim_ThenCheckResultsAreIgnored(t *testing.T) {
-	outcome, err := domain.NewExitCheckOutcome(domain.WorkTypeFixBug, domain.ClaimFailed(reasonOf("cannot reproduce")), inScope, specsNotFail)
+	outcome, err := domain.NewExitCheckOutcome(fixBugPath, domain.ClaimFailed(reasonOf("cannot reproduce")), inScope, specsNotFail)
 
 	require.NoError(t, err)
 	assert.Equal(t, "cannot reproduce", outcome.Reason().String())
@@ -185,21 +187,21 @@ func TestEveryCheckAboutCode_IsRequiredBeforeTheStagesThatCantChangeCode(t *test
 	canChangeCode := func(stage domain.Stage) bool {
 		return slices.ContainsFunc(code, func(p domain.RepoPath) bool { return stage.WriteScope().Allows(p, workID) })
 	}
-	for _, workType := range domain.WorkTypes() {
+	for _, path := range domain.Paths() {
 		var requiredByCodeStages []domain.ExitCheck
 		// The fixer is on no path, but is entered only after every stage
 		// that can hand over, so it comes last.
-		for _, step := range append(must(domain.PathFor(workType)).Steps(), domain.FixerStep()) {
+		for _, step := range append(path.Steps(), domain.FixerStep()) {
 			stage := step.Stage()
 			if canChangeCode(stage) {
-				requiredByCodeStages = append(requiredByCodeStages, domain.RequiredChecks(stage, workType)...)
+				requiredByCodeStages = append(requiredByCodeStages, domain.RequiredChecks(stage, path)...)
 				continue
 			}
-			for _, check := range domain.RequiredChecks(stage, workType) {
+			for _, check := range domain.RequiredChecks(stage, path) {
 				if !exempt[check] {
 					assert.Containsf(t, requiredByCodeStages, check,
-						"%s: '%s' can't change code but requires %s, which no earlier stage that can change code requires",
-						workType, stage, check)
+						"%s %s: '%s' can't change code but requires %s, which no earlier stage that can change code requires",
+						path.WorkType(), path.Version(), stage, check)
 				}
 			}
 		}
@@ -218,7 +220,7 @@ func TestClassifyFailure(t *testing.T) {
 	}
 	passedAll := func(stage domain.Stage, failing ...domain.CheckResult) []domain.CheckResult {
 		var results []domain.CheckResult
-		for _, c := range domain.RequiredChecks(stage, domain.WorkTypeFixBug) {
+		for _, c := range domain.RequiredChecks(stage, fixBugPath) {
 			results = append(results, domain.CheckPassed(c))
 		}
 		return append(failing, results...) // a failing result is found first
@@ -270,7 +272,7 @@ func TestClassifyFailure(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			outcome, err := domain.NewExitCheckOutcome(domain.WorkTypeFixBug, c.claim, c.scope, c.results)
+			outcome, err := domain.NewExitCheckOutcome(fixBugPath, c.claim, c.scope, c.results)
 			require.NoError(t, err)
 
 			kind, failed := domain.ClassifyFailure(outcome)
@@ -282,7 +284,7 @@ func TestClassifyFailure(t *testing.T) {
 }
 
 func TestClassifyFailure_GivenAPassingOutcome_ThenThereIsNoFailure(t *testing.T) {
-	outcome, err := domain.NewExitCheckOutcome(domain.WorkTypeFixBug, domain.ClaimPassed(), inScope, specifyPass)
+	outcome, err := domain.NewExitCheckOutcome(fixBugPath, domain.ClaimPassed(), inScope, specifyPass)
 	require.NoError(t, err)
 
 	_, failed := domain.ClassifyFailure(outcome)
@@ -307,14 +309,14 @@ func TestExitCheckOutcome_DependsOnTheWorkTypesPath(t *testing.T) {
 	discovery := domain.CheckWriteScope(domain.StageDiscovery, workID, domain.NewChangedFiles())
 	written := []domain.CheckResult{domain.CheckPassed(domain.CheckArtifactWritten)}
 
-	outcome, err := domain.NewExitCheckOutcome(domain.WorkTypeFixBug, domain.ClaimPassed(), discovery, written)
+	outcome, err := domain.NewExitCheckOutcome(fixBugPath, domain.ClaimPassed(), discovery, written)
 	require.NoError(t, err)
 	assert.True(t, outcome.Passed())
 
-	_, err = domain.NewExitCheckOutcome(domain.WorkTypeModifyBehaviour, domain.ClaimPassed(), discovery, written)
+	_, err = domain.NewExitCheckOutcome(pathOf(domain.WorkTypeModifyBehaviour, domain.PathV1), domain.ClaimPassed(), discovery, written)
 	require.ErrorIs(t, err, domain.ErrMissingValue)
 
-	outcome, err = domain.NewExitCheckOutcome(domain.WorkTypeModifyBehaviour, domain.ClaimPassed(), discovery,
+	outcome, err = domain.NewExitCheckOutcome(pathOf(domain.WorkTypeModifyBehaviour, domain.PathV1), domain.ClaimPassed(), discovery,
 		append(written, checkFailed(domain.CheckBehaviourDelta, "no '## Expected behaviour' section")))
 	require.NoError(t, err)
 	assert.Equal(t, "behaviour-delta: no '## Expected behaviour' section.", outcome.Reason().String())
@@ -326,7 +328,7 @@ func TestExitCheckOutcome_DependsOnTheWorkTypesPath(t *testing.T) {
 // failure is design's own work: the same stage tries again.
 func TestExitCheckOutcome_AnInvalidDesign_IsTheStagesOwnWork(t *testing.T) {
 	scope := domain.CheckWriteScope(domain.StageDesign, workID, domain.NewChangedFiles(must(domain.NewRepoPath("/repo", ".gofast/works/w1/design-v1.json"))))
-	outcome, err := domain.NewExitCheckOutcome(domain.WorkTypeNewFeature, domain.ClaimPassed(), scope, []domain.CheckResult{
+	outcome, err := domain.NewExitCheckOutcome(pathOf(domain.WorkTypeNewFeature, domain.PathV1), domain.ClaimPassed(), scope, []domain.CheckResult{
 		domain.CheckPassed(domain.CheckArtifactWritten),
 		checkFailed(domain.CheckDesignValid, "aggregate Wallet has no invariant"),
 		domain.CheckPassed(domain.CheckNFRProposalsValid),
@@ -340,7 +342,7 @@ func TestExitCheckOutcome_AnInvalidDesign_IsTheStagesOwnWork(t *testing.T) {
 	assert.Equal(t, "design-valid: aggregate Wallet has no invariant.", outcome.Reason().String())
 
 	code := domain.CheckWriteScope(domain.StageDesign, workID, domain.NewChangedFiles(must(domain.NewRepoPath("/repo", "wallet/wallet.go"))))
-	outcome, err = domain.NewExitCheckOutcome(domain.WorkTypeNewFeature, domain.ClaimPassed(), code, []domain.CheckResult{
+	outcome, err = domain.NewExitCheckOutcome(pathOf(domain.WorkTypeNewFeature, domain.PathV1), domain.ClaimPassed(), code, []domain.CheckResult{
 		domain.CheckPassed(domain.CheckArtifactWritten), domain.CheckPassed(domain.CheckDesignValid), domain.CheckPassed(domain.CheckNFRProposalsValid),
 	})
 	require.NoError(t, err)

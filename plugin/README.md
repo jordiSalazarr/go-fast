@@ -2,9 +2,10 @@
 
 Drives an agent along gofast's paths: fix-bug (discovery → specify →
 implement → review → integration-testing → [stress-testing]), and new-feature
-and modify-behaviour, which add design between discovery and specify. A
-fixer sends work back when a later stage finds the code (or the design)
-wrong. The `gf` CLI decides where the work is and refuses invalid moves; this
+and modify-behaviour, which start from the owner's input: [event-modelling]
+→ grill → discovery → design → specify → implement → review →
+integration-testing → [stress-testing]. A fixer sends work back when a later
+stage finds the code (or the design) wrong. The `gf` CLI decides where the work is and refuses invalid moves; this
 plugin connects it to Claude Code:
 
 - **Stage agents** `gofast:discovery`, `gofast:design`, `gofast:specify`,
@@ -133,6 +134,19 @@ The guard hook and `gf`'s own owner check (below) cover those.
    ends when there is no active work left on the branch.
 
 ## Exit checks
+
+## Paths
+
+Paths have versions, and a work keeps the version it started on, so
+changing a path never changes work in progress. New fix-bug work follows v1
+and new feature work v2:
+
+| Work type | v1 (works started before path versions) | v2 |
+|---|---|---|
+| fix-bug | discovery (human) → specify (human) → implement → review → integration-testing → [stress-testing] | — |
+| new-feature, modify-behaviour | discovery (human) → design (human) → specify (human) → implement → review → integration-testing → [stress-testing] | [event-modelling] → grill (human) → discovery → design (human) → specify (human) → implement → review → integration-testing → [stress-testing] |
+
+Stages in brackets are optional. Unmarked gates are auto.
 
 `gf submit --passed` runs the stage's exit checks itself; the agent's claim
 alone never passes a stage. `gf status` (`current.checks`) and `gf checks`

@@ -26,7 +26,7 @@ func startWork(log *eventlog.Session) error {
 
 func started() []domain.Event {
 	return []domain.Event{
-		domain.WorkStarted{WorkID: newWorkID, WorkType: domain.WorkTypeFixBug, Description: newDesc, Branch: Branch},
+		domain.WorkStarted{WorkID: newWorkID, WorkType: domain.WorkTypeFixBug, PathVersion: domain.PathV1, Description: newDesc, Branch: Branch},
 		domain.StageEntered{WorkID: newWorkID, Stage: domain.StageDiscovery, Visit: Visit1, Gate: domain.GateHuman, Budget: Budget(3)},
 	}
 }

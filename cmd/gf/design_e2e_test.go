@@ -12,11 +12,17 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/jordiSalazarr/go-fast/workflow/automations"
+	"github.com/jordiSalazarr/go-fast/workflow/domain"
+	"github.com/jordiSalazarr/go-fast/workflow/eventlog"
 	"github.com/jordiSalazarr/go-fast/workflow/progress"
+	"github.com/jordiSalazarr/go-fast/workflow/worktree"
 )
 
-// The design stage end to end: new-feature and modify-behaviour work, NFR
-// proposals the owner adopts, and rework back into design.
+// The design stage end to end, on path v1: new-feature and modify-behaviour
+// work started before paths had versions, NFR proposals the owner adopts,
+// and rework back into design. Such works keep their path: discovery
+// (human gate), design, specify.
 
 // walletDesignJSON is the brief's example design.
 func walletDesignJSON(t *testing.T) string {
@@ -33,13 +39,48 @@ const behaviourDelta = "# discovery\n\n## Current behaviour\n\nThe server listen
 const latencyProposal = `{"nfrs": [{"id": "server-latency", "areas": ["server/**"], "operation": "GET /port",
   "load": {"vus": 2, "duration": "1s"}, "targets": {"p95": "500ms", "minRps": 1}}]}`
 
-// toDesign commits the repository, starts work of a designed type and takes
-// it through discovery, to design's first visit.
+// startV1 starts work the way gf did before paths had versions: its
+// WorkStarted has no path version, so it follows path v1. Like gf start, it
+// runs the automations, which open the first assignment and record its
+// baseline.
+func (r *repo) startV1(workType, description string) {
+	r.t.Helper()
+	store, err := eventlog.Open(r.dir)
+	require.NoError(r.t, err)
+	id := must(domain.NewWorkID("w-v1"))
+	started := domain.WorkStarted{WorkID: id, WorkType: must(domain.ParseWorkType(workType)),
+		Description: must(domain.NewDescription(description)), Branch: must(domain.NewBranch("main"))}
+	first := must(domain.PathOf(started.WorkType, started.PathVersion)).Steps()[0]
+	opened := func(a domain.AssignmentID) {
+		_, err := worktree.OpenBaselines(r.dir).Ensure(a)
+		require.NoError(r.t, err)
+	}
+	require.NoError(r.t, store.Exclusive(func(s *eventlog.Session) error {
+		err := s.Append(eventlog.WorkStream(id), 0, eventlog.OwnerActor(must(domain.NewOwner("Jordi", "jordi@example.com"))),
+			started, domain.StageEntered{WorkID: id, Stage: first.Stage(), Visit: domain.FirstVisit(), Gate: first.Gate(), Budget: first.Budget()})
+		if err != nil {
+			return err
+		}
+		return automations.Runner{AssignmentOpened: opened}.Run(s)
+	}))
+	v := r.expect("discovery", progress.AssignmentOpen, 0, 3)
+	require.Equal(r.t, "human", v.Current.Gate, "path v1")
+}
+
+func must[T any](v T, err error) T {
+	if err != nil {
+		panic(err)
+	}
+	return v
+}
+
+// toDesign commits the repository, starts v1 work of a designed type and
+// takes it through discovery, to design's first visit.
 func (r *repo) toDesign(workType string) progress.View {
 	r.t.Helper()
 	r.git("add", "-A")
 	r.git("commit", "-q", "-m", "initial")
-	r.gf("start", "--type", workType, "The server listens on 8080")
+	r.startV1(workType, "The server listens on 8080")
 	r.write(r.status().Current.Artifact, behaviourDelta)
 	r.submitAsAgent("--passed")
 	r.gf("approve")
@@ -391,8 +432,9 @@ func (r *repo) specifyPasses(specs map[string]string) string {
 	return out
 }
 
-// 1. New feature: design's first structured design is invalid, specify
-// first misses a slice, and the work completes without stress testing.
+// 1. New feature on path v1 (started before this version of gf): design's
+// first structured design is invalid, specify first misses a slice, and the
+// work completes on its original path, without stress testing.
 func TestNewFeature_EndToEnd(t *testing.T) {
 	r := newDesignRepo(t)
 	v := r.toDesign("new-feature")
@@ -469,7 +511,7 @@ func TestModifyBehaviour_EndToEnd_AnAdoptedNFRForcesStressTesting(t *testing.T) 
 	r.git("commit", "-q", "-m", "initial")
 
 	// Discovery must state the current and the expected behaviour.
-	r.gf("start", "--type", "modify-behaviour", "A wallet applies debits")
+	r.startV1("modify-behaviour", "A wallet applies debits")
 	v := r.expect("discovery", progress.AssignmentOpen, 0, 3)
 	assert.Equal(t, []string{"artifact-written", "behaviour-delta"}, v.Current.Checks)
 	r.write(v.Current.Artifact, "# discovery\n\n## Current behaviour\n\nPosting ignores the amount.\n")

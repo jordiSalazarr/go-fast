@@ -41,7 +41,7 @@ func step(stage domain.Stage) domain.PathStep {
 }
 
 func WorkStarted() domain.WorkStarted {
-	return domain.WorkStarted{WorkID: WorkID, WorkType: domain.WorkTypeFixBug, Description: Description, Branch: Branch}
+	return domain.WorkStarted{WorkID: WorkID, WorkType: domain.WorkTypeFixBug, PathVersion: domain.PathV1, Description: Description, Branch: Branch}
 }
 
 func StageEntered(stage domain.Stage) domain.StageEntered {

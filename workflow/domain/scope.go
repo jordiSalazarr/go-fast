@@ -100,7 +100,7 @@ func (s Stage) WriteScope() WriteScope {
 		return WriteScopeTestsAndArtifacts
 	case StageImplement:
 		return WriteScopeAnything
-	case StageDiscovery, StageDesign, StageReview, StageIntegrationTesting, StageStressTesting, StageFixer:
+	case StageEventModelling, StageGrill, StageDiscovery, StageDesign, StageReview, StageIntegrationTesting, StageStressTesting, StageFixer:
 		return WriteScopeArtifacts
 	}
 	return WriteScope{}

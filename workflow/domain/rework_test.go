@@ -294,10 +294,11 @@ func TestCheckRoute_WithoutATarget_NamesTheAllowedOnes(t *testing.T) {
 	require.NoError(t, fixer.CheckRoute(domain.StageSpecify))
 }
 
-// newFeatureEntered is the StageEntered of a stage visit on new-feature's path.
+// newFeatureEntered is the StageEntered of a stage visit on new-feature's v1
+// path.
 func newFeatureEntered(stage domain.Stage, v int) domain.WorkEvent {
 	step := domain.FixerStep()
-	for _, s := range must(domain.PathFor(domain.WorkTypeNewFeature)).Steps() {
+	for _, s := range must(domain.PathOf(domain.WorkTypeNewFeature, domain.PathV1)).Steps() {
 		if s.Stage() == stage {
 			step = s
 		}

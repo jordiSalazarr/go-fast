@@ -12,6 +12,7 @@ var (
 	ErrInvalidAssignmentID   = errors.New("invalid assignment id")
 	ErrUnknownWorkType       = errors.New("unknown work type")
 	ErrUnknownStage          = errors.New("unknown stage")
+	ErrUnknownPathVersion    = errors.New("unknown path version")
 	ErrUnknownGate           = errors.New("unknown gate")
 	ErrInvalidAttemptBudget  = errors.New("attempt budget must be a positive number")
 	ErrInvalidReworkBudget   = errors.New("rework budget must be a positive number")

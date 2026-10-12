@@ -73,12 +73,12 @@ func (m *module) writeArtifact(stage domain.Stage) {
 // results by check.
 func (m *module) check(stage domain.Stage, config exitchecks.Config) map[domain.ExitCheck]domain.CheckResult {
 	m.t.Helper()
-	return m.checkOn(domain.WorkTypeFixBug, stage, config)
+	return m.checkOn(Must(domain.PathFor(domain.WorkTypeFixBug)), stage, config)
 }
 
 // checkOn runs the stage's exit checks on a work type's path and returns
 // their results by check.
-func (m *module) checkOn(workType domain.WorkType, stage domain.Stage, config exitchecks.Config) map[domain.ExitCheck]domain.CheckResult {
+func (m *module) checkOn(path domain.Path, stage domain.Stage, config exitchecks.Config) map[domain.ExitCheck]domain.CheckResult {
 	m.t.Helper()
 	changed, started, err := worktree.OpenBaselines(m.root).ChangedSince(AssignmentOn(stage))
 	require.NoError(m.t, err)
@@ -88,10 +88,10 @@ func (m *module) checkOn(workType domain.WorkType, stage domain.Stage, config ex
 	}
 	runner := exitchecks.Runner{Root: m.root, Config: config, Env: append(os.Environ(), "GF_ACTOR=agent")}
 	visit := exitchecks.Visit{
-		Assignment: AssignmentOn(stage), Work: WorkID, WorkType: workType, Stage: stage, Visit: Visit1, Attempt: Attempt(1),
+		Assignment: AssignmentOn(stage), Work: WorkID, Path: path, Stage: stage, Visit: Visit1, Attempt: Attempt(1),
 		Specify: AssignmentOn(domain.StageSpecify), Changed: changed,
 	}
-	if workType.HasDesign() {
+	if path.Includes(domain.StageDesign) {
 		// The design's first visit was accepted before specify's first.
 		visit.Design, visit.DesignEnd = Visit1, AssignmentOn(domain.StageSpecify)
 	}
@@ -101,7 +101,7 @@ func (m *module) checkOn(workType domain.WorkType, stage domain.Stage, config ex
 	for _, r := range results {
 		byCheck[r.Check()] = r
 	}
-	require.Len(m.t, byCheck, len(domain.RequiredChecks(stage, workType)), "a result for every required check")
+	require.Len(m.t, byCheck, len(domain.RequiredChecks(stage, path)), "a result for every required check")
 	return byCheck
 }
 
@@ -233,7 +233,7 @@ func TestImplement_TheFixMakesTheSpecsPass(t *testing.T) {
 
 	results := m.check(domain.StageImplement, exitchecks.Config{})
 
-	for _, check := range domain.RequiredChecks(domain.StageImplement, domain.WorkTypeFixBug) {
+	for _, check := range domain.RequiredChecks(domain.StageImplement, Must(domain.PathFor(domain.WorkTypeFixBug))) {
 		passes(t, results[check])
 	}
 }

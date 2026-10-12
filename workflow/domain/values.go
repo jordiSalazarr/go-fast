@@ -80,6 +80,13 @@ func (t WorkType) isZero() bool   { return t.name == "" }
 type Stage struct{ name string }
 
 var (
+	// StageEventModelling turns the owner's event model into the canonical
+	// one, with scenarios. It is optional: entered only when the work
+	// started with an event model.
+	StageEventModelling = Stage{name: "event-modelling"}
+	// StageGrill is a live session with the owner, in the main session, that
+	// settles every open question before discovery.
+	StageGrill     = Stage{name: "grill"}
 	StageDiscovery = Stage{name: "discovery"}
 	// StageDesign models the change before any spec is written: event and
 	// domain model, contracts and read models. It writes artifacts only.
@@ -97,7 +104,7 @@ var (
 )
 
 func Stages() []Stage {
-	return []Stage{StageDiscovery, StageDesign, StageSpecify, StageImplement, StageReview, StageIntegrationTesting, StageStressTesting, StageFixer}
+	return []Stage{StageEventModelling, StageGrill, StageDiscovery, StageDesign, StageSpecify, StageImplement, StageReview, StageIntegrationTesting, StageStressTesting, StageFixer}
 }
 
 func ParseStage(s string) (Stage, error) {

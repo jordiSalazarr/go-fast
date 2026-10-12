@@ -25,7 +25,7 @@ var designPath = domain.DesignFor(WorkID, Visit1).String()
 
 func (m *module) checkDesign() map[domain.ExitCheck]domain.CheckResult {
 	m.t.Helper()
-	return m.checkOn(domain.WorkTypeNewFeature, domain.StageDesign, exitchecks.Config{})
+	return m.checkOn(Must(domain.PathOf(domain.WorkTypeNewFeature, domain.PathV1)), domain.StageDesign, exitchecks.Config{})
 }
 
 // Design valid.
@@ -127,7 +127,7 @@ func TestBehaviourDelta(t *testing.T) {
 	m.begin(domain.StageDiscovery)
 	artifact := domain.ArtifactFor(WorkID, domain.StageDiscovery, Visit1).String()
 	check := func() domain.CheckResult {
-		return m.checkOn(domain.WorkTypeModifyBehaviour, domain.StageDiscovery, exitchecks.Config{})[domain.CheckBehaviourDelta]
+		return m.checkOn(Must(domain.PathOf(domain.WorkTypeModifyBehaviour, domain.PathV1)), domain.StageDiscovery, exitchecks.Config{})[domain.CheckBehaviourDelta]
 	}
 
 	fails(t, check(), artifact+" is missing")
@@ -174,7 +174,7 @@ func (m *module) onDesignedSpecify(design string) {
 
 func (m *module) checkDesignedSpecify() map[domain.ExitCheck]domain.CheckResult {
 	m.t.Helper()
-	return m.checkOn(domain.WorkTypeNewFeature, domain.StageSpecify, exitchecks.Config{})
+	return m.checkOn(Must(domain.PathOf(domain.WorkTypeNewFeature, domain.PathV1)), domain.StageSpecify, exitchecks.Config{})
 }
 
 func TestSpecsCoverSlices_EveryAddedCommandAndAutomationSliceCovered_Passes(t *testing.T) {

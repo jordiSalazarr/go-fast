@@ -13,17 +13,26 @@ import (
 	"github.com/jordiSalazarr/go-fast/workflow/domain"
 )
 
-// Each stage agent names the exit checks gf runs for its stage, as the
-// domain lists them: those of every path the stage is on, then those only
-// some paths add.
+// instructions is where a stage's instructions live: its agent's file, or
+// for grill, which runs in the main session with the owner, its skill.
+func instructions(stage domain.Stage) string {
+	if stage == domain.StageGrill {
+		return filepath.Join("..", "..", "plugin", "skills", "grill", "SKILL.md")
+	}
+	return filepath.Join("..", "..", "plugin", "agents", stage.String()+".md")
+}
+
+// Each stage's instructions name the exit checks gf runs for its stage, as
+// the domain lists them: those of every path the stage is on, in every
+// version, then those only some paths add.
 func TestStageAgents_NameTheirExitChecks(t *testing.T) {
 	for _, stage := range domain.Stages() {
-		body, err := os.ReadFile(filepath.Join("..", "..", "plugin", "agents", stage.String()+".md"))
+		body, err := os.ReadFile(instructions(stage))
 		require.NoError(t, err)
 		var byType [][]domain.ExitCheck
-		for _, workType := range domain.WorkTypes() {
-			if path, _ := domain.PathFor(workType); path.Includes(stage) || stage == domain.StageFixer {
-				byType = append(byType, domain.RequiredChecks(stage, workType))
+		for _, path := range domain.Paths() {
+			if path.Includes(stage) || stage == domain.StageFixer {
+				byType = append(byType, domain.RequiredChecks(stage, path))
 			}
 		}
 		var common []string
@@ -45,7 +54,7 @@ func TestStageAgents_NameTheirExitChecks(t *testing.T) {
 // visit after a rework; the fixer chooses its route.
 func TestStageAgents_KnowAboutRework(t *testing.T) {
 	for _, stage := range domain.Stages() {
-		body, err := os.ReadFile(filepath.Join("..", "..", "plugin", "agents", stage.String()+".md"))
+		body, err := os.ReadFile(instructions(stage))
 		require.NoError(t, err)
 		if stage == domain.StageFixer {
 			assert.Contains(t, string(body), "gf submit --passed --route <target>")
@@ -86,7 +95,7 @@ func TestFixerAgent_DiagnosesFirstInPerformanceMode(t *testing.T) {
 func TestAgentsAndDrive_NeverRunOwnerCommands(t *testing.T) {
 	paths := []string{filepath.Join("..", "..", "plugin", "skills", "drive", "SKILL.md")}
 	for _, stage := range domain.Stages() {
-		paths = append(paths, filepath.Join("..", "..", "plugin", "agents", stage.String()+".md"))
+		paths = append(paths, instructions(stage))
 	}
 	for _, p := range paths {
 		body, err := os.ReadFile(p)

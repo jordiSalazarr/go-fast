@@ -197,7 +197,7 @@ func Check(target Target, claim domain.AgentClaim, changes Changes, checks Check
 		return checked, nil
 	}
 	checked.Results, err = checks(exitchecks.Visit{
-		Assignment: open.ID(), Work: open.Work(), WorkType: target.work.Type(), Stage: open.Stage(), Visit: open.Visit(),
+		Assignment: open.ID(), Work: open.Work(), Path: target.work.Path(), Stage: open.Stage(), Visit: open.Visit(),
 		Attempt: currentAttempt(open), Specify: target.specify, SpecifyEnd: target.specifyEnd,
 		Design: target.designVisit, DesignEnd: target.designEnd,
 		Changed: changed, BaselineStarted: started, FirstAssignment: target.work.FirstAssignment(),
@@ -218,7 +218,7 @@ func currentAttempt(open domain.Open) domain.Attempt {
 // it must be made again.
 func Submit(log Log, actor eventlog.Actor, target Target, claim domain.AgentClaim, checked Checked) (Submission, error) {
 	open := target.Open
-	events, err := open.SubmitForAcceptance(target.work.Type(), claim, checked.Changed, checked.Results)
+	events, err := open.SubmitForAcceptance(target.work.Path(), claim, checked.Changed, checked.Results)
 	if err != nil {
 		return Submission{}, err
 	}
@@ -327,7 +327,7 @@ func NewCommand(openStore func() (*eventlog.Store, error), automate automations.
 			}
 			out := cmd.OutOrStdout()
 			if claim.Passed() {
-				fmt.Fprintf(out, "Running the exit checks of '%s': %s\n", target.Open.Stage(), checkNames(target.Open.Stage(), target.work.Type()))
+				fmt.Fprintf(out, "Running the exit checks of '%s': %s\n", target.Open.Stage(), checkNames(target.Open.Stage(), target.work.Path()))
 			}
 			checked, err := Check(target, claim, changes, checks, out)
 			if err != nil {
@@ -354,9 +354,9 @@ func NewCommand(openStore func() (*eventlog.Store, error), automate automations.
 	return cmd
 }
 
-func checkNames(stage domain.Stage, workType domain.WorkType) string {
+func checkNames(stage domain.Stage, path domain.Path) string {
 	var names []string
-	for _, c := range domain.RequiredChecks(stage, workType) {
+	for _, c := range domain.RequiredChecks(stage, path) {
 		names = append(names, c.String())
 	}
 	return strings.Join(names, ", ")
