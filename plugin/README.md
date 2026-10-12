@@ -252,6 +252,17 @@ it from your terminal: **approving grill approves the plan**. A rejection
 starts another round on the next `/gofast:drive`, and `gf return grill
 "<reason>"` sends the work back to grill from a later stage.
 
+## Discovery after grill
+
+On path v2, discovery runs after grill, on an auto gate: the plan is agreed,
+so discovery finds how it fits the existing code: where each slice lands,
+which events, aggregates and read models already exist, and where the code
+conflicts with the plan. Conflicts go under `## Decisions for the owner` in
+its artifact, and design carries them to you at its approval. On
+modify-behaviour work, `behaviour-delta` still applies: `## Current
+behaviour` and `## Expected behaviour`, now informed by the event model and
+grill's decisions.
+
 ## The decisions index
 
 gf generates `<decisionsDir>/README.md`, a table of every accepted grill:

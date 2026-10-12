@@ -64,6 +64,17 @@ func TestStageAgents_KnowAboutRework(t *testing.T) {
 	}
 }
 
+// After grill, discovery maps the agreed behaviour onto the code and leaves
+// conflicts with the plan to the owner.
+func TestDiscoveryAgent_FitsTheAgreedBehaviourToTheCode(t *testing.T) {
+	body, err := os.ReadFile(instructions(domain.StageDiscovery))
+	require.NoError(t, err)
+	for _, want := range []string{"**how the agreed behaviour fits the existing code**", "`work.grill.docPath`",
+		"list each conflict under `## Decisions for the owner`", "## Expected behaviour` section (what it must do instead, as the event model and grill's decisions say)"} {
+		assert.Contains(t, string(body), want)
+	}
+}
+
 // Review decides stress testing as it passes.
 func TestReviewAgent_DecidesStressTesting(t *testing.T) {
 	body, err := os.ReadFile(filepath.Join("..", "..", "plugin", "agents", "review.md"))

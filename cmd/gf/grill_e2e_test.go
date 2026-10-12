@@ -146,3 +146,21 @@ func TestDecisionsIndex_GoesInTheConfiguredDirectory(t *testing.T) {
 	r.gf("approve")
 	assert.Contains(t, r.readFile("adr/README.md"), "| Wallets | new-feature |")
 }
+
+// After grill, modify-behaviour's discovery still states both sides of the
+// change, and its pass moves the work to design without the owner.
+func TestDiscoveryAfterGrill_ModifyBehaviour_NeedsTheBehaviourDelta_OnAnAutoGate(t *testing.T) {
+	r := newRepo(t)
+	r.gf("start", "--type", "modify-behaviour", "Wallets")
+	r.grillWrites(d1, a1, decisionDocument(a1Document))
+	r.submitAsAgent("--passed")
+	r.gf("approve")
+
+	v := r.expect("discovery", progress.AssignmentOpen, 0, 3)
+	assert.Equal(t, []string{"artifact-written", "behaviour-delta"}, v.Current.Checks)
+	r.writeArtifact("Posting lives in server/posting.go.")
+	assert.Contains(t, r.submitAsAgent("--passed"), "✗ behaviour-delta")
+	r.write(v.Current.Artifact, behaviourDelta)
+	assert.Contains(t, r.submitAsAgent("--passed"), "'discovery' accepted.")
+	r.expect("design", progress.AssignmentOpen, 0, 3)
+}
