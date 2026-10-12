@@ -114,7 +114,8 @@ type WorkView struct {
 	// without event modelling.
 	EventModel *EventModelView `json:"eventModel,omitempty"`
 	// Grill is the latest grill visit's outcome: its decision document and
-	// what it settled; absent before grill writes one.
+	// what it settled; the latest accepted one's until a later visit writes
+	// its own; absent before grill writes one.
 	Grill *GrillView `json:"grill,omitempty"`
 	// NFRProposals are the NFRs the latest design visit proposes that
 	// .gofast/nfrs.json doesn't contain yet; absent when there are none.
@@ -492,6 +493,9 @@ func Read(log Reader, branch domain.Branch, facts Facts) (View, error) {
 	}
 	if visit, ok := lastVisit[domain.StageGrill]; ok && facts.Grill != nil {
 		view.Work.Grill = grillView(history, work.ID(), visit, facts)
+		if accepted, ok := latestAccepted(history, work.ID(), domain.StageGrill); ok && view.Work.Grill == nil {
+			view.Work.Grill = grillView(history, work.ID(), accepted, facts) // until the later visit writes its own
+		}
 	}
 	if visit, ok := lastVisit[domain.StageDesign]; ok && facts.NFRProposals != nil {
 		view.Work.NFRProposals = nfrProposalsView(domain.NFRProposalsFor(work.ID(), visit), facts)
