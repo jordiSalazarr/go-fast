@@ -40,6 +40,8 @@ var (
 var (
 	ErrWorkAlreadyActive   = errors.New("work is already active on this branch")
 	ErrEventModelNotOnPath = errors.New("only work whose path has event modelling can start from an event model")
+	ErrInputNotAccepted    = errors.New("inputs are for feature work: new-feature or modify-behaviour")
+	ErrSpecNotMarkdown     = errors.New("the spec must be a markdown file (.md)")
 	ErrNotCurrentStage     = errors.New("stage is not the current stage of the work")
 	ErrNoActiveWork        = errors.New("no active work")
 	ErrCannotEnterFixer    = errors.New("only a stage that checks code can hand work to the fixer")

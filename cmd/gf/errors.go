@@ -43,8 +43,10 @@ func friendly(err error, cmd *cobra.Command, ran bool) string {
 		return fmt.Sprintf("Only the owner can %s. Ask the owner to run `%s`.", ownerOnly.Action, ownerOnly.Command)
 	case errors.As(err, &input):
 		return input.Error()
-	case errors.Is(err, domain.ErrEventModelNotOnPath):
-		return "Only new-feature and modify-behaviour work can start from an event model (--event-model)."
+	case errors.Is(err, domain.ErrInputNotAccepted), errors.Is(err, domain.ErrEventModelNotOnPath):
+		return "Inputs (--spec, --event-model) are for feature work: new-feature or modify-behaviour."
+	case errors.Is(err, domain.ErrSpecNotMarkdown):
+		return "The spec must be a markdown file (.md)."
 	case errors.As(err, &active):
 		return fmt.Sprintf("There is already active work on branch %s: %s %q (%s). Finish it, or have the owner run `gf abandon \"<reason>\"`, before starting another.",
 			active.Branch, active.Type, active.Description, active.ID)

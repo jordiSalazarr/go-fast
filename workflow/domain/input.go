@@ -80,6 +80,34 @@ func (i WorkInput) Hash() ContentHash { return i.hash }
 // start.
 func (i WorkInput) ChangedSince(content []byte) bool { return HashOf(content) != i.hash }
 
+// acceptedInputs are the inputs each work type can start from; a type
+// opts in by listing them. Feature work starts from the owner's input.
+var acceptedInputs = map[WorkType][]InputKind{
+	WorkTypeNewFeature:      {InputSpec, InputEventModel},
+	WorkTypeModifyBehaviour: {InputSpec, InputEventModel},
+}
+
+// AcceptsInput rejects inputs of a kind work of this type can't start
+// from.
+func (t WorkType) AcceptsInput(kind InputKind) error {
+	if !slices.Contains(acceptedInputs[t], kind) {
+		return fmt.Errorf("%s input on %s work: %w", kind, t, ErrInputNotAccepted)
+	}
+	return nil
+}
+
+// CheckInput rejects an input a work of this type can't start from: one of
+// a kind the type doesn't accept, or a spec that isn't a markdown file.
+func (t WorkType) CheckInput(kind InputKind, path RepoPath) error {
+	if err := t.AcceptsInput(kind); err != nil {
+		return err
+	}
+	if kind == InputSpec && !strings.HasSuffix(path.value, ".md") {
+		return fmt.Errorf("spec %s: %w", path, ErrSpecNotMarkdown)
+	}
+	return nil
+}
+
 // checkInputs rejects inputs a work can't start with: two of one kind, or
 // an event model on a path without event modelling.
 func checkInputs(path Path, inputs []WorkInput) error {

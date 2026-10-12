@@ -57,13 +57,19 @@ func (e *InputError) Error() string {
 	return fmt.Sprintf("The %s %s %s", e.Kind, e.Path, e.Problem)
 }
 
-// ReadInput reads a work input: a file of the repository at root, given
-// relative to the root or as an absolute path, and committed as it is, so
-// every stage reads the same thing.
-func ReadInput(root string, kind domain.InputKind, file string) (domain.WorkInput, error) {
+// ReadInput reads an input of work of a type: a file of the repository at
+// root, given relative to the root or as an absolute path, that the type
+// accepts, and committed as it is, so every stage reads the same thing.
+func ReadInput(root string, workType domain.WorkType, kind domain.InputKind, file string) (domain.WorkInput, error) {
+	if err := workType.AcceptsInput(kind); err != nil {
+		return domain.WorkInput{}, err
+	}
 	path, err := domain.NewRepoPath(root, file)
 	if err != nil {
 		return domain.WorkInput{}, &InputError{Kind: kind, Path: file, Problem: "is not a file inside the repository."}
+	}
+	if err := workType.CheckInput(kind, path); err != nil {
+		return domain.WorkInput{}, err
 	}
 	content, err := worktree.CommittedFile(root, path)
 	switch {
@@ -84,10 +90,10 @@ func NewCommand(openStore func() (*eventlog.Store, error), automate automations.
 		Use:   `start --type <fix-bug|new-feature|modify-behaviour> "<description>" [--spec <path.md>] [--event-model <path>]`,
 		Short: "Start work on the first stage of its path",
 		Long: "Start work on the first stage of its path.\n\n" +
-			"Feature work (new-feature, modify-behaviour) can start from the owner's input: --spec, a markdown file describing\n" +
-			"the feature, and --event-model, the owner's event model in any form (JSON, markdown, an image or PDF of a board).\n" +
-			"Both are optional and must be committed files of the repository. With an event model, the work enters event\n" +
-			"modelling first.",
+			"Feature work (new-feature, modify-behaviour) can start from the owner's input: --spec, a markdown file (.md)\n" +
+			"describing the feature, and --event-model, the owner's event model in any form (JSON, markdown, an image or PDF\n" +
+			"of a board). Both are optional, for feature work only, and must be committed files of the repository. With an\n" +
+			"event model, the work enters event modelling first.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			workType, err := domain.ParseWorkType(typeName)
@@ -114,7 +120,7 @@ func NewCommand(openStore func() (*eventlog.Store, error), automate automations.
 				if err != nil {
 					return err
 				}
-				input, err := ReadInput(root, in.kind, in.file)
+				input, err := ReadInput(root, workType, in.kind, in.file)
 				if err != nil {
 					return err
 				}
@@ -161,8 +167,8 @@ func NewCommand(openStore func() (*eventlog.Store, error), automate automations.
 	}
 	cmd.Flags().StringVar(&typeName, "type", "", "work type (available: "+strings.Join(types, ", ")+")")
 	_ = cmd.MarkFlagRequired("type")
-	cmd.Flags().StringVar(&spec, "spec", "", "a committed markdown file describing the feature")
-	cmd.Flags().StringVar(&eventModel, "event-model", "", "the owner's committed event model, in any form (feature work only)")
+	cmd.Flags().StringVar(&spec, "spec", "", "feature work only: a committed markdown file (.md) describing the feature")
+	cmd.Flags().StringVar(&eventModel, "event-model", "", "feature work only: the owner's committed event model, in any form")
 	return cmd
 }
 

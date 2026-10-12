@@ -60,8 +60,20 @@ func TestStartWork_WithoutAnEventModel_SkipsEventModelling(t *testing.T) {
 }
 
 func TestStartWork_RejectsInputsItCantStartFrom(t *testing.T) {
-	_, err := domain.StartWork(workID, domain.WorkTypeFixBug, description, mainBranch, activeOn(t, mainBranch), eventModelInput)
-	assert.ErrorIs(t, err, domain.ErrEventModelNotOnPath, "fix-bug has no event modelling")
+	for _, in := range []domain.WorkInput{specInput, eventModelInput} {
+		_, err := domain.StartWork(workID, domain.WorkTypeFixBug, description, mainBranch, activeOn(t, mainBranch), in)
+		assert.ErrorIs(t, err, domain.ErrInputNotAccepted, "fix-bug takes no %s", in.Kind())
+	}
+	for _, workType := range []domain.WorkType{domain.WorkTypeNewFeature, domain.WorkTypeModifyBehaviour} {
+		_, err := domain.StartWork(workID, workType, description, mainBranch, activeOn(t, mainBranch), specInput, eventModelInput)
+		assert.NoError(t, err, workType.String())
+	}
+
+	_, err := domain.StartWork(workID, domain.WorkTypeNewFeature, description, mainBranch, activeOn(t, mainBranch),
+		input(domain.InputSpec, "server/posting.go", "package server"))
+	assert.ErrorIs(t, err, domain.ErrSpecNotMarkdown)
+	assert.NoError(t, domain.WorkTypeNewFeature.CheckInput(domain.InputEventModel, must(domain.ParseRepoPath("docs/board.pdf"))),
+		"an event model can be in any form")
 
 	_, err = domain.StartWork(workID, domain.WorkTypeNewFeature, description, mainBranch, activeOn(t, mainBranch),
 		specInput, input(domain.InputSpec, "docs/other.md", "x"))
@@ -97,4 +109,16 @@ func TestParseRepoPath_AcceptsOnlyCleanRelativePaths(t *testing.T) {
 		_, err := domain.ParseRepoPath(bad)
 		assert.ErrorIs(t, err, domain.ErrInvalidRepoPath, bad)
 	}
+}
+
+// The input rules apply when work starts: a fix-bug work recorded with a
+// spec before they existed still replays.
+func TestRebuildWork_AFixBugStartedWithASpec_StillReplays(t *testing.T) {
+	history := started()
+	start := history[0].(domain.WorkStarted)
+	start.Inputs = []domain.WorkInput{input(domain.InputSpec, "server/posting.go", "package server")}
+	history[0] = start
+
+	w := asInProgress(t, givenWork(t, history...))
+	assert.Equal(t, domain.StageDiscovery, w.CurrentStage())
 }

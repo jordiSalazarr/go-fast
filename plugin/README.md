@@ -160,7 +160,8 @@ Feature work starts from the owner's input:
 gf start --type new-feature "<title>" [--spec <path.md>] [--event-model <path>]
 ```
 
-`--spec` is a markdown file describing the feature, in any structure;
+Both flags are for feature work only: gf refuses them on fix-bug work.
+`--spec` is a markdown file (`.md`) describing the feature, in any structure;
 `--event-model` is your event model in whatever form it exists (JSON,
 markdown, an exported image or PDF of a board). Both are optional; with
 neither, the description is the only input. Both must be files of the

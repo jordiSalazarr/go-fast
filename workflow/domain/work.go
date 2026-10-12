@@ -279,8 +279,9 @@ func (AbandonedWork) isWorkState()          {}
 
 // StartWork starts a work on a branch, on the first stage of its type's path
 // it enters, unless the branch already has active work. Its inputs are the
-// files the owner starts it from, at most one of each kind; an event model
-// makes it enter event modelling, which only paths with that stage have.
+// files the owner starts it from: only kinds its type accepts, at most one
+// of each; an event model makes it enter event modelling. These rules apply
+// at start only: a recorded start replays as it was recorded.
 func StartWork(id WorkID, workType WorkType, description Description, branch Branch, fact ActiveWorkFact, inputs ...WorkInput) ([]WorkEvent, error) {
 	if err := requirePresent(
 		required{"work id", id}, required{"work type", workType}, required{"description", description},
@@ -299,6 +300,14 @@ func StartWork(id WorkID, workType WorkType, description Description, branch Bra
 	path, err := PathFor(workType)
 	if err != nil {
 		return nil, fmt.Errorf("start work %s: %w", id, err)
+	}
+	for _, in := range inputs {
+		if err := requirePresent(required{"input kind", in.kind}, required{"input path", in.path}, required{"input hash", in.hash}); err != nil {
+			return nil, fmt.Errorf("start work %s: work input: %w", id, err)
+		}
+		if err := workType.CheckInput(in.kind, in.path); err != nil {
+			return nil, fmt.Errorf("start work %s: %w", id, err)
+		}
 	}
 	if err := checkInputs(path, inputs); err != nil {
 		return nil, fmt.Errorf("start work %s: %w", id, err)

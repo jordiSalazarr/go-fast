@@ -33,12 +33,18 @@ func TestStart_RefusesInputsThatAreNotCommittedFilesOfTheRepository(t *testing.T
 	assert.Equal(t, "The event-model docs/missing.json is not a file inside the repository.\n", res.stderr)
 	res = r.gfFails(nil, "start", "--type", "new-feature", "Wallets", "--spec", filepath.Join(os.TempDir(), "x.md"))
 	assert.Contains(t, res.stderr, "is not a file inside the repository.")
-	res = r.gfFails(nil, "start", "--type", "new-feature", "Wallets", "--spec", "docs")
-	assert.Equal(t, "The spec docs is not a file inside the repository.\n", res.stderr)
+	res = r.gfFails(nil, "start", "--type", "new-feature", "Wallets", "--event-model", "docs")
+	assert.Equal(t, "The event-model docs is not a file inside the repository.\n", res.stderr)
 
+	// Inputs are for feature work, and a spec is markdown.
 	r.git("checkout", "--", "docs/wallets.md")
-	res = r.gfFails(nil, "start", "--type", "fix-bug", "Wallets", "--event-model", "docs/wallets.md")
-	assert.Equal(t, "Only new-feature and modify-behaviour work can start from an event model (--event-model).\n", res.stderr)
+	for _, flag := range []string{"--spec", "--event-model"} {
+		res = r.gfFails(nil, "start", "--type", "fix-bug", "Wallets", flag, "docs/wallets.md")
+		assert.Equal(t, "Inputs (--spec, --event-model) are for feature work: new-feature or modify-behaviour.\n", res.stderr, flag)
+	}
+	res = r.gfFails(nil, "start", "--type", "new-feature", "Wallets", "--spec", "server/server.go")
+	assert.Equal(t, "The spec must be a markdown file (.md).\n", res.stderr)
+	assert.Contains(t, r.gf("start", "--help"), "feature work only: a committed markdown file (.md) describing the feature")
 
 	assert.Nil(t, r.status().Work, "nothing started")
 }
