@@ -25,8 +25,9 @@ const ConfigPath = ".gofast/checks.json"
 const DefaultTimeout = 10 * time.Minute
 
 // Config is what a repository configures about its exit checks: what counts
-// as its integration suite, how to run its service for stress testing, and
-// how long a check's command may take.
+// as its integration suite, how to run its service for stress testing, how
+// long a check's command may take, and where grill's decision documents go
+// (docs.decisionsDir).
 type Config struct {
 	// Integration is nil when the repository has no integration command;
 	// integration-passes then fails.
@@ -86,6 +87,9 @@ type configFile struct {
 		Timeout      string   `json:"timeout"`
 	} `json:"stress"`
 	Timeout string `json:"timeout"`
+	Docs    *struct {
+		DecisionsDir string `json:"decisionsDir"`
+	} `json:"docs"`
 }
 
 // LoadConfig reads the check configuration of the repository at root. A
@@ -109,6 +113,15 @@ func LoadConfig(root string) (Config, error) {
 	if file.Timeout != "" {
 		if config.Timeout, err = parseTimeout("timeout", file.Timeout); err != nil {
 			return Config{}, err
+		}
+	}
+	if d := file.Docs; d != nil && d.DecisionsDir != "" {
+		path, err := domain.ParseRepoPath(strings.TrimSuffix(d.DecisionsDir, "/"))
+		if err == nil {
+			config.Decisions, err = domain.NewDecisionsDir(path)
+		}
+		if err != nil {
+			return Config{}, &ConfigError{Problem: fmt.Sprintf(`"docs.decisionsDir" must be a directory of the repository outside .gofast/, relative to its root, such as "docs/decisions", not %q`, d.DecisionsDir)}
 		}
 	}
 	if i := file.Integration; i != nil {

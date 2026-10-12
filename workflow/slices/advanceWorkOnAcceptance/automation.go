@@ -1,6 +1,9 @@
 // Package advanceworkonacceptance moves work past a stage once the stage
 // visit's assignment is accepted. Review's acceptance carries its stress
-// decision, which the work records as it advances.
+// decision, which the work records as it advances. Before it moves a work
+// on, it tells the boundary: gf regenerates the decisions index there, so
+// an accepted grill is in it before discovery's visit is entered and its
+// baseline taken.
 package advanceworkonacceptance
 
 import (
@@ -28,10 +31,14 @@ func workToAdvance(accepted domain.AssignmentAccepted, work domain.WorkState) (d
 	return w, true
 }
 
+// Boundary is told the history at a stage boundary: the work's current
+// visit is accepted and the next one not entered yet. It may be nil.
+type Boundary func(eventlog.History)
+
 // Run advances every work whose current stage visit was accepted and returns
 // how many events it appended. It reads the log once, and again only after
 // appending, so every decision sees the latest work.
-func Run(log Log) (int, error) {
+func Run(log Log, boundary Boundary) (int, error) {
 	records, err := log.ReadAll()
 	if err != nil {
 		return 0, fmt.Errorf("%s: %w", Name, err)
@@ -54,6 +61,9 @@ func Run(log Log) (int, error) {
 		events, err := w.AdvancePastStage(accepted.Stage, accepted.Visit, accepted.Stress)
 		if err != nil {
 			return appended, fmt.Errorf("%s: %w", Name, err)
+		}
+		if boundary != nil {
+			boundary(history)
 		}
 		if err := log.Append(eventlog.WorkStream(w.ID()), version, eventlog.AutomationActor(Name), eventlog.Events(events)...); err != nil {
 			return appended, fmt.Errorf("%s: %w", Name, err)

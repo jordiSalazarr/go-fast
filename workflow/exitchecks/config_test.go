@@ -108,3 +108,26 @@ func TestLoadConfig_RejectsWhatItCannotUse(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadConfig_ReadsTheDecisionsDirectory(t *testing.T) {
+	root := t.TempDir()
+	writeConfig(t, root, `{"docs": {"decisionsDir": "adr/"}}`)
+
+	config, err := exitchecks.LoadConfig(root)
+
+	require.NoError(t, err)
+	assert.Equal(t, "adr", config.Decisions.Path().String())
+}
+
+func TestLoadConfig_RefusesADecisionsDirectoryOutsideTheRepositoryOrInGofast(t *testing.T) {
+	for _, dir := range []string{"../adr", "/tmp/adr", ".gofast/decisions", "."} {
+		root := t.TempDir()
+		writeConfig(t, root, `{"docs": {"decisionsDir": "`+dir+`"}}`)
+
+		_, err := exitchecks.LoadConfig(root)
+
+		var invalid *exitchecks.ConfigError
+		require.ErrorAs(t, err, &invalid, dir)
+		assert.Contains(t, invalid.Problem, `"docs.decisionsDir" must be a directory of the repository outside .gofast/`)
+	}
+}

@@ -89,6 +89,7 @@ func render(w io.Writer, config exitchecks.Config) {
 	} else {
 		fmt.Fprintf(w, "  stress       not configured: stress testing fails until the owner adds a \"stress\" section to %s\n", exitchecks.ConfigPath)
 	}
+	fmt.Fprintf(w, "  decisions    %s/ (grill's decision documents; gf generates its README.md)\n", config.Decisions.Path())
 	if k6, err := exec.LookPath("k6"); err == nil {
 		fmt.Fprintf(w, "  k6           %s\n", k6)
 	} else {

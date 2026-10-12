@@ -40,9 +40,14 @@ with `gf checks`:
 ```json
 {
   "integration": { "command": ["go", "test", "-tags=integration", "./..."], "timeout": "15m" },
-  "timeout": "10m"
+  "timeout": "10m",
+  "docs": { "decisionsDir": "docs/decisions" }
 }
 ```
+
+`docs.decisionsDir` is where grill writes its decision documents (default
+`docs/decisions`); it must be a directory of the repository outside
+`.gofast/`.
 
 **Commit checks.json before starting work; changing it during a stage fails
 that attempt's scope check.** While it has uncommitted changes, `gf checks`
@@ -247,6 +252,19 @@ it from your terminal: **approving grill approves the plan**. A rejection
 starts another round on the next `/gofast:drive`, and `gf return grill
 "<reason>"` sends the work back to grill from a later stage.
 
+## The decisions index
+
+gf generates `<decisionsDir>/README.md`, a table of every accepted grill:
+date, title, work type, work, branch, the work's status (in progress,
+completed or abandoned), and links to the decision document and the event
+model, if any. Its header says gf generated it; nobody else writes it (the
+guard and every stage's scope refuse it). gf rewrites it only between
+stages, never while a stage visit of the branch's work is in progress: when
+you approve grill, it is written before discovery's visit begins (so
+discovery's baseline has it); when a work completes or is abandoned, its
+status is updated then; any other change waits for the next stage boundary.
+Commit it with the rest of your changes.
+
 ## Design
 
 On new-feature and modify-behaviour work, design (`gofast:design`, human
@@ -415,11 +433,13 @@ files in `current.fixer.stressRunDir`, profiling) before choosing a route.
 
 | Stage | May write |
 |---|---|
-| discovery, design, review, integration-testing, stress-testing, fixer | only the work's artifact directory |
+| event-modelling, discovery, design, review, integration-testing, stress-testing, fixer | only the work's artifact directory |
+| grill | the work's artifact directory and this work's decision document, `<decisionsDir>/<YYYY-MM-DD>-<work>-<slug>.md` |
 | specify | tests (`*_test.go`, files under `testdata/`) and artifacts |
 | implement | anything except gofast's own files in `.gofast/` |
 
-Nothing in `.gofast/` outside the work's artifact directory is ever writable.
+Nothing in `.gofast/` outside the work's artifact directory is ever writable,
+nor the decisions directory's `README.md`, which gf generates.
 Scopes are enforced twice:
 
 1. **While the agent works**, the guard hook denies Write, Edit and

@@ -67,15 +67,40 @@ func TestRun_AdvancesOnceAndIsIdempotent(t *testing.T) {
 		opened := domain.AssignmentOpened{AssignmentID: discoveryID, WorkID: workID, Stage: domain.StageDiscovery, Visit: visit1, Gate: domain.GateAuto, Budget: budget3}
 		require.NoError(t, s.Append(eventlog.AssignmentStream(discoveryID), 0, agent, opened, accepted))
 
-		first, err := Run(s)
+		first, err := Run(s, nil)
 		require.NoError(t, err)
-		second, err := Run(s)
+		second, err := Run(s, nil)
 		require.NoError(t, err)
 
 		assert.Equal(t, 1, first)
 		assert.Equal(t, 0, second)
 		records, _ := s.ReadAll()
 		assert.Equal(t, specifyEntered, records[len(records)-1].Event)
+		return nil
+	}))
+}
+
+// The boundary sees the accepted visit before the work moves on: the next
+// visit is not entered yet, so its baseline can't have been taken.
+func TestRun_TellsTheBoundaryBeforeEnteringTheNextVisit(t *testing.T) {
+	store := must(eventlog.Open(t.TempDir()))
+	agent := eventlog.AgentActor("agent")
+
+	require.NoError(t, store.Exclusive(func(s *eventlog.Session) error {
+		require.NoError(t, s.Append(eventlog.WorkStream(workID), 0, agent, eventlog.Events(started)...))
+		opened := domain.AssignmentOpened{AssignmentID: discoveryID, WorkID: workID, Stage: domain.StageDiscovery, Visit: visit1, Gate: domain.GateAuto, Budget: budget3}
+		require.NoError(t, s.Append(eventlog.AssignmentStream(discoveryID), 0, agent, opened, accepted))
+
+		var told []domain.Stage
+		boundary := func(h eventlog.History) {
+			w, _, err := h.Work(workID)
+			require.NoError(t, err)
+			told = append(told, w.(domain.InProgressWork).CurrentStage())
+		}
+		_, err := Run(s, boundary)
+		require.NoError(t, err)
+
+		assert.Equal(t, []domain.Stage{domain.StageDiscovery}, told, "told once, while the work is still on the accepted visit")
 		return nil
 	}))
 }
@@ -101,10 +126,10 @@ func TestRun_ReadsTheLogOnceAndAgainOnlyAfterAppending(t *testing.T) {
 		require.NoError(t, s.Append(eventlog.AssignmentStream(discoveryID), 0, agent, opened, accepted))
 
 		first := &countingLog{Log: s}
-		_, err := Run(first)
+		_, err := Run(first, nil)
 		require.NoError(t, err)
 		again := &countingLog{Log: s}
-		_, err = Run(again)
+		_, err = Run(again, nil)
 		require.NoError(t, err)
 
 		assert.Equal(t, 2, first.reads, "one read, one after the append")
@@ -132,9 +157,9 @@ func TestRun_PastReview_RecordsItsStressDecision_AndIsIdempotent(t *testing.T) {
 			domain.AssignmentOpened{AssignmentID: reviewID, WorkID: workID, Stage: domain.StageReview, Visit: visit1, Gate: domain.GateAuto, Budget: budget3},
 			domain.AssignmentAccepted{AssignmentID: reviewID, WorkID: workID, Stage: domain.StageReview, Visit: visit1, Stress: include}))
 
-		first, err := Run(s)
+		first, err := Run(s, nil)
 		require.NoError(t, err)
-		second, err := Run(s)
+		second, err := Run(s, nil)
 		require.NoError(t, err)
 
 		assert.Equal(t, 2, first)

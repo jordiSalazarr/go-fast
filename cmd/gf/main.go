@@ -13,6 +13,7 @@ import (
 
 	"github.com/jordiSalazarr/go-fast/workflow/automations"
 	"github.com/jordiSalazarr/go-fast/workflow/caller"
+	"github.com/jordiSalazarr/go-fast/workflow/decisions"
 	"github.com/jordiSalazarr/go-fast/workflow/domain"
 	"github.com/jordiSalazarr/go-fast/workflow/eventlog"
 	"github.com/jordiSalazarr/go-fast/workflow/exitchecks"
@@ -193,15 +194,41 @@ func (a *app) openStore() (*eventlog.Store, error) {
 	return store, nil
 }
 
-// automations records each opened assignment's working-tree baseline. It
-// runs inside a command, after openStore, so root and logger are set. A
-// baseline that cannot be recorded is logged; submit then takes one late.
+// automations records each opened assignment's working-tree baseline, and
+// refreshes the decisions index at stage boundaries. It runs inside a
+// command, after openStore, so root and logger are set. A baseline that
+// cannot be recorded is logged; submit then takes one late. An index that
+// cannot be refreshed is logged; the next boundary tries again.
 func (a *app) automations() automations.Runner {
-	return automations.Runner{AssignmentOpened: func(id domain.AssignmentID) {
-		if _, err := worktree.OpenBaselines(a.root).Ensure(id); err != nil {
-			a.logger.Error("could not record the baseline of an assignment", "assignment", id.String(), "error", err.Error())
+	return automations.Runner{
+		AssignmentOpened: func(id domain.AssignmentID) {
+			if _, err := worktree.OpenBaselines(a.root).Ensure(id); err != nil {
+				a.logger.Error("could not record the baseline of an assignment", "assignment", id.String(), "error", err.Error())
+			}
+		},
+		Boundary: a.refreshDecisionsIndex,
+	}
+}
+
+// refreshDecisionsIndex regenerates the decisions directory's README.md
+// when the branch is between stages and the index would change.
+func (a *app) refreshDecisionsIndex(history eventlog.History) {
+	err := func() error {
+		branch, err := gitbranch.Current(a.root)
+		if err != nil {
+			return err
 		}
-	}}
+		config, err := exitchecks.LoadConfig(a.root)
+		if err != nil {
+			return err
+		}
+		readGrill := func(p domain.RepoPath) (domain.Grill, error) { return exitchecks.LoadGrill(a.root, p) }
+		_, err = decisions.Refresh(a.root, config.Decisions, history, branch, readGrill)
+		return err
+	}()
+	if err != nil {
+		a.logger.Error("could not refresh the decisions index", "error", err.Error())
+	}
 }
 
 func (a *app) changedFiles(id domain.AssignmentID) (domain.ChangedFiles, bool, error) {
