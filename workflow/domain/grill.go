@@ -181,3 +181,94 @@ func plural(n int, one, many string) string {
 	}
 	return fmt.Sprintf("%d %s", n, many)
 }
+
+// DocumentEntry is an entry of the decision document the owner reads: its
+// id and its text, up to the next entry.
+type DocumentEntry struct {
+	ID   string
+	Text string
+}
+
+// DecisionDocument is what the owner approves: the entries of its
+// `## Decisions` and `## Acceptance scenarios` sections.
+type DecisionDocument struct {
+	Decisions           []DocumentEntry
+	AcceptanceScenarios []DocumentEntry
+}
+
+var (
+	bulletEntry  = regexp.MustCompile(`^-\s+([A-Z][0-9]+)\s*:`)
+	headingEntry = regexp.MustCompile(`^###\s+([A-Z][0-9]+)(\s*:|\s+—|\s*$)`)
+)
+
+// ParseDecisionDocument reads the entries of the document's sections, given
+// their text. An entry opens with a line "- D1: …" or "### D1" (optionally
+// followed by ":" or " —"), with D for decisions and A for acceptance
+// scenarios, and runs to the next entry.
+func ParseDecisionDocument(decisions, acceptance string) DecisionDocument {
+	return DecisionDocument{Decisions: entries(decisions, 'D'), AcceptanceScenarios: entries(acceptance, 'A')}
+}
+
+func entries(section string, prefix byte) []DocumentEntry {
+	var out []DocumentEntry
+	for _, line := range strings.Split(section, "\n") {
+		trimmed := strings.TrimSpace(line)
+		m := bulletEntry.FindStringSubmatch(trimmed)
+		if m == nil {
+			m = headingEntry.FindStringSubmatch(trimmed)
+		}
+		if m != nil && m[1][0] == prefix {
+			out = append(out, DocumentEntry{ID: m[1], Text: trimmed})
+			continue
+		}
+		if len(out) > 0 {
+			out[len(out)-1].Text += "\n" + trimmed
+		}
+	}
+	return out
+}
+
+// DocumentProblems lists where the decision document the owner approves
+// and grill's structured outcome, file, disagree: a decision or acceptance
+// scenario in one but not the other, and, with an event model, an
+// assumption a decision addresses that its entry in the document doesn't
+// name.
+func (g Grill) DocumentProblems(doc DecisionDocument, file string, hasEventModel bool) []string {
+	var p problems
+	ids := func(entries []DocumentEntry) []string {
+		return names(entries, func(e DocumentEntry) string { return e.ID })
+	}
+	decisionIDs := names(g.v.Decisions, func(d GrillDecision) string { return d.ID })
+	p.sameIDs("decision", decisionIDs, ids(doc.Decisions), file)
+	p.sameIDs("acceptance scenario", g.AcceptanceIDs(), ids(doc.AcceptanceScenarios), file)
+	if !hasEventModel {
+		return p.list
+	}
+	for _, d := range g.v.Decisions {
+		i := slices.IndexFunc(doc.Decisions, func(e DocumentEntry) bool { return e.ID == d.ID })
+		if i < 0 {
+			continue
+		}
+		for _, a := range d.Addresses {
+			if !regexp.MustCompile(`\b` + regexp.QuoteMeta(a) + `\b`).MatchString(doc.Decisions[i].Text) {
+				p.add("decision %s addresses %s, but its entry in the decision document doesn't name %s", d.ID, a, a)
+			}
+		}
+	}
+	return p.list
+}
+
+// sameIDs reports ids in the structured file but not in the document, then
+// ids in the document but not in the file.
+func (p *problems) sameIDs(kind string, inFile, inDoc []string, file string) {
+	for _, id := range inFile {
+		if !slices.Contains(inDoc, id) {
+			p.add("%s %s is in %s but not in the decision document", kind, id, file)
+		}
+	}
+	for _, id := range inDoc {
+		if !slices.Contains(inFile, id) {
+			p.add("%s %s is in the decision document but not in %s", kind, id, file)
+		}
+	}
+}

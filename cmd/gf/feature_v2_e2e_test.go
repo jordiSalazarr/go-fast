@@ -124,7 +124,8 @@ func TestNewFeatureV2_FromAnEventModel_EndToEnd(t *testing.T) {
 	assert.Equal(t, 3, v.Work.EventModel.Scenarios)
 	r.grillWrites(d1, "", decisionDocument(""))
 	assert.Contains(t, r.submitAsAgent("--passed"), "✗ grill-valid: 1 problem: .gofast/works/"+id+"/grill-v1.json: assumption M1 of the event model is addressed by no decision")
-	r.grillWrites(strings.Replace(d1, `"rationale"`, `"addresses": ["M1"], "rationale"`, 1), "", decisionDocument(""))
+	r.grillWrites(strings.Replace(d1, `"rationale"`, `"addresses": ["M1"], "rationale"`, 1), "",
+		strings.Replace(decisionDocument(""), "wallets never lend.", "wallets never lend. Settles M1: a wallet is opened first.", 1))
 	r.submitAsAgent("--passed")
 	r.expect("grill", progress.AssignmentAwaitingApproval, 1, 3)
 	r.gf("approve")
@@ -234,7 +235,8 @@ func TestReturn_FromDesignToGrill_StartsGrillsSecondVisit(t *testing.T) {
 
 	// Grill's second visit updates the same decision document.
 	d2 := `{"id": "D2", "question": "Are refunds in scope?", "answer": "Yes.", "rationale": "The owner changed their mind."}`
-	r.grillWrites(d1+", "+d2, a1, decisionDocument(a1Document))
+	r.grillWrites(d1+", "+d2, a1, strings.Replace(decisionDocument(a1Document), "wallets never lend.\n",
+		"wallets never lend.\n- D2: Are refunds in scope? Yes: the owner changed their mind.\n", 1))
 	assert.Contains(t, r.submitAsAgent("--passed"), "✓ grill-valid")
 	v = r.expect("grill", progress.AssignmentAwaitingApproval, 0, 3)
 	assert.Equal(t, 2, v.Work.Grill.Visit)

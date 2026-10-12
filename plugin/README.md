@@ -254,7 +254,11 @@ document, nothing else):
 `grill-valid` checks that the JSON parses, no question is open, decision ids
 are unique, the document is this work's and has its sections, acceptance
 scenarios exist without an event model, and, with one, that every
-assumption is addressed by a decision naming its id (`addresses`). The main
+assumption is addressed by a decision naming its id (`addresses`). The
+document you approve and the JSON later stages read must agree: the same
+decision ids (`- D1: …` or `### D1` at the start of a line in
+`## Decisions`) and acceptance scenario ids (likewise `A1`), and each
+addressed assumption named by id in its decision's entry. The main
 session submits with `gf submit --passed`; you read the document and approve
 it from your terminal: **approving grill approves the plan**. A rejection
 starts another round on the next `/gofast:drive`, and `gf return grill

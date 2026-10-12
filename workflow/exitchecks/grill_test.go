@@ -120,10 +120,22 @@ func TestGrillValid_WithAnEventModel_EveryAssumptionIsAddressed(t *testing.T) {
 	m.write(domain.ArtifactFor(WorkID, domain.StageEventModelling, Visit1).String(),
 		"# Event model\n\n## Assumptions\n\n- M1: a wallet is opened first.\n- M2: amounts are whole cents.\n")
 	doc := strings.Replace(decisionDoc, "## Acceptance scenarios\n\n- A1: Given a wallet with 10, when a debit of 20 is posted, then it is rejected for insufficient funds.\n\n", "", 1)
+	doc = strings.Replace(doc, "wallets never lend.", "wallets never lend. Settles M1 and M2.", 1)
 	m.grillWrites(grillJSON("", "", `"M1"`), doc)
 
 	fails(t, m.checkGrill()[domain.CheckGrillValid], "assumption M2 of the event model is addressed by no decision (amounts are whole cents.)")
 
 	m.write(grillPath, grillJSON("", "", `"M1", "M2"`))
 	passes(t, m.checkGrill()[domain.CheckGrillValid])
+}
+
+// The probe: the JSON has D1, the document the owner approves only X1;
+// and the JSON lists acceptance scenarios the document doesn't show.
+func TestGrillValid_ADocumentThatDisagreesWithTheJSON_Fails(t *testing.T) {
+	m := newModule(t)
+	more := walletScenario + `, {"id": "A2", "given": "g", "when": "w", "then": "t"}`
+	m.grillWrites(grillJSON("", more, ""), strings.Replace(decisionDoc, "- D1:", "- X1:", 1))
+
+	fails(t, m.checkGrill()[domain.CheckGrillValid], "2 problems: "+grillDoc+": decision D1 is in grill-v1.json but not in the decision document; "+
+		grillDoc+": acceptance scenario A2 is in grill-v1.json but not in the decision document")
 }

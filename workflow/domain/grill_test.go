@@ -92,3 +92,48 @@ func TestGrill_Problems(t *testing.T) {
 		})
 	}
 }
+
+// The owner approves the document, later stages read the JSON: both list
+// the same decisions and acceptance scenarios.
+func TestGrill_DocumentProblems(t *testing.T) {
+	grill := domain.NewGrill(walletGrill()) // D1, D2; A1
+	cases := []struct {
+		name          string
+		decisions     string
+		acceptance    string
+		hasEventModel bool
+		addresses     []string
+		want          []string
+	}{
+		{"the same ids", "- D1: Below zero? No.\n- D2: Refunds? Later.\n", "- A1: Given 10, when -20, then rejected.\n", false, nil, nil},
+		{"heading-style ids", "### D1: Below zero?\n\nNo.\n\n### D2 — Refunds?\n\nLater.\n", "### A1\n\nGiven 10, when -20, then rejected.\n", false, nil, nil},
+		{"a decision only in the JSON", "- D1: Below zero? No.\n", "- A1: x\n", false, nil,
+			[]string{"decision D2 is in grill-v1.json but not in the decision document"}},
+		{"a decision only in the document", "- D1: x\n- D2: y\n- D3: z\n", "- A1: x\n", false, nil,
+			[]string{"decision D3 is in the decision document but not in grill-v1.json"}},
+		{"another id format", "- X1: x\n", "- A1: x\n", false, nil, []string{
+			"decision D1 is in grill-v1.json but not in the decision document",
+			"decision D2 is in grill-v1.json but not in the decision document"}},
+		{"a scenario only in the document", "- D1: x\n- D2: y\n", "- A1: x\n- A3: z\n", false, nil,
+			[]string{"acceptance scenario A3 is in the decision document but not in grill-v1.json"}},
+		{"a scenario only in the JSON", "- D1: x\n- D2: y\n", "", false, nil,
+			[]string{"acceptance scenario A1 is in grill-v1.json but not in the decision document"}},
+		{"an id inside a line doesn't count", "- D1: x, see D2\n", "- A1: x\n", false, nil,
+			[]string{"decision D2 is in grill-v1.json but not in the decision document"}},
+		{"an addressed assumption the entry names", "- D1: Below zero? No (M1).\n- D2: y\n", "- A1: x\n", true, []string{"M1"}, nil},
+		{"an addressed assumption the entry names on a later line", "### D1\n\nBelow zero? No.\nSettles M1.\n\n### D2\n\ny\n", "- A1: x\n", true, []string{"M1"}, nil},
+		{"an addressed assumption only another entry names", "- D1: Below zero? No.\n- D2: M1 again\n", "- A1: x\n", true, []string{"M1"},
+			[]string{"decision D1 addresses M1, but its entry in the decision document doesn't name M1"}},
+		{"assumptions don't matter without an event model", "- D1: x\n- D2: y\n", "- A1: x\n", false, []string{"M1"}, nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			v := walletGrill()
+			v.Decisions[0].Addresses = c.addresses
+			grill = domain.NewGrill(v)
+			doc := domain.ParseDecisionDocument(c.decisions, c.acceptance)
+
+			assert.Equal(t, c.want, grill.DocumentProblems(doc, "grill-v1.json", c.hasEventModel))
+		})
+	}
+}

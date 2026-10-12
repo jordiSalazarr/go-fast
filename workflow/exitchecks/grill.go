@@ -120,7 +120,7 @@ func (c *checkRun) grillValid() (finding, error) {
 		problems = append(problems, path.String()+": "+p)
 	}
 	if doc := grill.DocPath(); facts.Decisions.IsDecisionOf(doc, c.visit.Work) {
-		docProblems, err := c.decisionDocProblems(doc, facts.HasEventModel)
+		docProblems, err := c.decisionDocProblems(grill, path, doc, facts.HasEventModel)
 		if err != nil {
 			return finding{}, err
 		}
@@ -138,8 +138,10 @@ func (c *checkRun) grillValid() (finding, error) {
 
 // decisionDocProblems checks that the decision document exists and has its
 // sections: intent, scope, decisions, glossary, acceptance scenarios
-// (without an event model), and open questions saying "None".
-func (c *checkRun) decisionDocProblems(doc domain.RepoPath, hasEventModel bool) ([]string, error) {
+// (without an event model), and open questions saying "None"; and that it
+// lists the same decisions and acceptance scenarios as grill's structured
+// outcome, at path.
+func (c *checkRun) decisionDocProblems(grill domain.Grill, path, doc domain.RepoPath, hasEventModel bool) ([]string, error) {
 	content, err := os.ReadFile(filepath.Join(c.Root, filepath.FromSlash(doc.String())))
 	if errors.Is(err, os.ErrNotExist) {
 		return []string{doc.String() + " is missing"}, nil
@@ -170,6 +172,12 @@ func (c *checkRun) decisionDocProblems(doc domain.RepoPath, hasEventModel bool) 
 		problems = append(problems, doc.String()+": no '## "+OpenQuestionsHeading+"' section")
 	case !strings.EqualFold(strings.TrimSuffix(strings.TrimSpace(body), "."), "none"):
 		problems = append(problems, doc.String()+": the '## "+OpenQuestionsHeading+"' section must say None")
+	}
+	decisions, _ := markdownBlock(string(content), DecisionsHeading)
+	acceptance, _ := markdownBlock(string(content), AcceptanceScenariosHeading)
+	parsed := domain.ParseDecisionDocument(decisions, acceptance)
+	for _, p := range grill.DocumentProblems(parsed, filepath.Base(path.String()), hasEventModel) {
+		problems = append(problems, doc.String()+": "+p)
 	}
 	return problems, nil
 }
