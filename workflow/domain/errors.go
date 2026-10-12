@@ -56,7 +56,6 @@ var (
 	ErrBaselineIncomplete    = errors.New("the baseline needs a measurement of every target NFR")
 	ErrStressMandatoryOnPath = errors.New("improve-performance work always runs stress testing: there is no stress decision to change")
 	ErrNoAcceptedPlan        = errors.New("a refactor's implement needs an accepted plan with areas")
-	ErrNotReturnable         = errors.New("work can only be returned while it is on a stage of its path, not in the fixer or at its rework limit")
 	// Stress testing.
 	ErrMissingStressDecision = errors.New("review's pass must decide whether stress testing runs")
 	ErrStressOutsideReview   = errors.New("only review decides stress testing when it submits")

@@ -258,12 +258,41 @@ func (c *checkRun) ownBaseline() (string, bool, error) {
 	return c.baselines.Tree(c.visit.Assignment)
 }
 
-func (c *checkRun) noOwnBaseline() finding { return missingBaseline(c.visit.Stage) }
+func (c *checkRun) noOwnBaseline() finding { return c.missingBaseline(c.visit.Stage) }
 
 // missingBaseline: without a stage's baseline gf can't tell what the stage
-// changed, and nothing the owner can do on this work brings it back.
-func missingBaseline(stage domain.Stage) finding {
-	return fail("The baseline for '%s' is missing (the work was started before this version of gf, or on another machine). The owner should abandon this work with `gf abandon \"<reason>\"` and start it again.", stage)
+// changed. The owner can send the work back to that stage, which starts
+// again with a fresh baseline; for the stage being checked, to the stage
+// before it. On the first stage of the path there is nothing to return to,
+// so only abandoning is left.
+func (c *checkRun) missingBaseline(stage domain.Stage) finding {
+	const missing = "The baseline for '%s' is missing (the work was started before this version of gf, or on another machine). "
+	target, ok := c.returnTargetFor(stage)
+	if !ok {
+		return fail(missing+"The owner should abandon this work with `gf abandon \"<reason>\"` and start it again.", stage)
+	}
+	return fail(missing+"The owner can send the work back with `gf return %s \"<reason>\"` to start that stage again with a fresh baseline, or abandon it.", stage, target)
+}
+
+// returnTargetFor is the stage the owner returns the work to for a fresh
+// baseline of stage: stage itself when it is earlier than the visit being
+// checked, else the stage before it on the path that isn't optional; ok is
+// false when stage is the first stage of the path.
+func (c *checkRun) returnTargetFor(stage domain.Stage) (domain.Stage, bool) {
+	steps := c.visit.Path.Steps()
+	i := slices.IndexFunc(steps, func(s domain.PathStep) bool { return s.Stage() == stage })
+	if i <= 0 {
+		return domain.Stage{}, false
+	}
+	if stage != c.visit.Stage {
+		return stage, true
+	}
+	for j := i - 1; j >= 0; j-- {
+		if !steps[j].Optional() {
+			return steps[j].Stage(), true
+		}
+	}
+	return domain.Stage{}, false
 }
 
 // specsWritten are the test files this visit changed and the tests written
@@ -328,7 +357,7 @@ func (c *checkRun) specTests() (files []domain.RepoPath, tests []string, problem
 		}
 	}
 	if !ok {
-		f := missingBaseline(domain.StageSpecify)
+		f := c.missingBaseline(domain.StageSpecify)
 		return nil, nil, &f, nil
 	}
 	ownBase, ok, err := c.ownBaseline()
@@ -339,7 +368,7 @@ func (c *checkRun) specTests() (files []domain.RepoPath, tests []string, problem
 	specifyEnd := ownBase
 	if end := c.visit.SpecifyEnd; end != (domain.AssignmentID{}) && end != c.visit.Assignment {
 		if specifyEnd, ok, err = c.baselines.Tree(end); err != nil || !ok {
-			f := missingBaseline(domain.StageSpecify)
+			f := c.missingBaseline(domain.StageSpecify)
 			return nil, nil, &f, err
 		}
 	}

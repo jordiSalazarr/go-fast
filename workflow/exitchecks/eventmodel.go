@@ -312,7 +312,7 @@ func (c *checkRun) acceptedFile(stage domain.Stage, path domain.RepoPath, end do
 		}
 	}
 	if !ok {
-		f := missingBaseline(stage)
+		f := c.missingBaseline(stage)
 		return nil, false, &f, nil
 	}
 	data, exists, err = worktree.FileAt(c.Root, tree, path)

@@ -45,10 +45,25 @@ func TestGivenWorkOnSpecify_WhenTheOwnerReturnsItToALaterStage_ThenItIsRejected(
 		ThenRejected(domain.ErrInvalidReturn)
 }
 
-func TestGivenWorkInTheFixer_WhenTheOwnerReturnsIt_ThenItIsRejected(t *testing.T) {
+// The fixer visit is cancelled by the cancelAssignmentOnReturn automation.
+func TestGivenWorkInTheFixer_WhenTheOwnerReturnsIt_ThenTheStageEntersItsNextVisit(t *testing.T) {
 	eventlogtest.Given(t, InFixer(domain.StageReview)...).
 		When(returningTo(domain.StageSpecify)).
-		ThenRejected(domain.ErrNotReturnable)
+		Then(
+			domain.WorkReturned{WorkID: WorkID, Owner: Owner, From: domain.StageFixer, FromVisit: Visit1,
+				Target: domain.StageSpecify, Visit: Visit(2), Reason: Reason("the specs miss refunds")},
+			EnteredVisit(domain.StageSpecify, 2),
+		)
+}
+
+func TestGivenAnEscalatedStage_WhenTheOwnerReturnsIt_ThenTheStageEntersItsNextVisit(t *testing.T) {
+	eventlogtest.Given(t, EscalatedOn(domain.StageImplement)...).
+		When(returningTo(domain.StageSpecify)).
+		Then(
+			domain.WorkReturned{WorkID: WorkID, Owner: Owner, From: domain.StageImplement, FromVisit: Visit1,
+				Target: domain.StageSpecify, Visit: Visit(2), Reason: Reason("the specs miss refunds")},
+			EnteredVisit(domain.StageSpecify, 2),
+		)
 }
 
 func TestGivenNoActiveWork_WhenTheOwnerReturnsIt_ThenItIsRejected(t *testing.T) {

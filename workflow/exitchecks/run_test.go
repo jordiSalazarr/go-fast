@@ -309,10 +309,28 @@ func TestImplement_WithoutTheSpecifyBaseline_FailsWithAClearMessage(t *testing.T
 	results := m.check(domain.StageImplement, exitchecks.Config{})
 
 	missing := "The baseline for 'specify' is missing (the work was started before this version of gf, or on another machine). " +
-		"The owner should abandon this work with `gf abandon \"<reason>\"` and start it again."
+		"The owner can send the work back with `gf return specify \"<reason>\"` to start that stage again with a fresh baseline, or abandon it."
 	fails(t, results[domain.CheckSpecsPass], missing)
 	fails(t, results[domain.CheckSpecsUntouched], missing)
 	assert.NotContains(t, results[domain.CheckSpecsPass].Summary(), "gf extend")
+}
+
+// Without its own baseline, a stage is sent back to the stage before it;
+// the first stage of the path has nothing to return to.
+func TestMissingBaseline_PointsToGfReturn_UnlessOnTheFirstStage(t *testing.T) {
+	m := newModule(t)
+	m.writeArtifact(domain.StageSpecify)
+	m.writeArtifact(domain.StageDiscovery)
+	runner := exitchecks.Runner{Root: m.root, Config: exitchecks.Config{Timeout: time.Minute, Decisions: domain.DefaultDecisionsDir()}, Env: os.Environ()}
+	check := func(stage domain.Stage) domain.CheckResult {
+		t.Helper()
+		results, err := runner.Run(exitchecks.Visit{Assignment: AssignmentOn(stage), Work: WorkID, Path: Must(domain.PathFor(domain.WorkTypeFixBug)),
+			Stage: stage, Visit: Visit1, Attempt: Attempt(1), BaselineStarted: true})
+		require.NoError(t, err)
+		return results[0]
+	}
+	fails(t, check(domain.StageSpecify), "The baseline for 'specify' is missing", "`gf return discovery \"<reason>\"`")
+	fails(t, check(domain.StageDiscovery), "The baseline for 'discovery' is missing", "The owner should abandon this work with `gf abandon \"<reason>\"` and start it again.")
 }
 
 // Build, suite and formatting.

@@ -81,3 +81,73 @@ func TestRebuildWork_AReturnThatTheWorkCouldNotMake_IsInconsistent(t *testing.T)
 		assert.ErrorIs(t, err, domain.ErrInconsistentHistory, name)
 	}
 }
+
+// The owner can return work whose current stage is escalated: the domain
+// returns it whatever state the visit is in, and the escalated assignment
+// can be cancelled.
+func TestReturnTo_FromAnEscalatedStage(t *testing.T) {
+	w := asInProgress(t, givenWork(t, onReview()...))
+	events, err := w.ReturnTo(owner, domain.StageSpecify, reasonOf("the specs miss refunds"))
+	thenEvents(t, events, err, returned(domain.StageReview, 1, domain.StageSpecify, 2)...)
+
+	review := domain.AssignmentIDFor(workID, domain.StageReview, visit(1))
+	escalated, err := domain.RebuildAssignment([]domain.AssignmentEvent{
+		domain.AssignmentOpened{AssignmentID: review, WorkID: workID, Stage: domain.StageReview, Visit: visit(1), Gate: domain.GateAuto, Budget: must(domain.NewAttemptBudget(1))},
+		domain.AttemptFailed{AssignmentID: review, Attempt: must(domain.NewAttempt(1)), Reason: reasonOf("x")},
+		domain.AssignmentEscalated{AssignmentID: review, AttemptsUsed: must(domain.NewAttemptCount(1)), Budget: must(domain.NewAttemptBudget(1))},
+	})
+	require.NoError(t, err)
+	_, err = escalated.(domain.Escalated).Cancel(reasonOf("work returned to specify"))
+	assert.NoError(t, err)
+}
+
+// At its rework limit, the owner can send the work back instead of
+// extending the rework budget; the budget stays as it was.
+func TestReturnTo_FromTheReworkLimit(t *testing.T) {
+	given := append(reworkedTimes(3), domain.ReworkLimitReached{WorkID: workID, Reworks: must(domain.NewReworkCount(3))})
+	limit := stateIs[domain.ReworkLimitReachedWork](t, givenWork(t, given...))
+	assert.Equal(t, []domain.Stage{domain.StageDiscovery, domain.StageSpecify, domain.StageImplement}, limit.ReturnTargets())
+
+	events, err := limit.ReturnTo(owner, domain.StageSpecify, reasonOf("the specs miss refunds"))
+
+	thenEvents(t, events, err, returned(domain.StageReview, 4, domain.StageSpecify, 2)...)
+	back := asInProgress(t, thenWorkState(t, given, events))
+	assert.Equal(t, domain.StageSpecify, back.CurrentStage())
+	assert.Equal(t, 3, back.Reworks().Int())
+	assert.Equal(t, domain.DefaultReworkBudget(), back.ReworkBudget(), "no rework budget used or added")
+}
+
+// From the fixer, the owner sends the work to a path stage before the one
+// that handed it over; the fixer visit is left behind (and cancelled).
+func TestReturnTo_FromTheFixer(t *testing.T) {
+	fixer := toFixerFrom(t, domain.WorkTypeFixBug, domain.PathV1, domain.StageReview)
+	assert.Equal(t, []domain.Stage{domain.StageDiscovery, domain.StageSpecify, domain.StageImplement}, fixer.ReturnTargets())
+
+	events, err := fixer.ReturnTo(owner, domain.StageDiscovery, reasonOf("the bug is elsewhere"))
+	require.NoError(t, err)
+	assert.Equal(t, domain.WorkReturned{WorkID: workID, Owner: owner, From: domain.StageFixer, FromVisit: visit(1), Target: domain.StageDiscovery,
+		Visit: visit(2), Reason: reasonOf("the bug is elsewhere")}, events[0])
+
+	_, err = fixer.ReturnTo(owner, domain.StageReview, reasonOf("x"))
+	assert.ErrorIs(t, err, domain.ErrInvalidReturn, "not the stage that handed over, nor any later one")
+	_, err = fixer.ReturnTo(owner, domain.StageFixer, reasonOf("x"))
+	assert.ErrorIs(t, err, domain.ErrInvalidReturn)
+}
+
+// On the new paths, any entered earlier stage is a return target: grill
+// and plan on a refactor.
+func TestReturnTargets_OnTheNewPaths(t *testing.T) {
+	history := must(domain.StartWork(workID, domain.WorkTypeRefactor, description, mainBranch, activeOn(t, mainBranch)))
+	for range 3 {
+		history = advance(t, history)
+	}
+	w := asInProgress(t, givenWork(t, history...))
+	require.Equal(t, domain.StageCharacterize, w.CurrentStage())
+	assert.Equal(t, []domain.Stage{domain.StageDiscovery, domain.StageGrill, domain.StagePlan}, w.ReturnTargets())
+	events, err := w.ReturnTo(owner, domain.StagePlan, reasonOf("the plan misses the ledger"))
+	require.NoError(t, err)
+	back := asInProgress(t, givenWork(t, append(history, events...)...))
+	assert.Equal(t, domain.StagePlan, back.CurrentStage())
+	assert.Equal(t, visit(2), back.CurrentVisit())
+	assert.Equal(t, 0, back.Reworks().Int())
+}

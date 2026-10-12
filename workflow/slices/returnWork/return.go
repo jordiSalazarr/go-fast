@@ -19,34 +19,41 @@ type Log interface {
 	Append(stream eventlog.Stream, expectedVersion int, actor eventlog.Actor, events ...domain.Event) error
 }
 
-// ReturnWork sends the branch's active work back to a new visit of target.
-// Only work in progress on a stage of its path can be returned: not while
-// it is in the fixer or at its rework limit.
-func ReturnWork(log Log, actor eventlog.Actor, branch domain.Branch, owner domain.Owner, target domain.Stage, reason domain.Reason) (domain.InProgressWork, error) {
+// returnable is active work the owner can send back: in progress on a
+// stage of its path (whatever state its assignment is in, escalated
+// included), in the fixer, or at its rework limit.
+type returnable interface {
+	domain.ActiveWork
+	ReturnTo(owner domain.Owner, target domain.Stage, reason domain.Reason) ([]domain.WorkEvent, error)
+}
+
+// ReturnWork sends the branch's active work back to a new visit of target,
+// and returns the work as it was.
+func ReturnWork(log Log, actor eventlog.Actor, branch domain.Branch, owner domain.Owner, target domain.Stage, reason domain.Reason) (domain.ActiveWork, error) {
 	records, err := log.ReadAll()
 	if err != nil {
-		return domain.InProgressWork{}, fmt.Errorf("return work: %w", err)
+		return nil, fmt.Errorf("return work: %w", err)
 	}
 	history := eventlog.NewHistory(records)
 	fact, err := history.ActiveWorkOn(branch)
 	if err != nil {
-		return domain.InProgressWork{}, fmt.Errorf("return work: %w", err)
+		return nil, fmt.Errorf("return work: %w", err)
 	}
 	active, err := fact.Work()
 	if err != nil {
-		return domain.InProgressWork{}, fmt.Errorf("return work: %w", err)
+		return nil, fmt.Errorf("return work: %w", err)
 	}
-	work, ok := active.(domain.InProgressWork)
+	work, ok := active.(returnable)
 	if !ok {
-		return domain.InProgressWork{}, fmt.Errorf("return work %s from %s: %w", active.ID(), active.CurrentStage(), domain.ErrNotReturnable)
+		return nil, fmt.Errorf("return work %s: %T can't be returned", active.ID(), active)
 	}
 	events, err := work.ReturnTo(owner, target, reason)
 	if err != nil {
-		return domain.InProgressWork{}, err
+		return nil, err
 	}
 	version := history.Version(eventlog.WorkStream(work.ID()))
 	if err := log.Append(eventlog.WorkStream(work.ID()), version, actor, eventlog.Events(events)...); err != nil {
-		return domain.InProgressWork{}, fmt.Errorf("return work: %w", err)
+		return nil, fmt.Errorf("return work: %w", err)
 	}
 	return work, nil
 }
@@ -57,7 +64,8 @@ func NewCommand(openStore func() (*eventlog.Store, error), automate automations.
 		Short: "Send the active work back to an earlier stage of its path (owner only)",
 		Long: "Send the active work back to an earlier stage of its path (owner only).\n\n" +
 			"The current stage visit is cancelled and the stage enters a new visit, which reads the reason;\n" +
-			"every later stage then runs again. It is not a rework: it uses none of the rework budget.",
+			"every later stage then runs again. It is not a rework: it uses none of the rework budget.\n" +
+			"It works whatever state the current stage is in: escalated, in the fixer (the fixer visit is cancelled), or at the rework limit.",
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target, err := domain.ParseStage(args[0])
@@ -84,7 +92,7 @@ func NewCommand(openStore func() (*eventlog.Store, error), automate automations.
 			if err != nil {
 				return err
 			}
-			var work domain.InProgressWork
+			var work domain.ActiveWork
 			err = store.Exclusive(func(s *eventlog.Session) error {
 				return automate.AroundCommand(s, func() error {
 					work, err = ReturnWork(s, c.Actor(), branch, owner, target, reason)

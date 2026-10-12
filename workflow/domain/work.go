@@ -502,9 +502,20 @@ func (w InFixerWork) ReturnToStage(target Stage, reason Reason) ([]WorkEvent, er
 // ReturnTargets are the stages the owner may send the work back to: the
 // stages of its path before the current one that the work entered, in path
 // order.
-func (w InProgressWork) ReturnTargets() []Stage {
+func (w InProgressWork) ReturnTargets() []Stage { return w.returnTargets(w.stage) }
+
+// ReturnTargets are the stages the owner may send work in the fixer back
+// to: those the work entered before the stage that handed it over.
+func (w InFixerWork) ReturnTargets() []Stage { return w.returnTargets(w.from) }
+
+// ReturnTargets are the stages the owner may send work at its rework limit
+// back to: those the work entered before the stage visit that handed it
+// over.
+func (w ReworkLimitReachedWork) ReturnTargets() []Stage { return w.returnTargets(w.stage) }
+
+func (w active) returnTargets(before Stage) []Stage {
 	var targets []Stage
-	end, _ := w.path.indexOf(w.stage)
+	end, _ := w.path.indexOf(before)
 	for _, step := range w.path.steps[:end] {
 		if _, entered := w.visits[step.stage]; entered {
 			targets = append(targets, step.stage)
@@ -514,22 +525,53 @@ func (w InProgressWork) ReturnTargets() []Stage {
 }
 
 // ReturnTo sends the work back, from its current stage visit, to a new visit
-// of an earlier stage, whatever state the current visit is in. From there
-// the path continues in order, so every later stage runs again, and the next
-// review decides stress testing again. It is not a rework: the fixer did not
-// send it.
+// of an earlier stage, whatever state the current visit is in: escalated or
+// awaiting approval included. From there the path continues in order, so
+// every later stage runs again, and the next review decides stress testing
+// again. It is not a rework: the fixer did not send it, and it uses none of
+// the rework budget.
 func (w InProgressWork) ReturnTo(owner Owner, target Stage, reason Reason) ([]WorkEvent, error) {
+	return w.returnTo(owner, target, reason, w.ReturnTargets())
+}
+
+// ReturnTo sends work in the fixer back to a stage of its path: the fixer
+// visit is cancelled, and the stage enters a new visit.
+func (w InFixerWork) ReturnTo(owner Owner, target Stage, reason Reason) ([]WorkEvent, error) {
+	return w.returnTo(owner, target, reason, w.ReturnTargets())
+}
+
+// ReturnTo sends work at its rework limit back to an earlier stage: the
+// owner judged the code wrong somewhere before the stage that keeps finding
+// it, without extending the rework budget.
+func (w ReworkLimitReachedWork) ReturnTo(owner Owner, target Stage, reason Reason) ([]WorkEvent, error) {
+	return w.returnTo(owner, target, reason, w.ReturnTargets())
+}
+
+func (w active) returnTo(owner Owner, target Stage, reason Reason, targets []Stage) ([]WorkEvent, error) {
 	if err := requirePresent(required{"owner", owner}, required{"stage", target}, required{"reason", reason}); err != nil {
 		return nil, fmt.Errorf("return work %s: %w", w.id, err)
 	}
-	if !slices.Contains(w.ReturnTargets(), target) {
-		return nil, fmt.Errorf("return work %s: %w", w.id, &InvalidReturnError{Target: target, Allowed: w.ReturnTargets()})
+	if !slices.Contains(targets, target) {
+		return nil, fmt.Errorf("return work %s: %w", w.id, &InvalidReturnError{Target: target, Allowed: targets})
 	}
 	entered := w.entering(target)
 	return []WorkEvent{
 		WorkReturned{WorkID: w.id, Owner: owner, From: w.stage, FromVisit: w.visit, Target: target, Visit: entered.Visit, Reason: reason},
 		entered,
 	}, nil
+}
+
+// returned is the state after the owner returned the work, from a state
+// whose return targets are targets; ok is false when the event can't follow.
+func (w active) returned(e WorkReturned, targets []Stage) (InProgressWork, *StageEntered, bool) {
+	entered := w.entering(e.Target)
+	if e.From != w.stage || e.FromVisit != w.visit || !slices.Contains(targets, e.Target) ||
+		e.Visit != entered.Visit || e.Owner.isZero() || e.Reason.isZero() {
+		return InProgressWork{}, nil, false
+	}
+	back := w.onStage(entered)
+	back.stress = nil // the next review decides again
+	return InProgressWork{back}, &entered, true
 }
 
 // AllowMoreRework extends the rework budget. The work is back in progress
@@ -658,14 +700,11 @@ func evolveWork(w work, path Path, state WorkState, e WorkEvent) (next WorkState
 			in.reworks = in.reworks.plusOne()
 			return InFixerWork{active: in, from: e.From, fromVisit: e.FromVisit, mode: e.Mode, reason: e.Reason}, &fixer, true
 		case WorkReturned:
-			entered := s.entering(e.Target)
-			if e.From != s.stage || e.FromVisit != s.visit || !slices.Contains(s.ReturnTargets(), e.Target) ||
-				e.Visit != entered.Visit || e.Owner.isZero() || e.Reason.isZero() {
+			back, entered, ok := s.returned(e, s.ReturnTargets())
+			if !ok {
 				return nil, nil, false
 			}
-			back := s.onStage(entered)
-			back.stress = nil // the next review decides again
-			return InProgressWork{back}, &entered, true
+			return back, entered, true
 		case ReworkLimitReached:
 			if !s.stage.ChecksCode() || !s.reworkBudget.exhaustedBy(s.reworks) || e.Reworks != s.reworks {
 				return nil, nil, false
@@ -685,6 +724,12 @@ func evolveWork(w work, path Path, state WorkState, e WorkEvent) (next WorkState
 			back := s.onStage(entered)
 			back.stress = nil // the next review decides again
 			return InProgressWork{back}, &entered, true
+		case WorkReturned:
+			back, entered, ok := s.returned(e, s.ReturnTargets())
+			if !ok {
+				return nil, nil, false
+			}
+			return back, entered, true
 		case WorkAbandoned:
 			return abandoned(w, e), nil, true
 		}
@@ -696,6 +741,12 @@ func evolveWork(w work, path Path, state WorkState, e WorkEvent) (next WorkState
 			}
 			s.reworkBudget = e.NewBudget
 			return InProgressWork{s.active}, nil, true
+		case WorkReturned:
+			back, entered, ok := s.returned(e, s.ReturnTargets())
+			if !ok {
+				return nil, nil, false
+			}
+			return back, entered, true
 		case WorkAbandoned:
 			return abandoned(w, e), nil, true
 		}
