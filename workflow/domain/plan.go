@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"path"
 	"slices"
 	"strings"
 )
@@ -48,16 +49,28 @@ func (p RefactorPlan) Moves() []RefactorMove { return slices.Clone(p.v.Moves) }
 
 // Problems lists what makes the plan incomplete, one sentence each, in a
 // stable order; none means it is valid: it names at least one area, every
-// area is a valid glob, it changes no behaviour, and the markdown plan
-// links the accepted grill's decision document, grillDoc.
-func (p RefactorPlan) Problems(markdown string, grillDoc RepoPath) []string {
+// area is a valid glob of code (not the whole repository, gofast's own
+// files or the decisions directory, decisions), it changes no behaviour,
+// and the markdown plan links the accepted grill's decision document,
+// grillDoc.
+func (p RefactorPlan) Problems(markdown string, grillDoc RepoPath, decisions DecisionsDir) []string {
 	var list problems
 	if len(p.v.Areas) == 0 {
 		list.add("the plan names no area: list the code the refactor may change as globs under \"areas\"")
 	}
 	for _, a := range p.v.Areas {
-		if _, err := NewAreaGlob(a); err != nil {
-			list.add("area %q is not a glob of repository paths, such as internal/wallet/**", a)
+		clean := path.Clean(a)
+		switch {
+		case wholeRepository(a):
+			list.add("area %q covers the whole repository: name the code the refactor moves (e.g. internal/wallet/**)", a)
+		case within(clean, gofastDir):
+			list.add("area %q is gofast's own files, not code: name the code the refactor moves (e.g. internal/wallet/**)", a)
+		case within(clean, decisions.path):
+			list.add("area %q is the decisions directory, not code: name the code the refactor moves (e.g. internal/wallet/**)", a)
+		default:
+			if _, err := NewAreaGlob(a); err != nil {
+				list.add("area %q is not a glob of repository paths, such as internal/wallet/**", a)
+			}
 		}
 	}
 	if p.v.BehaviourChange {
@@ -70,4 +83,21 @@ func (p RefactorPlan) Problems(markdown string, grillDoc RepoPath) []string {
 		list.add("the markdown plan doesn't link the accepted grill's decision document, %s", grillDoc)
 	}
 	return list.list
+}
+
+// wholeRepository reports whether an area matches every path: after
+// cleaning, it is one of **, **/*, *, ., ./... or /.
+func wholeRepository(area string) bool {
+	for _, form := range []string{area, path.Clean(area)} {
+		switch form {
+		case "**", "**/*", "*", ".", "./...", "/":
+			return true
+		}
+	}
+	return false
+}
+
+// within reports whether a cleaned area starts with dir.
+func within(area string, dir RepoPath) bool {
+	return !dir.isZero() && (area == dir.value || strings.HasPrefix(area, dir.value+"/"))
 }

@@ -126,7 +126,7 @@ func (c *checkRun) planValid() (finding, error) {
 		}
 		grillDoc = grill.DocPath()
 	}
-	problems := plan.Problems(string(markdown), grillDoc)
+	problems := plan.Problems(string(markdown), grillDoc, c.Config.Decisions)
 	if len(problems) == 0 {
 		return pass, nil
 	}

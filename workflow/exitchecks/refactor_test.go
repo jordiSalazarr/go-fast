@@ -93,6 +93,8 @@ func TestPlanValid(t *testing.T) {
 	fails(t, check(`{"areas": [], "behaviourChange": false}`, linked), "the plan names no area")
 	fails(t, check(`{"areas": ["server/**"], "behaviourChange": true}`, linked), "behaviourChange is true")
 	fails(t, check(`{"areas": ["server/**"]}`, linked), `"behaviourChange" is missing`)
+	fails(t, check(`{"areas": ["**"], "behaviourChange": false}`, linked), `area "**" covers the whole repository: name the code the refactor moves (e.g. internal/wallet/**)`)
+	fails(t, check(`{"areas": [".gofast/**"], "behaviourChange": false}`, linked), `area ".gofast/**" is gofast's own files, not code`)
 }
 
 // characterized has the plan accepted before characterize began.

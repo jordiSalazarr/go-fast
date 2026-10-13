@@ -1,6 +1,7 @@
 package domain_test
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -121,7 +122,8 @@ func TestRefactorPlan_Problems(t *testing.T) {
 	linked := "Follows [the decisions](../../../" + grillDoc.String() + ")."
 	valid := domain.NewRefactorPlan(domain.RefactorPlanValues{Areas: []string{"internal/wallet/**", "internal/ledger/posting.go"},
 		Moves: []domain.RefactorMove{{From: "internal/wallet/service.go", To: "internal/wallet/slices/postTransaction/"}}})
-	assert.Empty(t, valid.Problems(linked, grillDoc))
+	decisions := domain.DefaultDecisionsDir()
+	assert.Empty(t, valid.Problems(linked, grillDoc, decisions))
 	assert.Len(t, valid.Areas(), 2)
 
 	cases := []struct {
@@ -141,7 +143,29 @@ func TestRefactorPlan_Problems(t *testing.T) {
 			"the work has no accepted grill whose decision document the plan could link"},
 	}
 	for _, c := range cases {
-		assert.Equal(t, []string{c.want}, domain.NewRefactorPlan(c.plan).Problems(c.markdown, c.grill), c.name)
+		assert.Equal(t, []string{c.want}, domain.NewRefactorPlan(c.plan).Problems(c.markdown, c.grill, decisions), c.name)
+	}
+}
+
+// An area that matches every path would make implement's scope a check
+// that can never fail; gofast's files and the decisions are not code.
+func TestRefactorPlan_AreasNameCode(t *testing.T) {
+	grillDoc := must(domain.ParseRepoPath("docs/decisions/2026-10-12-w1-split-wallet.md"))
+	problems := func(area string) []string {
+		return domain.NewRefactorPlan(domain.RefactorPlanValues{Areas: []string{area}}).Problems(grillDoc.String(), grillDoc, domain.DefaultDecisionsDir())
+	}
+	for _, area := range []string{"**", "**/*", "*", ".", "./...", "/", "./**", "**/"} {
+		assert.Equal(t, []string{fmt.Sprintf("area %q covers the whole repository: name the code the refactor moves (e.g. internal/wallet/**)", area)},
+			problems(area), area)
+	}
+	for _, area := range []string{".gofast/**", ".gofast", ".gofast/works/w1/plan-v1.md"} {
+		assert.Equal(t, []string{fmt.Sprintf("area %q is gofast's own files, not code: name the code the refactor moves (e.g. internal/wallet/**)", area)},
+			problems(area), area)
+	}
+	assert.Equal(t, []string{`area "docs/decisions/**" is the decisions directory, not code: name the code the refactor moves (e.g. internal/wallet/**)`},
+		problems("docs/decisions/**"))
+	for _, area := range []string{"internal/**", "internal/wallet/service.go", "docs/decisionsmore/**", ".gofastish/**"} {
+		assert.Empty(t, problems(area), area)
 	}
 }
 
