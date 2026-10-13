@@ -94,10 +94,14 @@ type measurementV1 struct {
 	Requests  int     `json:"requests"`
 }
 
+// baselineMeasuredV1's script and its hash are absent on events recorded
+// before scripts were frozen.
 type baselineMeasuredV1 struct {
-	WorkID      string        `json:"workId"`
-	NFR         string        `json:"nfr"`
-	Measurement measurementV1 `json:"measurement"`
+	WorkID       string        `json:"workId"`
+	NFR          string        `json:"nfr"`
+	Measurement  measurementV1 `json:"measurement"`
+	Script       string        `json:"script,omitempty"`
+	ScriptSHA256 string        `json:"scriptSha256,omitempty"`
 }
 
 type nfrMeasurementV1 struct {
@@ -305,6 +309,7 @@ func encodeEvent(e domain.Event) (eventType string, stream Stream, payload any, 
 	case domain.BaselineMeasured:
 		return typeBaselineMeasured, WorkStream(e.WorkID), baselineMeasuredV1{
 			WorkID: e.WorkID.String(), NFR: e.NFR.String(), Measurement: encodeMeasurement(e.Measurement),
+			Script: e.Script.String(), ScriptSHA256: e.ScriptHash.String(),
 		}, nil
 	case domain.WorkFoundNothingToImprove:
 		p := workFoundNothingToImproveV1{WorkID: e.WorkID.String()}
@@ -418,7 +423,11 @@ func decodeEvent(eventType string, payload json.RawMessage) (domain.Event, Strea
 	case typeBaselineMeasured:
 		var p baselineMeasuredV1
 		d.unmarshal(payload, &p)
-		event = domain.BaselineMeasured{WorkID: d.workID(p.WorkID), NFR: d.nfrID(p.NFR), Measurement: d.measurement(p.Measurement)}
+		measured := domain.BaselineMeasured{WorkID: d.workID(p.WorkID), NFR: d.nfrID(p.NFR), Measurement: d.measurement(p.Measurement)}
+		if p.Script != "" || p.ScriptSHA256 != "" {
+			measured.Script, measured.ScriptHash = d.repoPath(p.Script), d.contentHash(p.ScriptSHA256)
+		}
+		event = measured
 	case typeWorkFoundNothingToImprove:
 		var p workFoundNothingToImproveV1
 		d.unmarshal(payload, &p)
@@ -633,6 +642,18 @@ func (d *decoder) inputs(in []workInputV1) []domain.WorkInput {
 		out = append(out, input)
 	}
 	return out
+}
+
+func (d *decoder) repoPath(s string) domain.RepoPath {
+	v, err := domain.ParseRepoPath(s)
+	d.keep(err)
+	return v
+}
+
+func (d *decoder) contentHash(s string) domain.ContentHash {
+	v, err := domain.ParseContentHash(s)
+	d.keep(err)
+	return v
 }
 
 func (d *decoder) pathVersion(n int) domain.PathVersion {

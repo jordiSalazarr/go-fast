@@ -53,6 +53,7 @@ type stressRun struct {
 // before it could be.
 type nfrOutcome struct {
 	nfr     domain.NFR
+	script  plannedScript
 	result  domain.NFRResult
 	problem string
 }
@@ -121,7 +122,7 @@ func (c *checkRun) runStress() (*stressRun, error) {
 		return run, fmt.Errorf("stress run: %w", err)
 	}
 	for _, s := range scripts {
-		if err := c.runScript(run, dir, s.nfr, s.path); err != nil {
+		if err := c.runScript(run, dir, s); err != nil {
 			return run, err
 		}
 	}
@@ -142,13 +143,17 @@ type StressResult struct {
 	// Missed describes each missed target, measured against target.
 	Missed []string `json:"missed,omitempty"`
 	// Problem is set when the service failed before it could be measured.
-	Problem   string  `json:"problem,omitempty"`
-	Measured  string  `json:"measured,omitempty"`
-	P95Ms     float64 `json:"p95Ms"`
-	P99Ms     float64 `json:"p99Ms"`
-	ErrorRate float64 `json:"errorRate"`
-	RPS       float64 `json:"rps"`
-	Requests  int     `json:"requests"`
+	Problem string `json:"problem,omitempty"`
+	// Script is the k6 script that ran, and ScriptSHA256 its content's
+	// hash as it ran; on measure, they become the baseline's frozen scripts.
+	Script       string  `json:"script"`
+	ScriptSHA256 string  `json:"scriptSha256"`
+	Measured     string  `json:"measured,omitempty"`
+	P95Ms        float64 `json:"p95Ms"`
+	P99Ms        float64 `json:"p99Ms"`
+	ErrorRate    float64 `json:"errorRate"`
+	RPS          float64 `json:"rps"`
+	Requests     int     `json:"requests"`
 }
 
 const stressResultsFile = "results.json"
@@ -156,7 +161,8 @@ const stressResultsFile = "results.json"
 func writeStressResults(path string, outcomes []nfrOutcome) error {
 	results := []StressResult{}
 	for _, o := range outcomes {
-		r := StressResult{NFR: o.nfr.ID().String(), Targets: o.nfr.Targets().Describe(), Problem: o.problem}
+		r := StressResult{NFR: o.nfr.ID().String(), Targets: o.nfr.Targets().Describe(), Problem: o.problem,
+			Script: o.script.path.String(), ScriptSHA256: o.script.hash.String()}
 		if o.problem == "" {
 			m := o.result.Measurement().Values()
 			r.Met, r.Missed, r.Measured = o.result.Met(), o.result.Missed(), o.result.Measurement().Describe()
@@ -203,6 +209,7 @@ func ReadStressResults(root string, id domain.AssignmentID) (attempt int, result
 type plannedScript struct {
 	nfr  domain.NFR
 	path domain.RepoPath
+	hash domain.ContentHash // of the content checked and run
 }
 
 // plannedScripts are the scripts to run, in NFR id order, once everything
@@ -256,9 +263,21 @@ func (c *checkRun) plannedScripts(run *stressRun) ([]plannedScript, error) {
 			problem("the work targets %s, which is no longer in %s; the owner restores it", id, NFRsPath)
 		}
 	}
+	for _, f := range c.visit.FrozenScripts {
+		content, err := os.ReadFile(filepath.Join(c.Root, filepath.FromSlash(f.Path().String())))
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("stress script %s: %w", f.Path(), err)
+		}
+		if !f.Unchanged(content, err == nil) {
+			problem("%s", f.Changed())
+		}
+	}
 	for _, n := range domain.MandatoryNFRs(nfrs, changed, c.visit.TargetNFRs) {
 		if slices.ContainsFunc(scripts, func(s plannedScript) bool { return s.nfr.ID() == n.ID() }) {
 			continue
+		}
+		if _, frozen := domain.FrozenAt(c.visit.FrozenScripts, domain.StressScriptFor(c.visit.Work, n.ID())); frozen {
+			continue // deleted: restoring it is the problem above
 		}
 		if slices.Contains(c.visit.TargetNFRs, n.ID()) {
 			problem("no script for %s, which the work targets: write %s", n.ID(), domain.StressScriptFor(c.visit.Work, n.ID()))
@@ -269,11 +288,12 @@ func (c *checkRun) plannedScripts(run *stressRun) ([]plannedScript, error) {
 	if len(scripts) == 0 && len(run.problems) == 0 {
 		problem("no stress script: write one per NFR to exercise, at %s/<nfr-id>.js", dir)
 	}
-	for _, s := range scripts {
+	for i, s := range scripts {
 		src, err := os.ReadFile(filepath.Join(c.Root, filepath.FromSlash(s.path.String())))
 		if err != nil {
 			return nil, fmt.Errorf("stress script %s: %w", s.path, err)
 		}
+		scripts[i].hash = domain.HashOf(src)
 		for _, p := range scriptProblems(string(src)) {
 			problem("%s.js %s", s.nfr.ID(), p)
 		}
@@ -283,7 +303,8 @@ func (c *checkRun) plannedScripts(run *stressRun) ([]plannedScript, error) {
 }
 
 // runScript runs one NFR's script against a freshly started service.
-func (c *checkRun) runScript(run *stressRun, dir string, nfr domain.NFR, script domain.RepoPath) error {
+func (c *checkRun) runScript(run *stressRun, dir string, s plannedScript) error {
+	nfr, script := s.nfr, s.path
 	config := *c.Config.Stress
 	id := nfr.ID().String()
 	fmt.Fprintf(c.log, "--- %s: %s, %d vus for %s, targets %s\n", id, script, nfr.Load().VUs(), nfr.Load().Duration(), nfr.Targets().Describe())
@@ -299,7 +320,7 @@ func (c *checkRun) runScript(run *stressRun, dir string, nfr domain.NFR, script 
 	defer service.stop()
 	if problem := service.waitReady(config.Ready, config.StartTimeout); problem != "" {
 		fmt.Fprintf(c.log, "(%s)\n", problem)
-		run.outcomes = append(run.outcomes, nfrOutcome{nfr: nfr, problem: problem + " (log: " + c.relative(filepath.Join(dir, id+".service.log")) + ")"})
+		run.outcomes = append(run.outcomes, nfrOutcome{nfr: nfr, script: s, problem: problem + " (log: " + c.relative(filepath.Join(dir, id+".service.log")) + ")"})
 		return nil
 	}
 
@@ -318,7 +339,7 @@ func (c *checkRun) runScript(run *stressRun, dir string, nfr domain.NFR, script 
 	service.stop()
 	switch {
 	case out.timedOut:
-		run.outcomes = append(run.outcomes, nfrOutcome{nfr: nfr, problem: "k6 " + out.failure()})
+		run.outcomes = append(run.outcomes, nfrOutcome{nfr: nfr, script: s, problem: "k6 " + out.failure()})
 		return nil
 	case !out.ok():
 		run.problems = append(run.problems, fmt.Sprintf("%s.js failed under k6 (%s): %s", id, out.failure(), lastLines(string(out.stderr)+string(out.stdout), 2)))
@@ -334,7 +355,7 @@ func (c *checkRun) runScript(run *stressRun, dir string, nfr domain.NFR, script 
 	}
 	result := nfr.Evaluate(m)
 	fmt.Fprintf(c.log, "measured %s: %s\n", id, m.Describe())
-	run.outcomes = append(run.outcomes, nfrOutcome{nfr: nfr, result: result})
+	run.outcomes = append(run.outcomes, nfrOutcome{nfr: nfr, script: s, result: result})
 	return nil
 }
 

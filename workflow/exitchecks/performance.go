@@ -69,36 +69,61 @@ func MeasurementOf(r StressResult) (domain.Measurement, error) {
 }
 
 // MeasuredBaseline is what a measure visit's latest stress run measured of
-// the target NFRs, each judged against its NFR's current targets, and the
-// raw results gf records as the baseline.
-func MeasuredBaseline(root string, id domain.AssignmentID, targets []domain.NFRID) ([]domain.NFRResult, []StressResult, error) {
+// the target NFRs: each judged against its NFR's current targets, the
+// scripts that measured them as they ran, and the raw results gf records as
+// the baseline.
+func MeasuredBaseline(root string, id domain.AssignmentID, targets []domain.NFRID) (MeasuredTargets, error) {
 	_, results, ok, err := ReadStressResults(root, id)
 	if err != nil {
-		return nil, nil, err
+		return MeasuredTargets{}, err
 	}
 	if !ok {
-		return nil, nil, fmt.Errorf("measure %s: no stress run measured anything: %w", id, domain.ErrBaselineIncomplete)
+		return MeasuredTargets{}, fmt.Errorf("measure %s: no stress run measured anything: %w", id, domain.ErrBaselineIncomplete)
 	}
 	nfrs, err := LoadNFRs(root)
 	if err != nil {
-		return nil, nil, err
+		return MeasuredTargets{}, err
 	}
-	var judged []domain.NFRResult
-	var kept []StressResult
+	var measured MeasuredTargets
 	for _, target := range targets {
 		i := slices.IndexFunc(results, func(r StressResult) bool { return r.NFR == target.String() && r.Problem == "" })
 		j := slices.IndexFunc(nfrs, func(n domain.NFR) bool { return n.ID() == target })
 		if i < 0 || j < 0 {
-			return nil, nil, fmt.Errorf("measure %s: %s: %w", id, target, domain.ErrBaselineIncomplete)
+			return MeasuredTargets{}, fmt.Errorf("measure %s: %s: %w", id, target, domain.ErrBaselineIncomplete)
 		}
 		m, err := MeasurementOf(results[i])
 		if err != nil {
-			return nil, nil, err
+			return MeasuredTargets{}, err
 		}
-		judged = append(judged, nfrs[j].Evaluate(m))
-		kept = append(kept, results[i])
+		script, err := frozenScriptOf(target, results[i])
+		if err != nil {
+			return MeasuredTargets{}, fmt.Errorf("measure %s: %w", id, err)
+		}
+		measured.Results = append(measured.Results, nfrs[j].Evaluate(m))
+		measured.Scripts = append(measured.Scripts, script)
+		measured.Raw = append(measured.Raw, results[i])
 	}
-	return judged, kept, nil
+	return measured, nil
+}
+
+// MeasuredTargets is what measure measured of the target NFRs.
+type MeasuredTargets struct {
+	Results []domain.NFRResult
+	Scripts []domain.FrozenScript
+	Raw     []StressResult
+}
+
+// frozenScriptOf is the script a result was measured with, as it ran.
+func frozenScriptOf(nfr domain.NFRID, r StressResult) (domain.FrozenScript, error) {
+	path, err := domain.ParseRepoPath(r.Script)
+	if err != nil {
+		return domain.FrozenScript{}, fmt.Errorf("%s: the stress run recorded no script; submit again: %w", nfr, err)
+	}
+	hash, err := domain.ParseContentHash(r.ScriptSHA256)
+	if err != nil {
+		return domain.FrozenScript{}, fmt.Errorf("%s: the stress run recorded no script hash; submit again: %w", nfr, err)
+	}
+	return domain.NewFrozenScript(nfr, path, hash)
 }
 
 // baselineRecorded: measure's stress run measured every target NFR.

@@ -161,12 +161,16 @@ type CoverageView struct {
 	Packages    []exitchecks.PackageCoverage `json:"packages"`
 }
 
-// BaselineView is a target NFR's baseline.
+// BaselineView is a target NFR's baseline, and the script that measured
+// it, frozen since; no script on a baseline recorded before scripts were
+// frozen.
 type BaselineView struct {
-	NFR      string `json:"nfr"`
-	Measured string `json:"measured"`
-	Targets  string `json:"targets,omitempty"`
-	Met      bool   `json:"met"`
+	NFR        string `json:"nfr"`
+	Measured   string `json:"measured"`
+	Targets    string `json:"targets,omitempty"`
+	Met        bool   `json:"met"`
+	Script     string `json:"script,omitempty"`
+	ScriptHash string `json:"scriptHash,omitempty"` // short
 }
 
 // EventModelView is the work's event modelling.
@@ -584,7 +588,7 @@ func Read(log Reader, branch domain.Branch, facts Facts) (View, error) {
 	if visit, ok := lastVisit[domain.StageCharacterize]; ok && facts.Coverage != nil {
 		view.Work.Coverage = coverageView(domain.AssignmentIDFor(work.ID(), domain.StageCharacterize, visit), visit, facts)
 	}
-	view.Work.Baseline = baselineViews(work.Baseline(), facts)
+	view.Work.Baseline = baselineViews(work.Baseline(), work.FrozenScripts(), facts)
 	fixer, inFixer := work.(domain.InFixerWork)
 	// In the fixer, the path is done up to the stage that handed over.
 	onPath := work.CurrentStage()
@@ -1294,6 +1298,9 @@ func RenderText(w io.Writer, v View) {
 			met = "meets its targets"
 		}
 		fmt.Fprintf(w, "Baseline of %s: %s (targets %s; %s)\n", b.NFR, b.Measured, b.Targets, met)
+		if b.Script != "" {
+			fmt.Fprintf(w, "  script %s: frozen (sha256 %s)\n", b.Script, b.ScriptHash)
+		}
 	}
 	if d := v.Work.Design; d != nil {
 		renderDesign(w, d)
@@ -1444,8 +1451,8 @@ func coverageView(id domain.AssignmentID, visit domain.Visit, facts Facts) *Cove
 }
 
 // baselineViews describe the work's baseline against the NFRs' current
-// targets.
-func baselineViews(baseline []domain.NFRMeasurement, facts Facts) []BaselineView {
+// targets, with the scripts that measured it.
+func baselineViews(baseline []domain.NFRMeasurement, frozen []domain.FrozenScript, facts Facts) []BaselineView {
 	var nfrs []domain.NFR
 	if facts.NFRs != nil && len(baseline) > 0 {
 		nfrs, _ = facts.NFRs()
@@ -1453,6 +1460,11 @@ func baselineViews(baseline []domain.NFRMeasurement, facts Facts) []BaselineView
 	var views []BaselineView
 	for _, b := range baseline {
 		v := BaselineView{NFR: b.NFR.String(), Measured: b.Measurement.Describe()}
+		for _, f := range frozen {
+			if f.NFR() == b.NFR {
+				v.Script, v.ScriptHash = f.Path().String(), f.Hash().Short()
+			}
+		}
 		for _, n := range nfrs {
 			if n.ID() == b.NFR {
 				v.Targets, v.Met = n.Targets().Describe(), n.Evaluate(b.Measurement).Met()

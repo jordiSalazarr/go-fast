@@ -57,6 +57,9 @@ type Visit struct {
 	// TargetNFRs are the NFRs improve-performance work must meet: every
 	// stress run scripts them.
 	TargetNFRs []domain.NFRID
+	// FrozenScripts are the scripts measure ran for the work's baseline:
+	// stress-scripts-valid fails when one changed since.
+	FrozenScripts []domain.FrozenScript
 	// Plan is the work's latest accepted refactor plan visit, and PlanEnd
 	// the stage visit entered when it was accepted. Zero when the work has
 	// none.

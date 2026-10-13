@@ -93,7 +93,8 @@ func TestStatus_OnImprovePerformance_ShowsTheTargetsTheBaselineAndTheSkillsLoade
 		if stage != domain.StageMeasure {
 			return nil
 		}
-		return []domain.Event{domain.BaselineMeasured{WorkID: WorkID, NFR: latency.ID(), Measurement: slow}}
+		return []domain.Event{domain.BaselineMeasured{WorkID: WorkID, NFR: latency.ID(), Measurement: slow,
+			Script: domain.StressScriptFor(WorkID, latency.ID()), ScriptHash: domain.HashOf([]byte("export default function () {}"))}}
 	}
 	events := append(walk(domain.WorkTypeImprovePerformance, domain.StageOptimize, started, baseline),
 		domain.SkillLoaded{WorkID: WorkID, Stage: domain.StageOptimize, Visit: Visit1, Skill: "concurrency"},
@@ -101,12 +102,15 @@ func TestStatus_OnImprovePerformance_ShowsTheTargetsTheBaselineAndTheSkillsLoade
 	v := queriedWith(t, eventlogtest.Given(t, events...), progress.Facts{NFRs: func() ([]domain.NFR, error) { return []domain.NFR{latency}, nil }})
 
 	assert.Equal(t, []string{"wallet-latency"}, v.Work.TargetNFRs)
-	assert.Equal(t, []progress.BaselineView{{NFR: "wallet-latency", Measured: slow.Describe(), Targets: "p95 ≤ 150ms", Met: false}}, v.Work.Baseline)
+	hash := domain.HashOf([]byte("export default function () {}")).String()[:12]
+	assert.Equal(t, []progress.BaselineView{{NFR: "wallet-latency", Measured: slow.Describe(), Targets: "p95 ≤ 150ms", Met: false,
+		Script: ".gofast/works/w1/stress/wallet-latency.js", ScriptHash: hash}}, v.Work.Baseline)
 	assert.Equal(t, []string{"concurrency"}, v.Current.SkillsLoaded, "only this visit's")
 	var text strings.Builder
 	progress.RenderText(&text, v)
 	assert.Contains(t, text.String(), "Target NFRs: wallet-latency\n")
 	assert.Contains(t, text.String(), "Baseline of wallet-latency: p95 212ms, ")
+	assert.Contains(t, text.String(), "  script .gofast/works/w1/stress/wallet-latency.js: frozen (sha256 "+hash+")\n")
 	assert.Contains(t, text.String(), "Skills loaded this visit: concurrency\n")
 }
 

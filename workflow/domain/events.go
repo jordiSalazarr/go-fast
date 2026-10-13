@@ -109,11 +109,15 @@ type WorkCompleted struct {
 }
 
 // BaselineMeasured: measure measured a target NFR before the work changed
-// the code; one per target NFR.
+// the code; one per target NFR. Script is the k6 script it ran and
+// ScriptHash its content's hash: from then on the script is frozen. Events
+// recorded before scripts were frozen have neither.
 type BaselineMeasured struct {
 	WorkID      WorkID
 	NFR         NFRID
 	Measurement Measurement
+	Script      RepoPath
+	ScriptHash  ContentHash
 }
 
 // WorkFoundNothingToImprove: every target NFR already met its targets at

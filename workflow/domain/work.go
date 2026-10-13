@@ -112,6 +112,9 @@ type ActiveWork interface {
 	// Baseline is what measure recorded of the target NFRs before the work
 	// changed the code; none before.
 	Baseline() []NFRMeasurement
+	// FrozenScripts are the scripts measure ran for the baseline: no stage
+	// may change them since.
+	FrozenScripts() []FrozenScript
 	Path() Path
 	CurrentStage() Stage
 	CurrentVisit() Visit
@@ -144,9 +147,11 @@ type active struct {
 	reworkBudget ReworkBudget
 	stress       *stressDecision  // nil until decided on this pass; never mutated
 	baseline     []NFRMeasurement // copied on write
+	frozen       []FrozenScript   // copied on write
 }
 
-func (w active) Baseline() []NFRMeasurement { return slices.Clone(w.baseline) }
+func (w active) Baseline() []NFRMeasurement    { return slices.Clone(w.baseline) }
+func (w active) FrozenScripts() []FrozenScript { return slices.Clone(w.frozen) }
 
 func (w active) Path() Path                 { return w.path }
 func (w active) CurrentStage() Stage        { return w.stage }
@@ -671,7 +676,14 @@ func evolveWork(w work, path Path, state WorkState, e WorkEvent) (next WorkState
 				slices.ContainsFunc(s.baseline, func(m NFRMeasurement) bool { return m.NFR == e.NFR }) {
 				return nil, nil, false
 			}
+			script, frozen, ok := frozenBy(w.id, e)
+			if !ok {
+				return nil, nil, false
+			}
 			s.baseline = append(slices.Clone(s.baseline), NFRMeasurement{NFR: e.NFR, Measurement: e.Measurement})
+			if frozen {
+				s.frozen = append(slices.Clone(s.frozen), script)
+			}
 			return InProgressWork{s.active}, nil, true
 		case WorkFoundNothingToImprove:
 			_, optimized := s.visits[StageOptimize]

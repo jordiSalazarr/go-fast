@@ -38,6 +38,8 @@ type stageFacts struct {
 	// catalog and diagnosis decide which catalog skills the stage may load.
 	catalog   domain.SkillCatalog
 	diagnosis domain.Diagnosis
+	// frozen are the scripts measure ran for the work's baseline.
+	frozen []domain.FrozenScript
 }
 
 // withSkills sets the plugin's skill catalog and what the work has
@@ -108,9 +110,11 @@ var ownerOnlyReasons = map[string]string{
 //     program only known at run time: deny, everywhere.
 //  2. Bash mentioning GF_ACTOR or gofast's own files: deny, everywhere.
 //  3. Bash clearing the environment (env -i, env -u, unset): deny, everywhere.
-//  4. Write, Edit or NotebookEdit outside the stage's write scope: deny, for
-//     gofast stage agents and for the main session while it drives. gf submit
-//     checks the scope again with git, however the files were written.
+//  4. Write, Edit or NotebookEdit outside the stage's write scope, or of a
+//     script frozen by the work's baseline: deny, for gofast stage agents and
+//     for the main session while it drives. gf submit checks the scope again
+//     with git, and stress-scripts-valid the frozen scripts, however the
+//     files were written.
 //  5. Skill loading a skill of the stage's catalog before the work has a
 //     diagnosis (SkillCatalog.MayLoad): deny, for the same callers as rule 4;
 //     so is a Read of that skill's SKILL.md, on a best-effort basis.
@@ -160,6 +164,9 @@ func decide(in claudehooks.Input, facts stageFacts, driving bool, root string) c
 		p, err := domain.NewRepoPath(root, target)
 		if err != nil {
 			return claudehooks.Deny(fmt.Sprintf("During '%s' you may only write inside the repository; %s is outside it.", facts.stage, target))
+		}
+		if frozen, ok := domain.FrozenAt(facts.frozen, p); ok {
+			return claudehooks.Deny(frozen.Changed())
 		}
 		if facts.writes.Allows(p, facts.added(p)) {
 			return claudehooks.Nothing()
@@ -303,6 +310,7 @@ func loadFacts(repo claudehooks.Repo, branchOf func(root string) (domain.Branch,
 		if err != nil {
 			return err
 		}
+		facts.frozen = work.FrozenScripts()
 		facts = facts.withWrites(writes, func(p domain.RepoPath) bool {
 			_, err := os.Stat(filepath.Join(repo.Root, filepath.FromSlash(p.String())))
 			return err == nil

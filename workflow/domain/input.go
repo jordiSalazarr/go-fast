@@ -54,7 +54,10 @@ func ParseContentHash(s string) (ContentHash, error) {
 }
 
 func (h ContentHash) String() string { return h.hex }
-func (h ContentHash) isZero() bool   { return h.hex == "" }
+
+// Short is the hash's first 12 hex digits, to show it.
+func (h ContentHash) Short() string { return h.hex[:min(12, len(h.hex))] }
+func (h ContentHash) isZero() bool  { return h.hex == "" }
 
 // WorkInput is a file the owner started the work from: a committed file of
 // the repository and its content's hash at start, so every stage reads the

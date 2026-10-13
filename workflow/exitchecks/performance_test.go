@@ -16,8 +16,8 @@ import (
 var walletLatency = Must(domain.NewNFRID("wallet-latency"))
 
 // visitOn runs the checks of a stage visit of improve-performance work that
-// targets wallet-latency.
-func (m *stressModule) visitOn(stage domain.Stage, config exitchecks.Config, path string) map[domain.ExitCheck]domain.CheckResult {
+// targets wallet-latency, with these scripts frozen by its baseline.
+func (m *stressModule) visitOn(stage domain.Stage, config exitchecks.Config, path string, frozen ...domain.FrozenScript) map[domain.ExitCheck]domain.CheckResult {
 	m.t.Helper()
 	changed, _, err := worktree.OpenBaselines(m.root).ChangedSince(AssignmentOn(stage))
 	require.NoError(m.t, err)
@@ -25,7 +25,7 @@ func (m *stressModule) visitOn(stage domain.Stage, config exitchecks.Config, pat
 	results, err := runner.Run(exitchecks.Visit{
 		Assignment: AssignmentOn(stage), Work: WorkID, Path: Must(domain.PathFor(domain.WorkTypeImprovePerformance)),
 		Stage: stage, Visit: Visit1, Attempt: Attempt(1), Changed: changed, FirstAssignment: AssignmentOn(domain.StageDiscovery),
-		TargetNFRs: []domain.NFRID{walletLatency},
+		TargetNFRs: []domain.NFRID{walletLatency}, FrozenScripts: frozen,
 	})
 	require.NoError(m.t, err)
 	byCheck := map[domain.ExitCheck]domain.CheckResult{}
@@ -54,11 +54,66 @@ func TestMeasure_RecordsTheBaselineOfTheTargets(t *testing.T) {
 	passes(t, results[domain.CheckStressScriptsValid])
 	passes(t, results[domain.CheckBaselineRecorded])
 	passes(t, results[domain.CheckDiagnosisWritten])
-	judged, kept, err := exitchecks.MeasuredBaseline(m.root, AssignmentOn(domain.StageMeasure), []domain.NFRID{walletLatency})
+	measured, err := exitchecks.MeasuredBaseline(m.root, AssignmentOn(domain.StageMeasure), []domain.NFRID{walletLatency})
 	require.NoError(t, err)
-	require.Len(t, judged, 1)
-	assert.False(t, judged[0].Met(), "a slow handler misses the target")
-	assert.Equal(t, "wallet-latency", kept[0].NFR)
+	require.Len(t, measured.Results, 1)
+	assert.False(t, measured.Results[0].Met(), "a slow handler misses the target")
+	assert.Equal(t, "wallet-latency", measured.Raw[0].NFR)
+	assert.Equal(t, []domain.FrozenScript{frozenScript(transactionScript)}, measured.Scripts, "the script as it ran")
+}
+
+// frozenScript is wallet-latency's script, frozen with this content.
+func frozenScript(content string) domain.FrozenScript {
+	return Must(domain.NewFrozenScript(walletLatency, domain.StressScriptFor(WorkID, walletLatency), domain.HashOf([]byte(content))))
+}
+
+// Once the work has a baseline, the target NFRs' scripts are frozen: a run
+// that compares with the baseline must use the script the baseline used.
+func TestStressScriptsValid_AFrozenScriptChanged_Fails(t *testing.T) {
+	const message = ".gofast/works/w1/stress/wallet-latency.js changed since measure recorded the baseline: restore it. " +
+		"A different script needs a new baseline: abandon the work and start again with the new script."
+	lighter := "import http from 'k6/http';\n// fake-k6: POST /wallets/7/transactions\nexport default function () {\n  http.post(`${__ENV.BASE_URL}/wallets/7/transactions`);\n}\n"
+
+	for _, stage := range []domain.Stage{domain.StageStressTesting, domain.StageMeasure} {
+		t.Run(stage.String(), func(t *testing.T) {
+			m := newStressModule(t, `{"p95": "500ms"}`)
+			if stage == domain.StageMeasure {
+				m.onMeasure(diagnosis) // a later measure visit
+			} else {
+				m.onStress(false)
+			}
+			m.script("wallet-latency", lighter)
+
+			results := m.visitOn(stage, m.config(t), withFakeK6(t), frozenScript(transactionScript))
+			fails(t, results[domain.CheckStressScriptsValid], message)
+			if stage == domain.StageStressTesting {
+				fails(t, results[domain.CheckNFRsMet], "not measured")
+			}
+		})
+	}
+
+	t.Run("deleted", func(t *testing.T) {
+		m := newStressModule(t, `{"p95": "500ms"}`)
+		m.onStress(false)
+		results := m.visitOn(domain.StageStressTesting, m.config(t), withFakeK6(t), frozenScript(transactionScript))
+		fails(t, results[domain.CheckStressScriptsValid], message)
+		assert.NotContains(t, results[domain.CheckStressScriptsValid].Summary(), "no script for wallet-latency")
+	})
+}
+
+func TestStressScriptsValid_FrozenScriptUnchanged_AndANewNonTargetScript_Pass(t *testing.T) {
+	m := newStressModule(t, `{"p95": "500ms"}`)
+	m.write(exitchecks.NFRsPath, `{"nfrs": [{"id": "wallet-latency", "areas": ["`+walletArea+`"], "operation": "POST /wallets/{id}/transactions",
+		"load": {"vus": 2, "duration": "1s"}, "targets": {"p95": "500ms"}},
+		{"id": "wallet-burst", "areas": ["`+walletArea+`"], "operation": "POST /wallets/{id}/transactions",
+		"load": {"vus": 2, "duration": "1s"}, "targets": {"p95": "500ms"}}]}`)
+	m.onStress(false)
+	m.script("wallet-latency", transactionScript)
+	m.script("wallet-burst", transactionScript)
+
+	results := m.visitOn(domain.StageStressTesting, m.config(t), withFakeK6(t), frozenScript(transactionScript))
+	passes(t, results[domain.CheckStressScriptsValid])
+	passes(t, results[domain.CheckNFRsMet])
 }
 
 func TestMeasure_WithoutAScriptForATarget_RecordsNoBaseline(t *testing.T) {

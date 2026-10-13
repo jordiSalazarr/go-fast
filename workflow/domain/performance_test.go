@@ -97,28 +97,89 @@ func TestRecordBaseline(t *testing.T) {
 	w := asInProgress(t, givenWork(t, history...))
 	require.Equal(t, domain.StageMeasure, w.CurrentStage())
 
-	_, err := w.RecordBaseline(nil)
+	_, err := w.RecordBaseline(nil, scripts(latency))
 	assert.ErrorIs(t, err, domain.ErrBaselineIncomplete)
+	_, err = w.RecordBaseline([]domain.NFRResult{latency.Evaluate(slow)}, nil)
+	assert.ErrorIs(t, err, domain.ErrBaselineIncomplete, "every target needs its script")
+	elsewhere := must(domain.NewFrozenScript(latency.ID(), must(domain.ParseRepoPath("stress/x.js")), scriptHash))
+	_, err = w.RecordBaseline([]domain.NFRResult{latency.Evaluate(slow)}, []domain.FrozenScript{elsewhere})
+	assert.ErrorIs(t, err, domain.ErrBaselineIncomplete, "the script is the NFR's, in the work's stress directory")
 
-	events, err := w.RecordBaseline([]domain.NFRResult{latency.Evaluate(slow), ledgerWrite.Evaluate(slow)})
+	events, err := w.RecordBaseline([]domain.NFRResult{latency.Evaluate(slow), ledgerWrite.Evaluate(slow)}, scripts(latency, ledgerWrite))
 	require.NoError(t, err)
-	assert.Equal(t, []domain.WorkEvent{domain.BaselineMeasured{WorkID: workID, NFR: latency.ID(), Measurement: slow}}, events,
+	assert.Equal(t, []domain.WorkEvent{baselineOf(latency, slow)}, events,
 		"only the targets; the target misses, so there is something to improve")
 	after := asInProgress(t, givenWork(t, append(history, events...)...))
 	assert.Equal(t, []domain.NFRMeasurement{{NFR: latency.ID(), Measurement: slow}}, after.Baseline())
 
-	_, err = asInProgress(t, givenWork(t, targeting(t, "wallet-transaction-latency")...)).RecordBaseline(nil)
+	_, err = asInProgress(t, givenWork(t, targeting(t, "wallet-transaction-latency")...)).RecordBaseline(nil, nil)
 	assert.ErrorIs(t, err, domain.ErrNotMeasuring)
+}
+
+var scriptHash = domain.HashOf([]byte("export default function () {}"))
+
+// scripts are the NFRs' scripts, as measure ran them.
+func scripts(nfrs ...domain.NFR) []domain.FrozenScript {
+	var out []domain.FrozenScript
+	for _, n := range nfrs {
+		out = append(out, must(domain.NewFrozenScript(n.ID(), domain.StressScriptFor(workID, n.ID()), scriptHash)))
+	}
+	return out
+}
+
+func baselineOf(n domain.NFR, m domain.Measurement) domain.BaselineMeasured {
+	return domain.BaselineMeasured{WorkID: workID, NFR: n.ID(), Measurement: m, Script: domain.StressScriptFor(workID, n.ID()), ScriptHash: scriptHash}
+}
+
+// Once the work has a baseline, its target NFRs' scripts are frozen, for
+// every later stage and measure visit.
+func TestFreezeRule(t *testing.T) {
+	history := onMeasure(t)
+	measuring := asInProgress(t, givenWork(t, history...))
+	assert.Empty(t, measuring.FrozenScripts(), "nothing is frozen before the baseline")
+	baseline, err := measuring.RecordBaseline([]domain.NFRResult{latency.Evaluate(slow)}, scripts(latency))
+	require.NoError(t, err)
+	history = advance(t, append(history, baseline...)) // optimize
+	optimize := asInProgress(t, givenWork(t, history...))
+	assert.Equal(t, scripts(latency), optimize.FrozenScripts())
+
+	frozen, ok := domain.FrozenAt(optimize.FrozenScripts(), domain.StressScriptFor(workID, latency.ID()))
+	require.True(t, ok)
+	_, ok = domain.FrozenAt(optimize.FrozenScripts(), domain.StressScriptFor(workID, ledgerWrite.ID()))
+	assert.False(t, ok, "a script for another NFR isn't frozen")
+	assert.True(t, frozen.Unchanged([]byte("export default function () {}"), true))
+	assert.False(t, frozen.Unchanged([]byte("export default function () { lighter() }"), true))
+	assert.False(t, frozen.Unchanged(nil, false), "deleted")
+	assert.Equal(t, ".gofast/works/"+workID.String()+"/stress/wallet-transaction-latency.js changed since measure recorded the baseline: restore it. "+
+		"A different script needs a new baseline: abandon the work and start again with the new script.", frozen.Changed())
+
+	// A recorded baseline names its NFR's script, whole.
+	for _, e := range []domain.BaselineMeasured{
+		{WorkID: workID, NFR: latency.ID(), Measurement: slow, Script: domain.StressScriptFor(workID, latency.ID())},
+		{WorkID: workID, NFR: latency.ID(), Measurement: slow, ScriptHash: scriptHash},
+		{WorkID: workID, NFR: latency.ID(), Measurement: slow, Script: domain.StressScriptFor(workID, ledgerWrite.ID()), ScriptHash: scriptHash},
+	} {
+		_, err := domain.RebuildWork(append(onMeasure(t), e))
+		assert.ErrorIs(t, err, domain.ErrInconsistentHistory)
+	}
+}
+
+// A baseline recorded before scripts were frozen freezes nothing.
+func TestFreezeRule_AnOldBaseline_FreezesNothing(t *testing.T) {
+	history := append(onMeasure(t), domain.BaselineMeasured{WorkID: workID, NFR: latency.ID(), Measurement: slow})
+	optimize := asInProgress(t, givenWork(t, advance(t, history)...))
+	assert.Equal(t, []domain.NFRMeasurement{{NFR: latency.ID(), Measurement: slow}}, optimize.Baseline())
+	assert.Empty(t, optimize.FrozenScripts())
 }
 
 // A baseline that already meets every target completes the work.
 func TestRecordBaseline_NothingToImprove_CompletesTheWork(t *testing.T) {
 	history := onMeasure(t)
-	events, err := asInProgress(t, givenWork(t, history...)).RecordBaseline([]domain.NFRResult{latency.Evaluate(fast)})
+	events, err := asInProgress(t, givenWork(t, history...)).RecordBaseline([]domain.NFRResult{latency.Evaluate(fast)}, scripts(latency))
 	require.NoError(t, err)
 	measurements := []domain.NFRMeasurement{{NFR: latency.ID(), Measurement: fast}}
 	assert.Equal(t, []domain.WorkEvent{
-		domain.BaselineMeasured{WorkID: workID, NFR: latency.ID(), Measurement: fast},
+		baselineOf(latency, fast),
 		domain.WorkFoundNothingToImprove{WorkID: workID, Measurements: measurements},
 	}, events)
 	done := stateIs[domain.CompletedWork](t, givenWork(t, append(history, events...)...))
@@ -135,7 +196,7 @@ func TestRecordBaseline_NothingToImprove_CompletesTheWork(t *testing.T) {
 func TestRecordBaseline_AfterOptimize_RecordsNothing(t *testing.T) {
 	history := onMeasure(t)
 	w := asInProgress(t, givenWork(t, history...))
-	baseline, err := w.RecordBaseline([]domain.NFRResult{latency.Evaluate(slow)})
+	baseline, err := w.RecordBaseline([]domain.NFRResult{latency.Evaluate(slow)}, scripts(latency))
 	require.NoError(t, err)
 	history = advance(t, append(history, baseline...)) // optimize
 	optimize := asInProgress(t, givenWork(t, history...))
@@ -156,7 +217,9 @@ func TestRecordBaseline_AfterOptimize_RecordsNothing(t *testing.T) {
 	require.NoError(t, err)
 	history = append(append(history, events...), back...)
 
-	again, err := asInProgress(t, givenWork(t, history...)).RecordBaseline([]domain.NFRResult{latency.Evaluate(fast)})
+	measureAgain := asInProgress(t, givenWork(t, history...))
+	assert.Equal(t, scripts(latency), measureAgain.FrozenScripts(), "a later measure visit is bound by the freeze too")
+	again, err := measureAgain.RecordBaseline([]domain.NFRResult{latency.Evaluate(fast)}, scripts(latency))
 	require.NoError(t, err)
 	assert.Empty(t, again)
 	_, err = domain.RebuildWork(append(history, domain.WorkFoundNothingToImprove{WorkID: workID, Measurements: []domain.NFRMeasurement{{NFR: latency.ID(), Measurement: fast}}}))

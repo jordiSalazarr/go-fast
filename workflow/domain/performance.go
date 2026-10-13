@@ -92,13 +92,71 @@ func MandatoryStress(nfrs []NFR, changed ChangedFiles, targets []NFRID) StressCh
 	return choice
 }
 
+// FrozenScript is a target NFR's k6 script as measure ran it for the
+// baseline: its path and its content's hash. A comparison against the
+// baseline only means something if both runs use the same script, so once
+// the work has a baseline, no stage may change or delete it, a later
+// measure visit included. A different script needs a new baseline, and so
+// a new work.
+type FrozenScript struct {
+	nfr  NFRID
+	path RepoPath
+	hash ContentHash
+}
+
+func NewFrozenScript(nfr NFRID, path RepoPath, hash ContentHash) (FrozenScript, error) {
+	if err := requirePresent(required{"script nfr", nfr}, required{"script path", path}, required{"script hash", hash}); err != nil {
+		return FrozenScript{}, fmt.Errorf("frozen script: %w", err)
+	}
+	return FrozenScript{nfr: nfr, path: path, hash: hash}, nil
+}
+
+func (s FrozenScript) NFR() NFRID        { return s.nfr }
+func (s FrozenScript) Path() RepoPath    { return s.path }
+func (s FrozenScript) Hash() ContentHash { return s.hash }
+
+// Unchanged reports whether the script, as it is now, is what measure ran:
+// content is its content, present false when it was deleted.
+func (s FrozenScript) Unchanged(content []byte, present bool) bool {
+	return present && HashOf(content) == s.hash
+}
+
+// Changed tells whoever changed the script, or is about to, what to do.
+func (s FrozenScript) Changed() string {
+	return fmt.Sprintf("%s changed since measure recorded the baseline: restore it. "+
+		"A different script needs a new baseline: abandon the work and start again with the new script.", s.path)
+}
+
+// FrozenAt finds the frozen script at p, if any.
+func FrozenAt(frozen []FrozenScript, p RepoPath) (FrozenScript, bool) {
+	i := slices.IndexFunc(frozen, func(s FrozenScript) bool { return s.path == p })
+	if i < 0 {
+		return FrozenScript{}, false
+	}
+	return frozen[i], true
+}
+
+// frozenBy is the script a recorded baseline froze: none (frozen false)
+// when it was recorded before scripts were frozen. ok is false when the
+// event names half a script, or a script other than its NFR's.
+func frozenBy(work WorkID, e BaselineMeasured) (script FrozenScript, frozen, ok bool) {
+	if e.Script.isZero() && e.ScriptHash.isZero() {
+		return FrozenScript{}, false, true
+	}
+	if e.Script != StressScriptFor(work, e.NFR) || e.ScriptHash.isZero() {
+		return FrozenScript{}, false, false
+	}
+	return FrozenScript{nfr: e.NFR, path: e.Script, hash: e.ScriptHash}, true, true
+}
+
 // RecordBaseline records what measure measured of the work's target NFRs,
-// as each result judged it against its NFR's targets. Every target needs a
-// result. The baseline is what the code did before the work changed it, so
-// once the work entered optimize, measuring again records nothing. If every
+// as each result judged it against its NFR's targets, and freezes the
+// scripts that measured them. Every target needs a result and its script.
+// The baseline is what the code did before the work changed it, so once
+// the work entered optimize, measuring again records nothing. If every
 // target already meets its NFR before optimize, there is nothing to
 // improve: the work completes instead of entering optimize.
-func (w InProgressWork) RecordBaseline(results []NFRResult) ([]WorkEvent, error) {
+func (w InProgressWork) RecordBaseline(results []NFRResult, scripts []FrozenScript) ([]WorkEvent, error) {
 	if w.stage != StageMeasure {
 		return nil, fmt.Errorf("record baseline of work %s on %s: %w", w.id, w.stage, ErrNotMeasuring)
 	}
@@ -113,7 +171,12 @@ func (w InProgressWork) RecordBaseline(results []NFRResult) ([]WorkEvent, error)
 		if i < 0 {
 			return nil, fmt.Errorf("record baseline of work %s: %s: %w", w.id, target, ErrBaselineIncomplete)
 		}
-		events = append(events, BaselineMeasured{WorkID: w.id, NFR: target, Measurement: results[i].measurement})
+		j := slices.IndexFunc(scripts, func(s FrozenScript) bool { return s.nfr == target })
+		if j < 0 || scripts[j].path != StressScriptFor(w.id, target) {
+			return nil, fmt.Errorf("record baseline of work %s: %s: no script: %w", w.id, target, ErrBaselineIncomplete)
+		}
+		events = append(events, BaselineMeasured{WorkID: w.id, NFR: target, Measurement: results[i].measurement,
+			Script: scripts[j].path, ScriptHash: scripts[j].hash})
 		measured = append(measured, NFRMeasurement{NFR: target, Measurement: results[i].measurement})
 		allMet = allMet && results[i].met
 	}

@@ -55,6 +55,8 @@ func allEvents() []domain.Event {
 		domain.StageEntered{WorkID: workID, Stage: domain.StageDiscovery, Visit: domain.FirstVisit(), Gate: domain.GateHuman, Budget: budget3},
 		domain.WorkCompleted{WorkID: workID},
 		domain.BaselineMeasured{WorkID: workID, NFR: must(domain.NewNFRID("wallet-transaction-latency")), Measurement: measured},
+		domain.BaselineMeasured{WorkID: workID, NFR: must(domain.NewNFRID("wallet-transaction-latency")), Measurement: measured,
+			Script: domain.StressScriptFor(workID, must(domain.NewNFRID("wallet-transaction-latency"))), ScriptHash: domain.HashOf([]byte("export default function () {}"))},
 		domain.WorkFoundNothingToImprove{WorkID: workID, Measurements: []domain.NFRMeasurement{{NFR: must(domain.NewNFRID("wallet-transaction-latency")), Measurement: measured}}},
 		domain.WorkAbandoned{WorkID: workID, Owner: owner, Reason: reason},
 		domain.FixerEntered{WorkID: workID, From: domain.StageReview, FromVisit: domain.FirstVisit(), Visit: must(domain.NewVisit(2)), Mode: domain.FixerModeCorrectness, Reason: reason},

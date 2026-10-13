@@ -68,10 +68,11 @@ type StressFacts func(work domain.ActiveWork) ([]domain.NFR, domain.ChangedFiles
 
 // Baseline is how a measure visit's baseline is read and kept. Measure
 // returns what the visit's latest stress run measured of the work's target
-// NFRs, judged against their targets; Keep records it once the work
+// NFRs, judged against their targets, and the scripts that measured them;
+// Keep records it once the work
 // recorded it as its baseline. The zero value records no baseline.
 type Baseline struct {
-	Measure func(target Target) ([]domain.NFRResult, error)
+	Measure func(target Target) ([]domain.NFRResult, []domain.FrozenScript, error)
 	Keep    func(target Target) error
 }
 
@@ -108,8 +109,10 @@ type Checked struct {
 	// Results are the exit checks' results; none for a failed claim.
 	Results []domain.CheckResult
 	// Baseline is what a passing measure visit measured of the target
-	// NFRs; none on any other stage.
-	Baseline []domain.NFRResult
+	// NFRs, and BaselineScripts the scripts that measured them; none on any
+	// other stage.
+	Baseline        []domain.NFRResult
+	BaselineScripts []domain.FrozenScript
 }
 
 // Submission is what submitting did.
@@ -255,14 +258,14 @@ func Check(target Target, claim domain.AgentClaim, changes Changes, scope Scope,
 		EventModel: target.eventModelVisit, EventModelEnd: target.eventModelEnd, HasEventModel: hasEventModel(target.work),
 		Grill: target.grillVisit, GrillEnd: target.grillEnd, Plan: target.planVisit, PlanEnd: target.planEnd,
 		Changed: changed, BaselineStarted: started, FirstAssignment: target.work.FirstAssignment(),
-		TargetNFRs: target.work.TargetNFRs(),
+		TargetNFRs: target.work.TargetNFRs(), FrozenScripts: target.work.FrozenScripts(),
 	}, progress)
 	if err != nil {
 		return Checked{}, fmt.Errorf("submit for acceptance: %w", err)
 	}
 	allPassed := !slices.ContainsFunc(checked.Results, func(r domain.CheckResult) bool { return !r.Passed() })
 	if open.Stage() == domain.StageMeasure && allPassed && baseline.Measure != nil {
-		if checked.Baseline, err = baseline.Measure(target); err != nil {
+		if checked.Baseline, checked.BaselineScripts, err = baseline.Measure(target); err != nil {
 			return Checked{}, fmt.Errorf("submit for acceptance: %w", err)
 		}
 	}
@@ -301,7 +304,7 @@ func Submit(log Log, actor eventlog.Actor, target Target, claim domain.AgentClai
 	if !ok {
 		return submitted, nil
 	}
-	if submitted.WorkEvents, err = measuring.RecordBaseline(checked.Baseline); err != nil {
+	if submitted.WorkEvents, err = measuring.RecordBaseline(checked.Baseline, checked.BaselineScripts); err != nil {
 		return Submission{}, fmt.Errorf("submit for acceptance: %w", err)
 	}
 	if len(submitted.WorkEvents) == 0 {
@@ -503,6 +506,9 @@ func describe(out io.Writer, submitted Submission) {
 		switch e := e.(type) {
 		case domain.BaselineMeasured:
 			fmt.Fprintf(out, "Baseline of %s: %s.\n", e.NFR, e.Measurement.Describe())
+			if e.ScriptHash != (domain.ContentHash{}) {
+				fmt.Fprintf(out, "%s is frozen (sha256 %s): no stage may change it from now on.\n", e.Script, e.ScriptHash.Short())
+			}
 		case domain.WorkFoundNothingToImprove:
 			fmt.Fprintln(out, "Every target NFR already meets its targets at baseline: there is nothing to improve, so the work is complete. "+
 				"To ask for more, tighten the NFR with `gf nfrs adopt` on a later design, or start new work with a stricter NFR.")

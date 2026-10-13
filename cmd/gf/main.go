@@ -272,16 +272,16 @@ func (a *app) scopeFacts(target submitforacceptance.Target) (domain.ScopeFacts, 
 // work recorded it as its baseline.
 func (a *app) baseline() submitforacceptance.Baseline {
 	return submitforacceptance.Baseline{
-		Measure: func(target submitforacceptance.Target) ([]domain.NFRResult, error) {
-			results, _, err := exitchecks.MeasuredBaseline(a.root, target.Open.ID(), target.Work().TargetNFRs())
-			return results, err
+		Measure: func(target submitforacceptance.Target) ([]domain.NFRResult, []domain.FrozenScript, error) {
+			measured, err := exitchecks.MeasuredBaseline(a.root, target.Open.ID(), target.Work().TargetNFRs())
+			return measured.Results, measured.Scripts, err
 		},
 		Keep: func(target submitforacceptance.Target) error {
-			_, kept, err := exitchecks.MeasuredBaseline(a.root, target.Open.ID(), target.Work().TargetNFRs())
+			measured, err := exitchecks.MeasuredBaseline(a.root, target.Open.ID(), target.Work().TargetNFRs())
 			if err != nil {
 				return err
 			}
-			return exitchecks.WriteBaseline(a.root, target.Open.Work(), kept)
+			return exitchecks.WriteBaseline(a.root, target.Open.Work(), measured.Raw)
 		},
 	}
 }

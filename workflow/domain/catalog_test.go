@@ -65,7 +65,7 @@ func TestSkillCatalog_MayLoad(t *testing.T) {
 func TestDiagnosisOf(t *testing.T) {
 	history := onMeasure(t)
 	w := asInProgress(t, givenWork(t, history...))
-	events, err := w.RecordBaseline([]domain.NFRResult{latency.Evaluate(slow)})
+	events, err := w.RecordBaseline([]domain.NFRResult{latency.Evaluate(slow)}, scripts(latency))
 	require.NoError(t, err)
 	optimize := asInProgress(t, givenWork(t, advance(t, append(history, events...))...))
 	assert.Equal(t, domain.Diagnosis{Stage: domain.StageOptimize, Baseline: true, MeasureAccepted: true}, domain.DiagnosisOf(optimize, true, false))

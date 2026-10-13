@@ -274,6 +274,27 @@ func TestRule4_StressTestingWritesItsScriptsAndArtifact(t *testing.T) {
 		decide(write(agent, "/repo/server/wallet.go"), on, false, root))
 }
 
+// Once the work has a baseline, its target NFRs' scripts are frozen: the
+// guard denies writing them, for fast feedback; stress-scripts-valid is the
+// authority.
+func TestRule4_TheBaselinesScriptsAreFrozen(t *testing.T) {
+	latency := Must(domain.NewNFRID("wallet-latency"))
+	frozen := Must(domain.NewFrozenScript(latency, domain.StressScriptFor(WorkID, latency), domain.HashOf([]byte("export default function () {}"))))
+	for _, stage := range []domain.Stage{domain.StageStressTesting, domain.StageMeasure} {
+		facts := on(stage)
+		facts.frozen = []domain.FrozenScript{frozen}
+		agent := "gofast:" + stage.String()
+		edit := toolCall(agent, "Edit", map[string]string{"file_path": "/repo/.gofast/works/w1/stress/wallet-latency.js", "old_string": "a", "new_string": "b"})
+
+		want := denied(".gofast/works/w1/stress/wallet-latency.js changed since measure recorded the baseline: restore it. " +
+			"A different script needs a new baseline: abandon the work and start again with the new script.")
+		assert.Equal(t, want, decide(write(agent, "/repo/.gofast/works/w1/stress/wallet-latency.js"), facts, false, root), stage.String())
+		assert.Equal(t, want, decide(edit, facts, false, root), stage.String())
+		assert.Equal(t, allowed, decide(write(agent, "/repo/.gofast/works/w1/stress/wallet-burst.js"), facts, false, root),
+			"%s: a script for a non-target NFR", stage)
+	}
+}
+
 // The NFRs are the owner's: no stage agent may change their targets, not even
 // the stress-testing agent, whose scripts live in its artifact directory.
 func TestRule4_TheNFRsAreTheOwners_OnEveryStage(t *testing.T) {

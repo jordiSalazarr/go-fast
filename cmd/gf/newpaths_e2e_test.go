@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -258,12 +260,17 @@ func TestImprovePerformancePath_EndToEnd(t *testing.T) {
 	assert.Contains(t, out, "✓ baseline-recorded: wallet-latency p95 ")
 	assert.Contains(t, out, "Baseline of wallet-latency: p95 ")
 	assert.Contains(t, r.eventTypes(), "BaselineMeasured")
+	script := r.status().Work.ArtifactDir + "stress/wallet-latency.js"
+	frozen := sha256.Sum256([]byte(walletScript))
+	assert.Contains(t, out, script+" is frozen (sha256 "+hex.EncodeToString(frozen[:])[:12]+"): no stage may change it from now on.")
 
 	// Optimize: the diagnosis exists, so the catalog skill loads, and the
 	// load is recorded.
 	v = r.expect("optimize", progress.AssignmentOpen, 0, 3)
 	require.Len(t, v.Work.Baseline, 1)
 	assert.False(t, v.Work.Baseline[0].Met, "the slow wallet misses the target")
+	assert.Equal(t, script, v.Work.Baseline[0].Script)
+	assert.Equal(t, hex.EncodeToString(frozen[:])[:12], v.Work.Baseline[0].ScriptHash)
 	assert.Empty(t, r.hook(plugin, "pre-tool-use", loadSkill("gofast:optimize", "gofast:concurrency")))
 	assert.Empty(t, r.hook(plugin, "post-tool-use", map[string]any{"hook_event_name": "PostToolUse", "tool_name": "Skill",
 		"tool_input": map[string]any{"skill": "gofast:concurrency"}, "tool_response": map[string]any{"success": true}}))
@@ -293,10 +300,23 @@ func TestImprovePerformancePath_EndToEnd(t *testing.T) {
 	r.workOnStage()
 	r.submitAsAgent("--passed")
 
-	// Stress testing meets the target, and shows the change against the
-	// baseline; the work completes.
+	// Stress testing: the baseline's script is frozen. The guard denies
+	// editing it; changed anyway, it fails stress-scripts-valid, naming it.
 	v = r.expect("stress-testing", progress.AssignmentOpen, 0, 3)
 	require.Len(t, v.Current.Stress.Mandatory, 1)
+	changed := script + " changed since measure recorded the baseline: restore it. " +
+		"A different script needs a new baseline: abandon the work and start again with the new script."
+	assert.Equal(t, deny(changed), r.hook(nil, "pre-tool-use", preToolUse("gofast:stress-testing", "Write",
+		map[string]any{"file_path": filepath.Join(r.dir, script), "content": "x"})))
+	r.writeScript(strings.Replace(walletScript, "JSON.stringify({ amount: 5 })", "null", 1))
+	r.workOnStage()
+	out = r.submitAsAgent("--passed")
+	assert.Contains(t, out, "stress-scripts-valid: "+changed)
+	v = r.expect("stress-testing", progress.AssignmentOpen, 1, 3)
+
+	// Restored, stress testing meets the target, and shows the change
+	// against the baseline; the work completes.
+	r.writeScript(walletScript)
 	r.workOnStage()
 	out = r.submitAsAgent("--passed")
 	assert.Contains(t, out, "✓ nfrs-met: against the baseline: wallet-latency: p95 ")
