@@ -168,7 +168,7 @@ func (b Baselines) changedSinceTree(id domain.AssignmentID, base string) (domain
 func (b Baselines) repoPaths(id domain.AssignmentID, names []string) ([]domain.RepoPath, error) {
 	var paths []domain.RepoPath
 	for _, name := range names {
-		if gfWrites[name] {
+		if gfWrites[name] || strings.HasPrefix(name, eventlog.InstructionsPath()+"/") {
 			continue
 		}
 		p, err := domain.NewRepoPath(b.root, filepath.FromSlash(name))
@@ -263,7 +263,8 @@ func CommittedFile(root string, path domain.RepoPath) ([]byte, error) {
 	return os.ReadFile(abs)
 }
 
-// gfWrites are the committed files gf itself changes during a stage visit.
+// gfWrites are the committed files gf itself changes during a stage visit;
+// so are the kept instructions, eventlog.InstructionsPath().
 var gfWrites = func() map[string]bool {
 	m := map[string]bool{}
 	for _, f := range eventlog.CommittedFiles() {

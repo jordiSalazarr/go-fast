@@ -89,6 +89,7 @@ var protectedNames = []struct{ text, name string }{
 	{".gofast/event", ".gofast/events.*"},
 	{".gofast/gf", ".gofast/gf.*"},
 	{".gofast/runtime", ".gofast/runtime/"},
+	{".gofast/instructions", ".gofast/instructions/"},
 }
 
 const clearEnvironmentReason = "Agents may not clear the environment while gofast is active."

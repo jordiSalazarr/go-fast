@@ -153,6 +153,8 @@ func TestRule2_GofastFilesAndGF_ACTORAreOffLimits(t *testing.T) {
 		"rm -rf .gofast/runtime",
 		"cat .gofast/runtime/log.sum",
 		"ls .gofast/gf*",
+		"rm -rf .gofast/instructions",
+		"echo x > .gofast/instructions/0a1b/SKILL.md",
 	} {
 		t.Run(command, func(t *testing.T) {
 			out := decide(bash(command), on(domain.StageImplement), true, root)

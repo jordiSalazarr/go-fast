@@ -67,11 +67,12 @@ func TestChangedSince_SeesEveryWayOfChangingFiles(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, taken)
 
-	writeFile(t, root, "main.go", "package main // edited\n")      // tracked, modified
-	writeFile(t, root, "internal/x.go", "package internal\n")      // untracked, new
-	require.NoError(t, os.Remove(filepath.Join(root, "dirty.go"))) // deleted
-	writeFile(t, root, "build/out.bin", "ignored")                 // ignored by .gitignore
-	writeFile(t, root, ".gofast/events.jsonl", "{}\n")             // written by gf
+	writeFile(t, root, "main.go", "package main // edited\n")        // tracked, modified
+	writeFile(t, root, "internal/x.go", "package internal\n")        // untracked, new
+	require.NoError(t, os.Remove(filepath.Join(root, "dirty.go")))   // deleted
+	writeFile(t, root, "build/out.bin", "ignored")                   // ignored by .gitignore
+	writeFile(t, root, ".gofast/events.jsonl", "{}\n")               // written by gf
+	writeFile(t, root, ".gofast/instructions/0a1b/SKILL.md", "kept") // written by gf's hooks
 	writeFile(t, root, ".gofast/gf.log", "ignored by .gofast/.gitignore")
 	writeFile(t, root, ".gofast/works/w1/specify-v1.md", "artifact")
 	git(t, root, "-c", "user.name=T", "-c", "user.email=t@x", "commit", "-q", "-am", "committing hides nothing")

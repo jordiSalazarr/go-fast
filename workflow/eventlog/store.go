@@ -157,6 +157,11 @@ func ensureLines(path string, lines []string) error {
 // LogPath is the event log's path relative to the repository root.
 func LogPath() string { return dirName + "/" + eventsFile }
 
+// InstructionsPath holds, relative to the repository root, the versions of
+// the plugin's skills and agents the works were instructed by. Committed,
+// and written by gf's hooks during stage visits.
+func InstructionsPath() string { return dirName + "/instructions" }
+
 // CommittedFiles are the files gf writes that git tracks, relative to the
 // repository root, slash-separated.
 func CommittedFiles() []string {
