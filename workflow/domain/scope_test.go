@@ -53,7 +53,8 @@ func TestEachStageHasItsWriteScope(t *testing.T) {
 	assert.Equal(t, domain.WriteScopeArtifactsAndDecision, domain.StageGrill.WriteScope())
 	assert.Equal(t, domain.WriteScopeArtifacts, domain.StageDiscovery.WriteScope())
 	assert.Equal(t, domain.WriteScopeArtifacts, domain.StageDesign.WriteScope())
-	assert.Equal(t, domain.WriteScopeTestsAndArtifacts, domain.StageSpecify.WriteScope())
+	assert.Equal(t, domain.WriteScopeTestsSkeletonsAndArtifacts, domain.StageSpecify.WriteScope())
+	assert.Equal(t, domain.WriteScopeTestsAndArtifacts, domain.StageCharacterize.WriteScope())
 	assert.Equal(t, domain.WriteScopeAnything, domain.StageImplement.WriteScope())
 	assert.Equal(t, domain.WriteScopeArtifacts, domain.StageReview.WriteScope())
 	assert.Equal(t, domain.WriteScopeArtifacts, domain.StageIntegrationTesting.WriteScope())
@@ -87,10 +88,11 @@ func TestWriteScopeAllows(t *testing.T) {
 	}
 	want := map[domain.WriteScope][]bool{
 		//                                  0     1     2      3      4      5      6      7      8      9      10     11     12     13     14     15     16     17     18     19     20     21     22
-		domain.WriteScopeArtifacts:            {true, true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false},
-		domain.WriteScopeArtifactsAndDecision: {true, true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, true, false, false, false, false, false},
-		domain.WriteScopeTestsAndArtifacts:    {true, true, false, false, false, false, false, false, false, true, true, true, false, false, false, false, false, false, false, false, false, false, false},
-		domain.WriteScopeAnything:             {true, true, false, false, false, false, false, false, false, true, true, true, true, true, true, true, false, true, true, true, true, true, true},
+		domain.WriteScopeArtifacts:                  {true, true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false},
+		domain.WriteScopeArtifactsAndDecision:       {true, true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, true, false, false, false, false, false},
+		domain.WriteScopeTestsAndArtifacts:          {true, true, false, false, false, false, false, false, false, true, true, true, false, false, false, false, false, false, false, false, false, false, false},
+		domain.WriteScopeTestsSkeletonsAndArtifacts: {true, true, false, false, false, false, false, false, false, true, true, true, true, true, false, false, false, false, false, false, false, false, false},
+		domain.WriteScopeAnything:                   {true, true, false, false, false, false, false, false, false, true, true, true, true, true, true, true, false, true, true, true, true, true, true},
 	}
 	for scope, allowed := range want {
 		for i, p := range paths {
@@ -124,6 +126,20 @@ func TestGrillsScope_AllowsGlossariesAndADRs(t *testing.T) {
 	}
 }
 
+// Specify may add skeletons: any non-test Go file outside gofast's own
+// files (skeletons-only checks they are new and do nothing). Characterize
+// keeps tests and artifacts only.
+func TestSpecifysScope_AllowsSkeletons_CharacterizesDoesnt(t *testing.T) {
+	for _, p := range []string{"domain/wallet_freeze.go", "wallet.go", "domain/wallet_test.go", "domain/testdata/x.json"} {
+		assert.True(t, domain.StageSpecify.WriteScope().Allows(repoPath(t, p), workID, decisions), p)
+	}
+	for _, p := range []string{"go.mod", "domain/wallet.md", ".gofast/x.go", "docs/decisions/README.md"} {
+		assert.False(t, domain.StageSpecify.WriteScope().Allows(repoPath(t, p), workID, decisions), p)
+	}
+	assert.False(t, domain.StageCharacterize.WriteScope().Allows(repoPath(t, "domain/wallet_freeze.go"), workID, decisions))
+	assert.True(t, domain.StageCharacterize.WriteScope().Allows(repoPath(t, "domain/wallet_test.go"), workID, decisions))
+}
+
 // The decisions directory is the owner's to choose, but never inside
 // gofast's own files.
 func TestDecisionsDir(t *testing.T) {
@@ -154,9 +170,10 @@ func TestWriteScopeViolations_OfEachScope(t *testing.T) {
 		repoPath(t, ".gofast/events.jsonl"),
 	)
 	cases := map[domain.WriteScope][]string{
-		domain.WriteScopeArtifacts:         {".gofast/events.jsonl", ".gofast/works/w0/specify-v1.md", "login/login.go", "login/login_test.go", "login/testdata/case.json"},
-		domain.WriteScopeTestsAndArtifacts: {".gofast/events.jsonl", ".gofast/works/w0/specify-v1.md", "login/login.go"},
-		domain.WriteScopeAnything:          {".gofast/events.jsonl", ".gofast/works/w0/specify-v1.md"},
+		domain.WriteScopeArtifacts:                  {".gofast/events.jsonl", ".gofast/works/w0/specify-v1.md", "login/login.go", "login/login_test.go", "login/testdata/case.json"},
+		domain.WriteScopeTestsAndArtifacts:          {".gofast/events.jsonl", ".gofast/works/w0/specify-v1.md", "login/login.go"},
+		domain.WriteScopeTestsSkeletonsAndArtifacts: {".gofast/events.jsonl", ".gofast/works/w0/specify-v1.md"},
+		domain.WriteScopeAnything:                   {".gofast/events.jsonl", ".gofast/works/w0/specify-v1.md"},
 	}
 	for scope, want := range cases {
 		var got []string

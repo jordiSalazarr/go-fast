@@ -188,8 +188,8 @@ list them.
 | grill | artifact-written, grill-valid |
 | discovery | artifact-written; on modify-behaviour also behaviour-delta |
 | design | artifact-written, design-valid, nfr-proposals-valid |
-| specify | artifact-written, specs-fail; on paths with grill (v2, v3) also specs-cover-scenarios; on path v1 with design, specs-cover-slices |
-| implement | artifact-written, build-passes, formatted, specs-pass, specs-untouched, suite-passes |
+| specify | artifact-written, skeletons-only, specs-fail; on paths with grill (v2, v3) also specs-cover-scenarios; on path v1 with design, specs-cover-slices |
+| implement | artifact-written, build-passes, formatted, skeletons-filled, specs-pass, specs-untouched, suite-passes |
 | review | artifact-written, formatted, build-passes, suite-passes |
 | integration-testing | artifact-written, integration-passes |
 | stress-testing | artifact-written, stress-scripts-valid, nfrs-met |
@@ -494,7 +494,7 @@ files in `current.fixer.stressRunDir`, profiling) before choosing a route.
 |---|---|
 | event-modelling, discovery, design, review, integration-testing, stress-testing, fixer | only the work's artifact directory |
 | grill | the work's artifact directory, this work's decision document, `<decisionsDir>/<YYYY-MM-DD>-<work>-<slug>.md`, glossaries (any `GLOSSARY.md` or `GLOSSARY-MAP.md`) and ADRs (`.md` files under any `docs/adr/` directory) |
-| specify | tests (`*_test.go`, files under `testdata/`) and artifacts |
+| specify | tests (`*_test.go`, files under `testdata/`), skeletons (new non-test `.go` files that only declare; `skeletons-only` checks them) and artifacts |
 | implement | anything except gofast's own files in `.gofast/` |
 
 Nothing in `.gofast/` outside the work's artifact directory is ever writable,

@@ -104,6 +104,10 @@ var (
 	WriteScopeArtifactsAndDecision = WriteScope{name: "artifacts, the decision document, glossaries and ADRs"}
 	// WriteScopeTestsAndArtifacts also allows *_test.go and files under testdata/.
 	WriteScopeTestsAndArtifacts = WriteScope{name: "tests and artifacts"}
+	// WriteScopeTestsSkeletonsAndArtifacts also allows non-test Go files,
+	// for the compile-only skeletons the specs need; skeletons-only checks
+	// they are new and do nothing.
+	WriteScopeTestsSkeletonsAndArtifacts = WriteScope{name: "tests, skeletons and artifacts"}
 	// WriteScopeAnything allows everything outside gofast's own files.
 	WriteScopeAnything = WriteScope{name: "anything"}
 )
@@ -112,13 +116,15 @@ func (s WriteScope) String() string { return s.name }
 
 // CanChangeCode reports whether the scope allows any code, tests included.
 func (s WriteScope) CanChangeCode() bool {
-	return s == WriteScopeTestsAndArtifacts || s == WriteScopeAnything
+	return s == WriteScopeTestsAndArtifacts || s == WriteScopeTestsSkeletonsAndArtifacts || s == WriteScopeAnything
 }
 
 // WriteScope is what may be written while the work is on this stage.
 func (s Stage) WriteScope() WriteScope {
 	switch s {
-	case StageSpecify, StageCharacterize:
+	case StageSpecify:
+		return WriteScopeTestsSkeletonsAndArtifacts
+	case StageCharacterize:
 		return WriteScopeTestsAndArtifacts
 	case StageImplement, StageOptimize:
 		return WriteScopeAnything
@@ -148,6 +154,8 @@ func (s WriteScope) Allows(path RepoPath, work WorkID, decisions DecisionsDir) b
 		return decisions.IsDecisionOf(path, work) || isGlossary(path) || isADR(path)
 	case WriteScopeTestsAndArtifacts:
 		return isTestFile(path)
+	case WriteScopeTestsSkeletonsAndArtifacts:
+		return isTestFile(path) || IsGoFile(path)
 	case WriteScopeAnything:
 		return true
 	}
@@ -291,6 +299,10 @@ func isADR(p RepoPath) bool {
 	}
 	return false
 }
+
+// IsGoFile reports whether a path is a Go source file that isn't test code:
+// what a skeleton is written in.
+func IsGoFile(p RepoPath) bool { return strings.HasSuffix(p.value, ".go") && !isTestFile(p) }
 
 // IsTestFile reports whether a path is test code: a *_test.go file, or a
 // file under a testdata directory.

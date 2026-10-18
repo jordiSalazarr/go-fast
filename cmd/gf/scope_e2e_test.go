@@ -42,27 +42,30 @@ func (r *repo) onSpecify() {
 	r.expect("specify", progress.AssignmentOpen, 0, 3)
 }
 
-const specifyOutOfScope = "Changed files outside the 'specify' write scope: server/server.go."
+const specifyEditedCode = "skeletons-only: server/server.go: an existing production file changed; specify may only add skeleton files"
 
+// Specify may add skeleton files, never change existing production code:
+// skeletons-only fails the attempt.
 func TestScope_SpecifyChangingCode_FailsTheAttempt(t *testing.T) {
 	r := newRepo(t)
 	r.onSpecify()
 
 	r.workOnStage()
-	r.write("server/server.go", fixedServer) // fixed outside the write scope
+	r.write("server/server.go", fixedServer) // fixes the code instead of specifying
 	out := r.submitAsAgent("--passed")
 
-	assert.Contains(t, out, specifyOutOfScope)
+	assert.Contains(t, out, "✗ "+specifyEditedCode)
+	assert.NotContains(t, out, "write scope")
 	v := r.expect("specify", progress.AssignmentOpen, 1, 3)
 	assert.Equal(t, progress.ProblemFailedCheck, v.Current.LastProblem.Kind)
-	assert.True(t, strings.HasPrefix(v.Current.LastProblem.Text, specifyOutOfScope+" specs-fail: no test written in this stage fails (TestPort_Is8080 passed)"),
+	assert.True(t, strings.HasPrefix(v.Current.LastProblem.Text, specifyEditedCode+"; specs-fail: no test written in this stage fails (TestPort_Is8080 passed)"),
 		v.Current.LastProblem.Text)
 
 	// Committing the change hides nothing: the baseline is the stage visit's start.
 	r.git("add", "-A")
 	r.git("commit", "-q", "-m", "sneak it in")
 	out = r.submitAsAgent("--passed")
-	assert.Contains(t, out, specifyOutOfScope)
+	assert.Contains(t, out, specifyEditedCode)
 	r.expect("specify", progress.AssignmentOpen, 2, 3)
 
 	// Reverting it, with only tests changed, passes.

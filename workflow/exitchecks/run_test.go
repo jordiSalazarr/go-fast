@@ -426,7 +426,7 @@ func TestRun_PrintsEachCheckAsItRuns(t *testing.T) {
 	})
 
 	require.NoError(t, err)
-	assert.Equal(t, "✓ artifact-written\n✗ specs-fail: no test written in this stage fails (TestPort_IsPositive passed) (log: .gofast/runtime/checks/w1-specify-1-attempt2.log)\n", string(progress))
+	assert.Equal(t, "✓ artifact-written\n✓ skeletons-only\n✗ specs-fail: no test written in this stage fails (TestPort_IsPositive passed) (log: .gofast/runtime/checks/w1-specify-1-attempt2.log)\n", string(progress))
 }
 
 type testWriter []byte

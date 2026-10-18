@@ -235,8 +235,11 @@ func TestRule4_WriteScopeOfEachStage(t *testing.T) {
 		{domain.StageSpecify, "/repo/login/login_test.go", allowed},
 		{domain.StageSpecify, "/repo/login/testdata/case.json", allowed},
 		{domain.StageSpecify, "/repo/.gofast/works/w1/specify-v1.md", allowed},
-		{domain.StageSpecify, "/repo/login/login.go",
-			denied("During 'specify' you may only write tests and the stage artifact `.gofast/works/w1/specify-v1.md`.")},
+		{domain.StageSpecify, "/repo/login/login.go", allowed}, // a skeleton: skeletons-only checks it on submit
+		{domain.StageSpecify, "/repo/go.mod",
+			denied("During 'specify' you may only write tests, new skeleton files (non-test .go files that only declare) and the stage artifact `.gofast/works/w1/specify-v1.md`.")},
+		{domain.StageCharacterize, "/repo/login/login.go",
+			denied("During 'characterize' you may only write tests and the stage artifact `.gofast/works/w1/characterize-v1.md`.")},
 		{domain.StageImplement, "/repo/login/login.go", allowed},
 		{domain.StageImplement, "/repo/.gofast/events.jsonl",
 			denied("During 'implement' you may write anything except gofast's own files in .gofast/ (.gofast/events.jsonl); the stage artifact is `.gofast/works/w1/implement-v1.md`.")},
@@ -312,10 +315,10 @@ func TestRule4_TheNFRsAreTheOwners_OnEveryStage(t *testing.T) {
 }
 
 func TestRule4_RelativePathsResolveAgainstCwd(t *testing.T) {
-	in := write("gofast:specify", "login/login.go")
+	in := write("gofast:review", "login/login_test.go")
 	in.CWD = "/repo"
 
-	out := decide(in, on(domain.StageSpecify), false, root)
+	out := decide(in, on(domain.StageReview), false, root)
 
 	assert.Equal(t, "deny", out.HookSpecificOutput.PermissionDecision)
 }

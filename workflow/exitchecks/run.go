@@ -224,6 +224,10 @@ func (c *checkRun) check(check domain.ExitCheck) (finding, error) {
 		return c.baselineRecorded()
 	case domain.CheckDiagnosisWritten:
 		return c.diagnosisWritten()
+	case domain.CheckSkeletonsOnly:
+		return c.skeletonsOnly()
+	case domain.CheckSkeletonsFilled:
+		return c.skeletonsFilled()
 	}
 	return finding{}, fmt.Errorf("gf does not know how to run %q", check)
 }

@@ -93,10 +93,10 @@ func TestGivenOpenAssignmentOnHumanGate_WhenSubmittingAPassingCheck_ThenItAwaits
 		Then(SubmittedForApproval(domain.StageSpecify, 2))
 }
 
-func TestGivenOpenAssignmentOnSpecify_WhenSubmittingAPassWithCodeChanged_ThenTheAttemptFails(t *testing.T) {
+func TestGivenOpenAssignmentOnSpecify_WhenSubmittingAPassWithANonGoFileChanged_ThenTheAttemptFails(t *testing.T) {
 	eventlogtest.Given(t, OpenOn(domain.StageSpecify)...).
-		When(submitting(passed, "main.go", "main_test.go")).
-		Then(Failed(domain.StageSpecify, 1, "Changed files outside the 'specify' write scope: main.go."))
+		When(submitting(passed, "go.mod", "main_test.go")).
+		Then(Failed(domain.StageSpecify, 1, "Changed files outside the 'specify' write scope: go.mod."))
 }
 
 func TestGivenOpenAssignmentOnSpecify_WhenSubmittingAPassWithOnlyTestsChanged_ThenItAwaitsApproval(t *testing.T) {

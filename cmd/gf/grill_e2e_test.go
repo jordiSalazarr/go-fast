@@ -182,7 +182,7 @@ func TestStatus_OnSpecifyAfterGrill_ShowsTheScenariosToCover(t *testing.T) {
 	r.gf("approve")
 
 	v := r.expect("specify", progress.AssignmentOpen, 0, 3)
-	assert.Equal(t, []string{"artifact-written", "specs-fail", "specs-cover-scenarios"}, v.Current.Checks)
+	assert.Equal(t, []string{"artifact-written", "skeletons-only", "specs-fail", "specs-cover-scenarios"}, v.Current.Checks)
 	assert.Equal(t, []string{"A1", "A2"}, v.Current.ScenariosToCover)
 	assert.Equal(t, []string{"A1", "A2"}, v.Current.UncoveredScenarios)
 	require.NotNil(t, v.Work.EventModel)

@@ -18,11 +18,11 @@ func TestChecks_ShowsTheConfigurationAndEachStagesChecks(t *testing.T) {
 	out := r.gf("checks")
 	assert.Contains(t, out, "defaults; .gofast/checks.json does not exist")
 	assert.Contains(t, out, "integration  not configured: integration-passes fails until the owner adds one to .gofast/checks.json")
-	assert.Contains(t, out, "  specify              artifact-written, specs-fail\n")
+	assert.Contains(t, out, "  specify              artifact-written, skeletons-only, specs-fail\n")
 	assert.Contains(t, out, "  discovery            artifact-written\n                       modify-behaviour also: behaviour-delta\n")
 	assert.Contains(t, out, "  design               artifact-written, design-valid, nfr-proposals-valid\n")
 	assert.Contains(t, out, "  implement            artifact-written, build-passes, formatted, suite-passes\n"+
-		"                       fix-bug, new-feature, modify-behaviour also: specs-pass, specs-untouched\n"+
+		"                       fix-bug, new-feature, modify-behaviour also: skeletons-filled, specs-pass, specs-untouched\n"+
 		"                       refactor also: tests-untouched\n")
 
 	assert.NotContains(t, out, "uncommitted changes")
@@ -120,11 +120,11 @@ func TestExitChecks_FixBugRun_EndToEnd(t *testing.T) {
 
 	// Specify: a test that already passes is not a spec of the bug.
 	v = r.expect("specify", progress.AssignmentOpen, 0, 3)
-	assert.Equal(t, []string{"artifact-written", "specs-fail"}, v.Current.Checks)
+	assert.Equal(t, []string{"artifact-written", "skeletons-only", "specs-fail"}, v.Current.Checks)
 	r.write("server/positive_test.go", "package server\n\nimport \"testing\"\n\nfunc TestPort_IsPositive(t *testing.T) {\n\tif Port() <= 0 {\n\t\tt.Fatal(\"no port\")\n\t}\n}\n")
 	r.write(v.Current.Artifact, "# specify\n\nTestPort_IsPositive.\n")
 	out = r.submitAsAgent("--passed")
-	assert.Contains(t, out, "✓ artifact-written\n✗ specs-fail: no test written in this stage fails (TestPort_IsPositive passed)")
+	assert.Contains(t, out, "✓ artifact-written\n✓ skeletons-only\n✗ specs-fail: no test written in this stage fails (TestPort_IsPositive passed)")
 	v = r.expect("specify", progress.AssignmentOpen, 1, 3)
 	assert.True(t, strings.HasPrefix(v.Current.LastProblem.Text, "specs-fail: no test written in this stage fails (TestPort_IsPositive passed) (log: .gofast/runtime/checks/"),
 		v.Current.LastProblem.Text)
@@ -136,7 +136,7 @@ func TestExitChecks_FixBugRun_EndToEnd(t *testing.T) {
 
 	// Implement: changing specify's test instead of the code fails.
 	v = r.expect("implement", progress.AssignmentOpen, 0, 3)
-	assert.Equal(t, []string{"artifact-written", "build-passes", "formatted", "specs-pass", "specs-untouched", "suite-passes"}, v.Current.Checks)
+	assert.Equal(t, []string{"artifact-written", "build-passes", "formatted", "skeletons-filled", "specs-pass", "specs-untouched", "suite-passes"}, v.Current.Checks)
 	r.write("server/port_test.go", strings.ReplaceAll(portSpec, "8080", "8081"))
 	r.write(v.Current.Artifact, "# implement\n\nAdjusted the test.\n")
 	out = r.submitAsAgent("--passed")

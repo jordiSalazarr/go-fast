@@ -16,8 +16,8 @@ import (
 func TestEachStageRequiresItsExitChecks(t *testing.T) {
 	fixBug := map[domain.Stage][]domain.ExitCheck{
 		domain.StageDiscovery: {domain.CheckArtifactWritten},
-		domain.StageSpecify:   {domain.CheckArtifactWritten, domain.CheckSpecsFail},
-		domain.StageImplement: {domain.CheckArtifactWritten, domain.CheckBuildPasses, domain.CheckFormatted, domain.CheckSpecsPass,
+		domain.StageSpecify:   {domain.CheckArtifactWritten, domain.CheckSkeletonsOnly, domain.CheckSpecsFail},
+		domain.StageImplement: {domain.CheckArtifactWritten, domain.CheckBuildPasses, domain.CheckFormatted, domain.CheckSkeletonsFilled, domain.CheckSpecsPass,
 			domain.CheckSpecsUntouched, domain.CheckSuitePasses},
 		domain.StageReview:             {domain.CheckArtifactWritten, domain.CheckFormatted, domain.CheckBuildPasses, domain.CheckSuitePasses},
 		domain.StageIntegrationTesting: {domain.CheckArtifactWritten, domain.CheckIntegrationPasses},
@@ -26,10 +26,10 @@ func TestEachStageRequiresItsExitChecks(t *testing.T) {
 	}
 	design := []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckDesignValid, domain.CheckNFRProposalsValid}
 	designed := with(with(fixBug, domain.StageDesign, design),
-		domain.StageSpecify, []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckSpecsFail, domain.CheckSpecsCoverSlices})
+		domain.StageSpecify, []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckSkeletonsOnly, domain.CheckSpecsFail, domain.CheckSpecsCoverSlices})
 	feature := with(with(designed, domain.StageEventModelling, []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckEventModelValid}),
 		domain.StageGrill, []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckGrillValid})
-	feature = with(feature, domain.StageSpecify, []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckSpecsFail, domain.CheckSpecsCoverScenarios})
+	feature = with(feature, domain.StageSpecify, []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckSkeletonsOnly, domain.CheckSpecsFail, domain.CheckSpecsCoverScenarios})
 	behaviourDelta := []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckBehaviourDelta}
 	refactor := with(with(with(with(fixBug, domain.StageGrill, []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckGrillValid}),
 		domain.StagePlan, []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckPlanValid}),
@@ -71,7 +71,7 @@ func TestExitChecksHaveStableNames(t *testing.T) {
 		"specs-untouched", "suite-passes", "formatted", "integration-passes", "stress-scripts-valid", "nfrs-met",
 		"design-valid", "nfr-proposals-valid", "behaviour-delta", "specs-cover-slices", "event-model-valid", "grill-valid", "specs-cover-scenarios",
 		"plan-valid", "characterization-passes", "coverage-sufficient", "tests-untouched",
-		"baseline-recorded", "diagnosis-written"}, names)
+		"baseline-recorded", "diagnosis-written", "skeletons-only", "skeletons-filled"}, names)
 }
 
 func TestCheckFailed_NeedsASummary(t *testing.T) {
@@ -91,10 +91,11 @@ func TestCheckFailed_NeedsASummary(t *testing.T) {
 
 var (
 	inScope      = domain.CheckWriteScope(domain.StageSpecify, workID, decisions, domain.NewChangedFiles(must(domain.NewRepoPath("/repo", "a_test.go"))))
-	outOfScope   = domain.CheckWriteScope(domain.StageSpecify, workID, decisions, domain.NewChangedFiles(must(domain.NewRepoPath("/repo", "a.go"))))
-	specifyPass  = []domain.CheckResult{domain.CheckPassed(domain.CheckArtifactWritten), domain.CheckPassed(domain.CheckSpecsFail)}
+	outOfScope   = domain.CheckWriteScope(domain.StageSpecify, workID, decisions, domain.NewChangedFiles(must(domain.NewRepoPath("/repo", "a.txt"))))
+	specifyPass  = []domain.CheckResult{domain.CheckPassed(domain.CheckArtifactWritten), domain.CheckPassed(domain.CheckSkeletonsOnly), domain.CheckPassed(domain.CheckSpecsFail)}
 	specsNotFail = []domain.CheckResult{
 		domain.CheckPassed(domain.CheckArtifactWritten),
+		domain.CheckPassed(domain.CheckSkeletonsOnly),
 		checkFailed(domain.CheckSpecsFail, "no test written in this stage fails"),
 	}
 )
@@ -112,14 +113,14 @@ func TestExitCheckOutcome(t *testing.T) {
 		{"passed, in scope, a check fails", domain.ClaimPassed(), inScope, specsNotFail, false,
 			"specs-fail: no test written in this stage fails."},
 		{"passed, out of scope, checks pass", domain.ClaimPassed(), outOfScope, specifyPass, false,
-			"Changed files outside the 'specify' write scope: a.go."},
+			"Changed files outside the 'specify' write scope: a.txt."},
 		{"passed, out of scope, a check fails", domain.ClaimPassed(), outOfScope, specsNotFail, false,
-			"Changed files outside the 'specify' write scope: a.go. specs-fail: no test written in this stage fails."},
+			"Changed files outside the 'specify' write scope: a.txt. specs-fail: no test written in this stage fails."},
 		{"failed, in scope", domain.ClaimFailed(reasonOf("tests fail")), inScope, nil, false, "tests fail"},
 		{"failed, out of scope", domain.ClaimFailed(reasonOf("tests fail")), outOfScope, nil, false,
-			"tests fail. Changed files outside the 'specify' write scope: a.go."},
+			"tests fail. Changed files outside the 'specify' write scope: a.txt."},
 		{"failed sentence, out of scope", domain.ClaimFailed(reasonOf("Tests fail!")), outOfScope, nil, false,
-			"Tests fail! Changed files outside the 'specify' write scope: a.go."},
+			"Tests fail! Changed files outside the 'specify' write scope: a.txt."},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -139,6 +140,7 @@ func TestExitCheckOutcome_GivenFailingChecks_ThenTheReasonListsThemInTheStageOrd
 		checkFailed(domain.CheckSpecsUntouched, "server_test.go was modified"),
 		domain.CheckPassed(domain.CheckBuildPasses),
 		domain.CheckPassed(domain.CheckFormatted),
+		domain.CheckPassed(domain.CheckSkeletonsFilled),
 		checkFailed(domain.CheckArtifactWritten, ".gofast/works/w1/implement-v1.md is missing"),
 		checkFailed(domain.CheckIntegrationPasses, "not required on implement, so ignored"),
 	}
@@ -280,6 +282,10 @@ func TestClassifyFailure(t *testing.T) {
 			scopeOf(domain.StageImplement), nil, domain.StageWorkFailure},
 		{"specify: agent claims a failure", domain.StageSpecify, domain.ClaimFailed(reasonOf("can't reproduce")),
 			scopeOf(domain.StageSpecify), nil, domain.StageWorkFailure},
+		{"specify: a skeleton has logic", domain.StageSpecify, domain.ClaimPassed(), scopeOf(domain.StageSpecify, "domain/wallet_freeze.go"),
+			passedAll(domain.StageSpecify, checkFailed(domain.CheckSkeletonsOnly, "domain/wallet_freeze.go: func Freeze has logic")), domain.StageWorkFailure},
+		{"implement: a skeleton is left", domain.StageImplement, domain.ClaimPassed(), scopeOf(domain.StageImplement),
+			passedAll(domain.StageImplement, checkFailed(domain.CheckSkeletonsFilled, "errSkeleton is still in domain/wallet_freeze.go")), domain.StageWorkFailure},
 		{"discovery: agent claims a failure", domain.StageDiscovery, domain.ClaimFailed(reasonOf("can't reproduce")),
 			scopeOf(domain.StageDiscovery), nil, domain.StageWorkFailure},
 	}

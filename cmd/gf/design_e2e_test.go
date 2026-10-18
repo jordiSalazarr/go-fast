@@ -333,7 +333,7 @@ func TestStatus_OnSpecify_ShowsTheAcceptedDesign_AndTheSlicesNeedingSpecs(t *tes
 		Slices: map[string]int{"added": 3},
 	}, v.Work.Design)
 	assert.Equal(t, []string{"PostTransaction", "PublishWalletDebited"}, v.Current.SlicesNeedingSpecs)
-	assert.Equal(t, []string{"artifact-written", "specs-fail", "specs-cover-slices"}, v.Current.Checks)
+	assert.Equal(t, []string{"artifact-written", "skeletons-only", "specs-fail", "specs-cover-slices"}, v.Current.Checks)
 	out := r.gf("status")
 	assert.Contains(t, out, "Design (visit 1): "+dir+"design-v1.md, "+dir+"design-v1.json\n  1 aggregates, 1 commands, slices: 3 added\n")
 	assert.Contains(t, out, "Slices needing specs (a new Test<SliceName>… test each): PostTransaction, PublishWalletDebited\n")

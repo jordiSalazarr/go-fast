@@ -84,6 +84,14 @@ var (
 	// CheckBaselineRecorded: measure's run measured every target NFR, so
 	// the work has a baseline to improve on.
 	CheckBaselineRecorded = ExitCheck{name: "baseline-recorded"}
+	// CheckSkeletonsOnly: every non-test Go file specify changed in this
+	// visit is new, and declares only what the specs need to compile:
+	// types, constants, at most one errSkeleton per package, and functions
+	// whose body is empty or returns zero values or errSkeleton.
+	CheckSkeletonsOnly = ExitCheck{name: "skeletons-only"}
+	// CheckSkeletonsFilled: no non-test Go file of the repository declares
+	// or references errSkeleton: implement filled every skeleton.
+	CheckSkeletonsFilled = ExitCheck{name: "skeletons-filled"}
 	// CheckDiagnosisWritten: measure's artifact has a non-empty
 	// `## Bottleneck` section that references at least one file in the
 	// work's artifact directory: a profile or a measurement.
@@ -98,7 +106,7 @@ func ExitChecks() []ExitCheck {
 		CheckStressScriptsValid, CheckNFRsMet, CheckDesignValid, CheckNFRProposalsValid, CheckBehaviourDelta,
 		CheckSpecsCoverSlices, CheckEventModelValid, CheckGrillValid, CheckSpecsCoverScenarios,
 		CheckPlanValid, CheckCharacterizationPasses, CheckCoverageSufficient, CheckTestsUntouched,
-		CheckBaselineRecorded, CheckDiagnosisWritten,
+		CheckBaselineRecorded, CheckDiagnosisWritten, CheckSkeletonsOnly, CheckSkeletonsFilled,
 	}
 }
 
@@ -147,9 +155,9 @@ func (s Stage) checks() []ExitCheck {
 		// Performance work changes no behaviour: every existing test stays.
 		return []ExitCheck{CheckArtifactWritten, CheckBuildPasses, CheckFormatted, CheckTestsUntouched, CheckSuitePasses}
 	case StageSpecify:
-		return []ExitCheck{CheckArtifactWritten, CheckSpecsFail}
+		return []ExitCheck{CheckArtifactWritten, CheckSkeletonsOnly, CheckSpecsFail}
 	case StageImplement:
-		return []ExitCheck{CheckArtifactWritten, CheckBuildPasses, CheckFormatted, CheckSpecsPass, CheckSpecsUntouched, CheckSuitePasses}
+		return []ExitCheck{CheckArtifactWritten, CheckBuildPasses, CheckFormatted, CheckSkeletonsFilled, CheckSpecsPass, CheckSpecsUntouched, CheckSuitePasses}
 	case StageReview:
 		return []ExitCheck{CheckArtifactWritten, CheckFormatted, CheckBuildPasses, CheckSuitePasses}
 	case StageIntegrationTesting:

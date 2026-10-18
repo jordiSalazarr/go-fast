@@ -235,6 +235,8 @@ func scopeReason(facts stageFacts, p domain.RepoPath) string {
 		return fmt.Sprintf("During '%s' you may only write the stage artifact `%s`.", facts.stage, facts.artifact)
 	case domain.WriteScopeTestsAndArtifacts:
 		return fmt.Sprintf("During '%s' you may only write tests and the stage artifact `%s`.", facts.stage, facts.artifact)
+	case domain.WriteScopeTestsSkeletonsAndArtifacts:
+		return fmt.Sprintf("During '%s' you may only write tests, new skeleton files (non-test .go files that only declare) and the stage artifact `%s`.", facts.stage, facts.artifact)
 	default:
 		return fmt.Sprintf("During '%s' you may write anything except gofast's own files in .gofast/ (%s); the stage artifact is `%s`.", facts.stage, p, facts.artifact)
 	}
