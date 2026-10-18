@@ -310,3 +310,17 @@ func TestGrill_LoadsTheVendoredInterviewSkills(t *testing.T) {
 		assert.Contains(t, string(source), "49dd158")
 	}
 }
+
+// Discovery and the fixer have no tools field, so they inherit the
+// session's MCP tools: the repository's observability servers, which they
+// use read-only, never copying secrets into committed artifacts.
+func TestDiscoveryAndFixer_InheritTheSessionsObservabilityTools(t *testing.T) {
+	for _, stage := range []domain.Stage{domain.StageDiscovery, domain.StageFixer} {
+		for _, line := range frontmatter(t, instructions(stage)) {
+			assert.False(t, strings.HasPrefix(line, "tools:"), "%s must not restrict its tools", stage)
+		}
+		body := string(must(os.ReadFile(instructions(stage))))
+		assert.Contains(t, body, "use any connected observability tools (logs, traces, metrics, alerts) **read-only**", stage.String())
+		assert.Contains(t, body, "never copy secrets or personal data into your artifact", stage.String())
+	}
+}

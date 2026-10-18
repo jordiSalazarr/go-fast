@@ -278,7 +278,45 @@ NFRs belong to you: agents can read them but no stage may change them. On
 new-feature and modify-behaviour work, the design stage may *propose* NFRs;
 you adopt them with `gf nfrs adopt` (see [section 8](#8-your-job-when-gofast-stops)).
 
-### 6.3 Check the configuration
+### 6.3 Optional: observability for discovery and the fixer
+
+Discovery and the fixer inherit the session's tools, MCP tools included, so
+they can read the logs, traces and metrics of the running system when they
+investigate an error, an incident or slowness. To give them an
+observability server:
+
+1. Add it to your repository's `.mcp.json`. For example, Logfire's MCP
+   server, with a **read-only** token taken from an environment variable:
+
+   ```json
+   {
+     "mcpServers": {
+       "logfire": {
+         "command": "uvx",
+         "args": ["logfire-mcp@latest"],
+         "env": { "LOGFIRE_READ_TOKEN": "${LOGFIRE_READ_TOKEN}" }
+       }
+     }
+   }
+   ```
+
+   Export `LOGFIRE_READ_TOKEN` in your shell. Never commit the token.
+
+2. Approve the server and allow its tools in `.claude/settings.json`, so the
+   subagents don't stall on permission prompts:
+
+   ```json
+   {
+     "enabledMcpjsonServers": ["logfire"],
+     "permissions": { "allow": ["mcp__logfire"] }
+   }
+   ```
+
+3. Use read-only credentials. The agents are told to use these tools
+   read-only and to keep secrets and personal data out of their artifacts,
+   which are committed; but that is advice. The token is the control.
+
+### 6.4 Check the configuration
 
 ```sh
 gf checks
@@ -289,10 +327,11 @@ the checks each stage requires, and your NFRs. It warns while `checks.json`
 or `nfrs.json` has uncommitted changes, and about NFRs without `minRps`. Fix
 anything it reports.
 
-### 6.4 Commit
+### 6.5 Commit
 
 ```sh
 git add .gofast/checks.json .gofast/nfrs.json   # nfrs.json only if you made one
+git add .mcp.json .claude/settings.json          # only if you added an observability server
 git commit -m "Configure gofast"
 ```
 
@@ -301,7 +340,7 @@ working tree as it was when the stage began. If you change `checks.json` or
 `nfrs.json` while a stage is open, that stage's next submission fails because
 it "changed files outside its write scope".
 
-### 6.5 Start from a clean working tree
+### 6.6 Start from a clean working tree
 
 Commit or stash your own changes before starting work. Anything you change
 while a stage is open counts as that stage's change.
