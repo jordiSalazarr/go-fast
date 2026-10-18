@@ -672,9 +672,30 @@ The protocol, `/v1` (`workflow/remote/wire`):
   written, with the log's seal. Idempotent by event ID; all or nothing.
   Refused as `tampered` (an ID held with other content), `diverged` (another
   event held at that stream version) or `gap`.
-- `GET /v1/projects/{p}/works` and `/works/{id}`: the works, and a work's
-  timeline: its events, each stage visit's agent and skill versions with
-  their kept files, and its files.
+- `GET /v1/projects/{p}/works` and `/works/{id}`: the works (filtered with
+  `?status=`, `?type=`, `?branch=`, `?q=`), and a work's timeline: its
+  events, each stage visit's agent and skill versions with their kept
+  files, and its files.
+- `GET /v1/projects/{p}/instructions`: every skill and agent the history
+  names; `?name=<name>` gives one's versions, oldest first, with their kept
+  files and every stage visit each instructed.
+- `GET /v1/projects/{p}/instructions/{a}/diff/{b}`: two kept versions
+  compared file by file, with a unified diff of each changed text file.
+- `GET /v1/projects/{p}/blobs/{sha256}/html`: a Markdown file rendered for
+  the viewer (goldmark: raw HTML left out, dangerous links dropped).
+
+Tokens: each project has one sync token, which reads and writes, and any
+number of read tokens, which read every `GET` endpoint and are refused
+(`403 forbidden`) on writes.
+
+**The viewer**, at the server's `/`, is plain HTML, CSS and JavaScript
+embedded in `gofast-server` (`historyserver/viewer/`), with no build step. It
+keeps the project and token in `sessionStorage` and sends the token as a
+bearer token, so there are no cookies and no CSRF. Everything from the
+history is set as text; only the server-rendered Markdown is set as HTML.
+Every response carries a strict Content-Security-Policy (`self` only, no
+inline script, no frames), `X-Frame-Options: DENY`, `nosniff` and
+`no-referrer`; blobs are served as `text/plain` or bytes, never as a page.
 
 Every request carries the project's token (`Authorization: Bearer`); the
 server's configuration holds its SHA-256. A sync copies the log under the

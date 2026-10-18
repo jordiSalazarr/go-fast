@@ -393,7 +393,15 @@ and nothing comes back from it.
 
    It speaks plain HTTP: put TLS in front of it (a reverse proxy) anywhere
    but on your own machine. The configuration holds each token's hash, never
-   the token.
+   the token. [`deploy/`](../deploy/README.md) has a ready setup: Docker with
+   Caddy for automatic TLS, or systemd, with daily backups
+   (`gofast-server -config server.json -backup <file>` copies the database
+   while it serves).
+
+   Add **read tokens** for whoever only reads the history, you in the
+   viewer included: `"readTokenSha256s": ["<SHA-256 of a read token>"]`
+   next to `tokenSha256`. A read token reads everything and writes nothing;
+   keep the sync token for `gf sync`.
 
 2. **Point the repository at it** with `.gofast/sync.json`, and commit it:
 
@@ -429,10 +437,21 @@ and nothing comes back from it.
    yet, so running it again is cheap, and an interrupted sync resumes where
    it stopped. `gf status` ends with how far the history is synced.
 
+5. **Read the history** at the server's address, `https://<domain>/`: sign
+   in with the project and a read token (kept for that browser tab only).
+   - **Works**, filtered by status, type, branch or a word of the
+     description.
+   - **A work**: each stage visit's attempts, failures, approvals and
+     rejections with who made them, reworks and returns, the agent and
+     skill versions that instructed it, and its artifacts, rendered.
+   - **Skills and agents**: every version of each, the stage visits each
+     instructed, and what changed from one version to the next. This answers
+     "which works did the version of `specify` with the bad example
+     instruct?"
+
 If two clones advanced the same work before merging, or a log was rewritten
 after it was synced, the server refuses that work's stream (`gf sync`
-names it) and syncs the rest. The server's timeline of the work,
-`GET /v1/projects/<project>/works/<work>`, shows what it holds.
+names it) and syncs the rest. The viewer shows what the server holds.
 
 ### 6.5 Check the configuration
 
@@ -670,6 +689,7 @@ change.
 | "skeletons-filled: errSkeleton is still in <files>" | Implement left a skeleton unfilled. It tries again until no non-test Go file uses `errSkeleton`. |
 | "review-verdict-consistent: … the verdict says Passed but ## Blocking lists B1" | Review passed while its artifact lists blocking findings (or lacks `## Verdict`, `## Risk map` or `## Agreed behaviour`). Review tries again: with blocking findings it must submit `--failed`, which sends the work to the fixer. |
 | "Set $GOFAST_SYNC_TOKEN to the project's token …" | `gf sync` needs the token in your shell: `export GOFAST_SYNC_TOKEN=<token>`. |
+| "$GOFAST_SYNC_TOKEN is a read token of project …" | Read tokens only read. Use the project's sync token for `gf sync`. |
 | "The history server … refused the token for project …" | The token's SHA-256 isn't the one in the server's configuration for that project, or the project isn't configured there. |
 | "gf could not reach the history server …" | The server is down or the URL is wrong. Nothing more was sent; run `gf sync` again once it's up. |
 | "Refused: stream <stream> at version <n>: …" | The server holds a different history of that stream: the same work was advanced in two clones, or this log was rewritten after a sync. The rest synced. Compare the clones' `.gofast/events.jsonl` with the server's timeline of the work. |
