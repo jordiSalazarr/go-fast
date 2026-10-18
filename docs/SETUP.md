@@ -205,8 +205,10 @@ rules add a second, harder layer in Claude Code itself. Add them to
       "Bash(gf rework-extend *)",
       "Bash(gf stress *)",
       "Bash(gf abandon *)",
+      "Bash(gf return *)",
       "Bash(gf log *)",
-      "Bash(gf nfrs *)"
+      "Bash(gf nfrs *)",
+      "Bash(gf sync *)"
     ]
   }
 }
@@ -358,7 +360,81 @@ observability server:
    read-only and to keep secrets and personal data out of their artifacts,
    which are committed; but that is advice. The token is the control.
 
-### 6.4 Check the configuration
+### 6.4 Optional: sync the history to a server
+
+The event log, the artifacts and the kept instruction versions already make
+each repository its own audit trail. To keep one history across all your
+repositories and machines, run a history server and sync to it. The
+repository stays the source of truth: the server holds an append-only copy,
+and nothing comes back from it.
+
+1. **Run the server.** It is in this repository, `cmd/gofast-server`, and
+   keeps everything in one SQLite file:
+
+   ```sh
+   go install github.com/jordiSalazarr/go-fast/cmd/gofast-server@latest
+   TOKEN=$(openssl rand -hex 32)                 # the project's token: keep it secret
+   printf %s "$TOKEN" | shasum -a 256            # its SHA-256, for the server's configuration
+   ```
+
+   `server.json`:
+
+   ```json
+   {
+     "listen": ":8080",
+     "db": "/var/lib/gofast/history.db",
+     "projects": { "wallets": { "tokenSha256": "<the SHA-256 above>" } }
+   }
+   ```
+
+   ```sh
+   gofast-server -config server.json
+   ```
+
+   It speaks plain HTTP: put TLS in front of it (a reverse proxy) anywhere
+   but on your own machine. The configuration holds each token's hash, never
+   the token.
+
+2. **Point the repository at it** with `.gofast/sync.json`, and commit it:
+
+   ```json
+   {
+     "server": "https://history.example.com",
+     "project": "wallets",
+     "include": ["events", "instructions", "artifacts", "decisions"]
+   }
+   ```
+
+   `include` says what leaves the machine. `events` is required: every
+   event of the log, exactly as written. `instructions` sends the kept
+   versions of the skills and agents the log names. `artifacts` sends the
+   works' artifacts (`.gofast/works/<work>/`) and the inputs they started
+   from. `decisions` sends grill's decision documents. Leave `include` out
+   to send all four. **Artifacts and decision documents can quote code,
+   logs and customer data**: list only what you're allowed to send.
+
+3. **Set the token in your own shell**, never in a file:
+   `export GOFAST_SYNC_TOKEN=<the token>`. `gf checks` warns when it is
+   missing, and when the server isn't https (localhost excepted).
+
+4. **Sync** from your own terminal, whenever you like:
+
+   ```sh
+   gf sync --dry-run   # asks the server what it holds; sends nothing
+   gf sync
+   ```
+
+   `gf sync` is owner-only, like `gf approve`, because it sends data outside
+   your machine; agents can't run it. It sends what the server doesn't hold
+   yet, so running it again is cheap, and an interrupted sync resumes where
+   it stopped. `gf status` ends with how far the history is synced.
+
+If two clones advanced the same work before merging, or a log was rewritten
+after it was synced, the server refuses that work's stream (`gf sync`
+names it) and syncs the rest. The server's timeline of the work,
+`GET /v1/projects/<project>/works/<work>`, shows what it holds.
+
+### 6.5 Check the configuration
 
 ```sh
 gf checks
@@ -369,7 +445,7 @@ the checks each stage requires, and your NFRs. It warns while `checks.json`
 or `nfrs.json` has uncommitted changes, and about NFRs without `minRps`. Fix
 anything it reports.
 
-### 6.5 Commit
+### 6.6 Commit
 
 ```sh
 git add .gofast/checks.json .gofast/nfrs.json   # nfrs.json only if you made one
@@ -382,7 +458,7 @@ working tree as it was when the stage began. If you change `checks.json` or
 `nfrs.json` while a stage is open, that stage's next submission fails because
 it "changed files outside its write scope".
 
-### 6.6 Start from a clean working tree
+### 6.7 Start from a clean working tree
 
 Commit or stash your own changes before starting work. Anything you change
 while a stage is open counts as that stage's change.
@@ -550,6 +626,7 @@ gofast creates these in your repository:
 | `.gofast/works/<work>/` | **yes**, with your branch | the artifacts: what each stage did and why |
 | `<decisionsDir>/` (default `docs/decisions/`) | **yes**, with your branch | grill's decision documents, and the index gf generates |
 | `GLOSSARY.md`, `GLOSSARY-MAP.md`, `docs/adr/*.md` | **yes**, with your branch | the glossary and ADRs grill writes while it interviews you |
+| `.gofast/sync.json` | **yes** (optional) | where `gf sync` sends the history, and what it sends; never the token |
 | `.gofast/instructions/<version>/` | **yes**, with your branch | a copy of each version of the plugin's skills and agents that instructed a stage, written by gf's hooks; the event log names them by version |
 | `.gofast/runtime/`, `.gofast/gf.log`, `.gofast/events.lock` | no (already ignored) | local bookkeeping: baselines, check logs, stress runs, the log's seal, gf's diagnostic log |
 
@@ -592,6 +669,10 @@ change.
 | "skeletons-only: <file>: func <name> has logic" (or "panics", or "var <name> is not `var errSkeleton = …`") | A skeleton does more than declare. Its functions may only be empty or return zero values or `errSkeleton`; it may declare `errSkeleton` once per package. Specify tries again. |
 | "skeletons-filled: errSkeleton is still in <files>" | Implement left a skeleton unfilled. It tries again until no non-test Go file uses `errSkeleton`. |
 | "review-verdict-consistent: … the verdict says Passed but ## Blocking lists B1" | Review passed while its artifact lists blocking findings (or lacks `## Verdict`, `## Risk map` or `## Agreed behaviour`). Review tries again: with blocking findings it must submit `--failed`, which sends the work to the fixer. |
+| "Set $GOFAST_SYNC_TOKEN to the project's token …" | `gf sync` needs the token in your shell: `export GOFAST_SYNC_TOKEN=<token>`. |
+| "The history server … refused the token for project …" | The token's SHA-256 isn't the one in the server's configuration for that project, or the project isn't configured there. |
+| "gf could not reach the history server …" | The server is down or the URL is wrong. Nothing more was sent; run `gf sync` again once it's up. |
+| "Refused: stream <stream> at version <n>: …" | The server holds a different history of that stream: the same work was advanced in two clones, or this log was rewritten after a sync. The rest synced. Compare the clones' `.gofast/events.jsonl` with the server's timeline of the work. |
 | `gf checks` warns ".gofast/instructions/<version> changed after gf kept it" | A kept copy was edited, so it no longer matches the version the event log names. Restore it with git (`git checkout -- .gofast/instructions/<version>`). To change a skill, edit `plugin/skills/`, never a kept copy. |
 | `gf checks` warns "has uncommitted changes" | Commit `checks.json` / `nfrs.json` before starting work. |
 | "The baseline for '<stage>' is missing" | The work was started with an older gf or on another machine, or `git gc` pruned an old baseline. Run `gf abandon "<reason>"` and start the work again. |
@@ -620,7 +701,7 @@ terminal.
 |---|---|---|
 | `gf start --type <fix-bug\|new-feature\|modify-behaviour> "<description>"` | anyone | starts work on the current branch |
 | `gf status [--json]` | anyone | where the work is, what to read, what comes next |
-| `gf checks` | anyone | shows and validates `checks.json` and `nfrs.json` |
+| `gf checks` | anyone | shows and validates `checks.json`, `nfrs.json` and `sync.json` |
 | `gf submit --passed` / `--failed "<reason>"` | agents | submits the current stage; a pass runs its exit checks |
 | `gf approve` | owner | approves a stage waiting for you |
 | `gf reject "<feedback>"` | owner | sends it back (uses an attempt) |
@@ -630,6 +711,7 @@ terminal.
 | `gf nfrs adopt [--yes]` | owner | adopts the NFRs a design proposes, while design waits for you |
 | `gf abandon "<reason>"` | owner | stops the work for good |
 | `gf log accept` | owner | accepts an event log changed outside gf |
+| `gf sync [--dry-run]` | owner | sends the work history to the server in `.gofast/sync.json` |
 | `--dir <path>` | any command | runs against another repository |
 
 For how gofast works inside (exit checks per stage, write scopes, the

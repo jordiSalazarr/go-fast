@@ -106,7 +106,8 @@ the hard layer, in `~/.claude/settings.json`
       "Bash(gf abandon *)",
       "Bash(gf return *)",
       "Bash(gf log *)",
-      "Bash(gf nfrs *)"
+      "Bash(gf nfrs *)",
+      "Bash(gf sync *)"
     ]
   }
 }
@@ -650,11 +651,50 @@ The guard also denies any Bash command that mentions `GF_ACTOR`,
 any that clears the environment: `env -i`, `env --ignore-environment`,
 `env -u`, `unset`.
 
+## Syncing the history
+
+`gf sync` (owner only) sends a repository's history to a history server, so
+every work, stage visit, decision, artifact and instruction version can be
+read in one place. The event log stays the source of truth: the server keeps
+an append-only copy and never feeds anything back. `cmd/gofast-server` is the
+reference server (`historyserver/`, SQLite). Setup is in
+[`docs/SETUP.md`](../docs/SETUP.md) §6.4.
+
+The protocol, `/v1` (`workflow/remote/wire`):
+
+- `GET /v1/projects/{p}/streams`: each stream's last version and a chained
+  digest of its events (`digest = sha256(previous digest ‖ sha256(line))`).
+- `HEAD`/`PUT`/`GET /v1/projects/{p}/blobs/{sha256}`: files by content, per
+  project; the server checks the hash on upload.
+- `POST /v1/projects/{p}/files`: where each blob was in the repository, and
+  which work it belongs to; refused (`missing-blob`) for a blob not held.
+- `POST /v1/projects/{p}/events`: a batch of the log's lines exactly as
+  written, with the log's seal. Idempotent by event ID; all or nothing.
+  Refused as `tampered` (an ID held with other content), `diverged` (another
+  event held at that stream version) or `gap`.
+- `GET /v1/projects/{p}/works` and `/works/{id}`: the works, and a work's
+  timeline: its events, each stage visit's agent and skill versions with
+  their kept files, and its files.
+
+Every request carries the project's token (`Authorization: Bearer`); the
+server's configuration holds its SHA-256. A sync copies the log under the
+shared lock, so the network never holds it, then sends blobs, then files,
+then events, so the server never holds an event whose files are missing.
+Before sending a stream it compares the server's digest with its own: a
+stream whose history differs (rewritten after a sync, or advanced in
+another clone) is refused and reported, and the others still sync. Its
+cursors, in `.gofast/runtime/sync.json`, are a cache the server's stream
+heads rebuild.
+
+**Why owner only:** a sync sends data outside the machine, so the agent
+mustn't be able to start one. `gf sync` needs a terminal and refuses
+`GF_ACTOR=agent`, and the guard denies agents' commands that run it.
+
 ## How the owner approves
 
 **Approve from your own terminal, not from inside Claude Code.** `gf approve`,
 `gf reject`, `gf extend`, `gf rework-extend`, `gf stress`, `gf abandon`,
-`gf return`, `gf nfrs adopt` and `gf log accept` are owner-only, and
+`gf return`, `gf nfrs adopt`, `gf log accept` and `gf sync` are owner-only, and
 `gf` checks two things before they reach the workflow:
 
 1. **stdin is a terminal** (the isatty check, via the terminal driver).
