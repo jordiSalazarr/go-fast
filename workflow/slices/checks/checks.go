@@ -15,6 +15,7 @@ import (
 
 	"github.com/jordiSalazarr/go-fast/workflow/domain"
 	"github.com/jordiSalazarr/go-fast/workflow/exitchecks"
+	"github.com/jordiSalazarr/go-fast/workflow/instructions"
 	"github.com/jordiSalazarr/go-fast/workflow/skillcatalog"
 	"github.com/jordiSalazarr/go-fast/workflow/worktree"
 )
@@ -40,7 +41,7 @@ func NewCommand(repositoryRoot func() (string, error), getenv func(string) strin
 	var pluginDir string
 	cmd := &cobra.Command{
 		Use:   "checks [--plugin-dir <dir>]",
-		Short: "Show the exit-check configuration, the NFRs, the checks each stage requires and the skill catalogs",
+		Short: "Show the exit-check configuration, the NFRs, the checks each stage requires, the skill catalogs and the kept instruction versions",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root, err := repositoryRoot()
@@ -89,9 +90,17 @@ func NewCommand(repositoryRoot func() (string, error), getenv func(string) strin
 				}
 				catalog = &c
 			}
+			kept, problems, err := instructions.Verify(root)
+			if err != nil {
+				return err
+			}
+			for _, p := range problems {
+				fmt.Fprintf(cmd.OutOrStdout(), "Warning: %s. The event log's versions point at these copies: restore it with git.\n\n", p)
+			}
 			render(cmd.OutOrStdout(), config)
 			renderNFRs(cmd.OutOrStdout(), nfrs)
 			renderCatalog(cmd.OutOrStdout(), catalog)
+			renderKept(cmd.OutOrStdout(), kept, len(problems))
 			return nil
 		},
 	}
@@ -114,6 +123,19 @@ func renderCatalog(w io.Writer, catalog *domain.SkillCatalog) {
 	fmt.Fprintln(w, "\nSkill catalogs (each unlocks after the diagnosis: `## Bottleneck` with evidence):")
 	for _, s := range stages {
 		fmt.Fprintf(w, "  %-20s %s\n", s, strings.Join(catalog.Skills(s), ", "))
+	}
+}
+
+// renderKept says how many versions of the plugin's instructions the
+// repository keeps, and whether each still matches its version.
+func renderKept(w io.Writer, kept, changed int) {
+	switch {
+	case kept == 0 && changed == 0:
+		fmt.Fprintf(w, "\nInstruction versions: none kept yet in %s.\n", instructions.Path())
+	case changed == 0:
+		fmt.Fprintf(w, "\nInstruction versions: %d kept in %s, each intact.\n", kept, instructions.Path())
+	default:
+		fmt.Fprintf(w, "\nInstruction versions: %d kept in %s, %d with problems (see the warnings above).\n", kept, instructions.Path(), changed)
 	}
 }
 

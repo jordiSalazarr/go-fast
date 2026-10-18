@@ -75,3 +75,23 @@ func TestInstructions_WithoutThePlugin_TheAgentIsRecordedUnversioned(t *testing.
 	_, err := os.Stat(filepath.Join(r.dir, ".gofast", "instructions"))
 	assert.True(t, os.IsNotExist(err))
 }
+
+func TestChecks_VerifiesTheKeptInstructionVersions(t *testing.T) {
+	r := newRepo(t)
+	assert.Contains(t, r.gf("checks"), "\nInstruction versions: none kept yet in .gofast/instructions.\n")
+
+	r.gf("start", "--type", "fix-bug", "login button does nothing")
+	r.expect("discovery", progress.AssignmentOpen, 0, 3)
+	plugin := gofastPlugin(t)
+	r.hook(plugin, "agent-start", subagentEvent("SubagentStart", "gofast:discovery", false))
+	assert.Contains(t, r.gf("checks"), "\nInstruction versions: 3 kept in .gofast/instructions, each intact.\n", "the agent and its two preloads")
+
+	skill, err := gfinstructions.Skill(plugin["CLAUDE_PLUGIN_ROOT"], "discovery")
+	require.NoError(t, err)
+	kept := ".gofast/instructions/" + skill.Version.String()
+	r.write(kept+"/SKILL.md", "# Discovery, rewritten after the fact\n")
+	out := r.gf("checks")
+	assert.Contains(t, out, "Warning: "+kept+" changed after gf kept it")
+	assert.Contains(t, out, "The event log's versions point at these copies: restore it with git.\n")
+	assert.Contains(t, out, "\nInstruction versions: 3 kept in .gofast/instructions, 1 with problems (see the warnings above).\n")
+}
