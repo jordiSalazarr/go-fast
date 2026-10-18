@@ -16,6 +16,7 @@ import (
 	"github.com/jordiSalazarr/go-fast/workflow/domain"
 	"github.com/jordiSalazarr/go-fast/workflow/exitchecks"
 	"github.com/jordiSalazarr/go-fast/workflow/instructions"
+	"github.com/jordiSalazarr/go-fast/workflow/remote"
 	"github.com/jordiSalazarr/go-fast/workflow/skillcatalog"
 	"github.com/jordiSalazarr/go-fast/workflow/worktree"
 )
@@ -41,7 +42,7 @@ func NewCommand(repositoryRoot func() (string, error), getenv func(string) strin
 	var pluginDir string
 	cmd := &cobra.Command{
 		Use:   "checks [--plugin-dir <dir>]",
-		Short: "Show the exit-check configuration, the NFRs, the checks each stage requires, the skill catalogs and the kept instruction versions",
+		Short: "Show the exit-check configuration, the NFRs, the checks each stage requires, the skill catalogs, the kept instruction versions and the sync configuration",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root, err := repositoryRoot()
@@ -90,6 +91,13 @@ func NewCommand(repositoryRoot func() (string, error), getenv func(string) strin
 				}
 				catalog = &c
 			}
+			syncConfig, err := remote.LoadConfig(root)
+			if err != nil {
+				return err
+			}
+			for _, w := range syncConfig.Warnings(getenv(remote.TokenEnv)) {
+				fmt.Fprintf(cmd.OutOrStdout(), "Warning: %s\n\n", w)
+			}
 			kept, problems, err := instructions.Verify(root)
 			if err != nil {
 				return err
@@ -101,6 +109,7 @@ func NewCommand(repositoryRoot func() (string, error), getenv func(string) strin
 			renderNFRs(cmd.OutOrStdout(), nfrs)
 			renderCatalog(cmd.OutOrStdout(), catalog)
 			renderKept(cmd.OutOrStdout(), kept, len(problems))
+			renderSync(cmd.OutOrStdout(), syncConfig, getenv(remote.TokenEnv) != "")
 			return nil
 		},
 	}
@@ -137,6 +146,21 @@ func renderKept(w io.Writer, kept, changed int) {
 	default:
 		fmt.Fprintf(w, "\nInstruction versions: %d kept in %s, %d with problems (see the warnings above).\n", kept, instructions.Path(), changed)
 	}
+}
+
+// renderSync says where gf sync sends the history, and what it sends.
+func renderSync(w io.Writer, c remote.Config, token bool) {
+	if !c.Configured {
+		fmt.Fprintf(w, "\nSync: not configured (%s does not exist); the history stays in this repository.\n", remote.ConfigPath)
+		return
+	}
+	state := "set"
+	if !token {
+		state = "missing"
+	}
+	fmt.Fprintf(w, "\nSync (%s): project %s on %s\n", remote.ConfigPath, c.Project, c.Server)
+	fmt.Fprintf(w, "  sends        %s\n", strings.Join(c.Included(), ", "))
+	fmt.Fprintf(w, "  token        $%s %s\n", remote.TokenEnv, state)
 }
 
 func render(w io.Writer, config exitchecks.Config) {
