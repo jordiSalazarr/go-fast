@@ -114,6 +114,7 @@ const (
 // as written.
 type Envelope struct {
 	ID         string          `json:"id"`
+	Position   int             `json:"position"`
 	Stream     string          `json:"stream"`
 	Version    int             `json:"version"`
 	Type       string          `json:"type"`
