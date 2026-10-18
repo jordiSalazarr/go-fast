@@ -336,13 +336,19 @@ func TestRule4_AppliesToTheMainSessionOnlyWhileDriving(t *testing.T) {
 }
 
 // Grill runs in the main session: while it drives, the session may write
-// grill's artifacts and this work's decision document, nothing else.
-func TestRule4_GrillWritesItsArtifactsAndTheWorksDecisionDocument_FromTheMainSession(t *testing.T) {
-	grillScope := denied("During 'grill' you may only write the stage artifacts in `.gofast/works/w1/` and this work's decision document, `docs/decisions/<YYYY-MM-DD>-w1-<slug>.md`.")
+// grill's artifacts, this work's decision document, glossaries and ADRs,
+// nothing else.
+func TestRule4_GrillWritesItsArtifactsTheWorksDecisionDocumentGlossariesAndADRs_FromTheMainSession(t *testing.T) {
+	grillScope := denied("During 'grill' you may only write the stage artifacts in `.gofast/works/w1/`, this work's decision document, `docs/decisions/<YYYY-MM-DD>-w1-<slug>.md`, glossaries (`GLOSSARY.md`, `GLOSSARY-MAP.md`) and ADRs (`.md` files under a `docs/adr/` directory).")
 	for path, want := range map[string]claudehooks.Output{
 		"/repo/.gofast/works/w1/grill-v1.md":            allowed,
 		"/repo/.gofast/works/w1/grill-v1.json":          allowed,
 		"/repo/docs/decisions/2026-10-12-w1-wallets.md": allowed,
+		"/repo/GLOSSARY.md":                             allowed,
+		"/repo/src/billing/GLOSSARY.md":                 allowed,
+		"/repo/docs/adr/0001-event-sourced-wallets.md":  allowed,
+		"/repo/docs/adr/0001-x.go":                      grillScope,
+		"/repo/GLOSSARY.txt":                            grillScope,
 		"/repo/docs/decisions/2026-10-12-w0-wallets.md": grillScope,
 		"/repo/docs/decisions/notes.md":                 grillScope,
 		"/repo/login/login.go":                          grillScope,

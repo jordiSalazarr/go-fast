@@ -225,7 +225,7 @@ func scopeReason(facts stageFacts, p domain.RepoPath) string {
 	}
 	switch facts.stage.WriteScope() {
 	case domain.WriteScopeArtifactsAndDecision:
-		return fmt.Sprintf("During '%s' you may only write the stage artifacts in `%s/` and this work's decision document, `%s/<YYYY-MM-DD>-%s-<slug>.md`.",
+		return fmt.Sprintf("During '%s' you may only write the stage artifacts in `%s/`, this work's decision document, `%s/<YYYY-MM-DD>-%s-<slug>.md`, glossaries (`GLOSSARY.md`, `GLOSSARY-MAP.md`) and ADRs (`.md` files under a `docs/adr/` directory).",
 			facts.stage, domain.ArtifactDir(facts.work), facts.decisions.Path(), facts.work)
 	case domain.WriteScopeArtifacts:
 		if facts.stage == domain.StageStressTesting {

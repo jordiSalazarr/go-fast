@@ -241,8 +241,8 @@ and anything a later stage would otherwise guess, and stops when no question
 is open. While it waits for your answers the session stops; your reply
 continues the round.
 
-It writes, within its write scope (its artifacts and this work's decision
-document, nothing else):
+It writes, within its write scope (its artifacts, this work's decision
+document, the glossaries and the ADRs, nothing else):
 
 - the **decision document** `docs/decisions/<YYYY-MM-DD>-<work>-<slug>.md`,
   with `## Intent`, `## Scope` (in / out), `## Decisions` (`D1`, `D2`, …:
@@ -493,7 +493,7 @@ files in `current.fixer.stressRunDir`, profiling) before choosing a route.
 | Stage | May write |
 |---|---|
 | event-modelling, discovery, design, review, integration-testing, stress-testing, fixer | only the work's artifact directory |
-| grill | the work's artifact directory and this work's decision document, `<decisionsDir>/<YYYY-MM-DD>-<work>-<slug>.md` |
+| grill | the work's artifact directory, this work's decision document, `<decisionsDir>/<YYYY-MM-DD>-<work>-<slug>.md`, glossaries (any `GLOSSARY.md` or `GLOSSARY-MAP.md`) and ADRs (`.md` files under any `docs/adr/` directory) |
 | specify | tests (`*_test.go`, files under `testdata/`) and artifacts |
 | implement | anything except gofast's own files in `.gofast/` |
 

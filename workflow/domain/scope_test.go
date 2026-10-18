@@ -99,6 +99,31 @@ func TestWriteScopeAllows(t *testing.T) {
 	}
 }
 
+// Grill also writes the repository's glossaries and ADRs, as the
+// domain-modeling skill does while it interviews the owner; never the
+// decisions index, nor gofast's own files.
+func TestGrillsScope_AllowsGlossariesAndADRs(t *testing.T) {
+	scope := domain.StageGrill.WriteScope()
+	assert.Equal(t, "artifacts, the decision document, glossaries and ADRs", scope.String())
+	for _, p := range []string{"GLOSSARY.md", "GLOSSARY-MAP.md", "src/x/GLOSSARY.md", "src/ordering/GLOSSARY-MAP.md",
+		"docs/adr/0001-x.md", "billing/docs/adr/0002-y.md", "docs/adr/archive/0003-z.md"} {
+		assert.True(t, scope.Allows(repoPath(t, p), workID, decisions), p)
+	}
+	adrDecisions := must(domain.NewDecisionsDir(repoPath(t, "docs/adr")))
+	for _, p := range []string{"docs/adr/x.go", "GLOSSARY.txt", "glossary.md", "docs/adrs/x.md", "adr/0001-x.md", "mydocs/adr/0001-x.md",
+		"docs/decisions/README.md", ".gofast/GLOSSARY.md", ".gofast/docs/adr/0001-x.md", "src/x.go"} {
+		assert.False(t, scope.Allows(repoPath(t, p), workID, decisions), p)
+	}
+	assert.False(t, scope.Allows(repoPath(t, "docs/adr/README.md"), workID, adrDecisions), "the index, even in docs/adr")
+	for _, stage := range domain.Stages() {
+		if stage.WriteScope() == domain.WriteScopeArtifactsAndDecision || stage.WriteScope().CanChangeCode() {
+			continue
+		}
+		assert.False(t, stage.WriteScope().Allows(repoPath(t, "GLOSSARY.md"), workID, decisions), "%s may not write glossaries", stage)
+		assert.False(t, stage.WriteScope().Allows(repoPath(t, "docs/adr/0001-x.md"), workID, decisions), "%s may not write ADRs", stage)
+	}
+}
+
 // The decisions directory is the owner's to choose, but never inside
 // gofast's own files.
 func TestDecisionsDir(t *testing.T) {

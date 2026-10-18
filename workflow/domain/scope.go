@@ -99,8 +99,9 @@ var (
 	// WriteScopeArtifacts allows only the work's artifact directory.
 	WriteScopeArtifacts = WriteScope{name: "artifacts"}
 	// WriteScopeArtifactsAndDecision also allows the work's decision
-	// document in the decisions directory.
-	WriteScopeArtifactsAndDecision = WriteScope{name: "artifacts and the decision document"}
+	// document in the decisions directory, the repository's glossaries and
+	// its ADRs: grill writes them while it interviews the owner.
+	WriteScopeArtifactsAndDecision = WriteScope{name: "artifacts, the decision document, glossaries and ADRs"}
 	// WriteScopeTestsAndArtifacts also allows *_test.go and files under testdata/.
 	WriteScopeTestsAndArtifacts = WriteScope{name: "tests and artifacts"}
 	// WriteScopeAnything allows everything outside gofast's own files.
@@ -144,7 +145,7 @@ func (s WriteScope) Allows(path RepoPath, work WorkID, decisions DecisionsDir) b
 	}
 	switch s {
 	case WriteScopeArtifactsAndDecision:
-		return decisions.IsDecisionOf(path, work)
+		return decisions.IsDecisionOf(path, work) || isGlossary(path) || isADR(path)
 	case WriteScopeTestsAndArtifacts:
 		return isTestFile(path)
 	case WriteScopeAnything:
@@ -264,6 +265,31 @@ func (w Writes) Violations(changed ChangedFiles) []RepoPath {
 		}
 	}
 	return violations
+}
+
+// isGlossary reports whether a path is a glossary of the domain model: a
+// GLOSSARY.md, or the GLOSSARY-MAP.md that maps the contexts' glossaries,
+// at any depth.
+func isGlossary(p RepoPath) bool {
+	name := p.value[strings.LastIndex(p.value, "/")+1:]
+	return name == "GLOSSARY.md" || name == "GLOSSARY-MAP.md"
+}
+
+// isADR reports whether a path is an architecture decision record: a .md
+// file under a docs/adr directory, the repository's or a context's
+// (billing/docs/adr).
+func isADR(p RepoPath) bool {
+	if !strings.HasSuffix(p.value, ".md") {
+		return false
+	}
+	dirs := strings.Split(p.value, "/")
+	dirs = dirs[:len(dirs)-1]
+	for i := 1; i < len(dirs); i++ {
+		if dirs[i-1] == "docs" && dirs[i] == "adr" {
+			return true
+		}
+	}
+	return false
 }
 
 // IsTestFile reports whether a path is test code: a *_test.go file, or a
