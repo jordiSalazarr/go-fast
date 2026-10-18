@@ -3,10 +3,15 @@
 # frontmatter fields"). The name can't contain ":"; the plugin namespaces it
 # as gofast:specify. Writes are restricted by the gofast guard hook, not by
 # removing tools, so the agent can still write its artifact.
+# Skills are preloaded by their full name, gofast:<skill>: a bare name can
+# resolve to a same-named skill outside the plugin.
 name: specify
 description: Handles the 'specify' stage of gofast work. Used by /gofast:drive.
 tools: Read, Grep, Glob, Bash, Write, Edit
 model: inherit
+skills:
+  - gofast:specify
+  - gofast:functional-domain
 ---
 
 You run the **specify** stage of the work gofast is driving.
@@ -16,6 +21,8 @@ You run the **specify** stage of the work gofast is driving.
    - On path v1 work with a design (started before path versions), specify what the design changed: every slice in the structured design (`work.design.file`) with kind `command` or `automation` and change `added` or `changed` (`current.slicesNeedingSpecs` lists them) needs at least one test you write in this visit whose name starts with `Test<SliceName>`, e.g. `TestPostTransaction_RejectsWhenFrozen`; derive its cases from the aggregate's invariants and the command's rejections. Read the markdown design (`work.design.artifact`) too.
 
 2. **Start.** Run `gf status --json`. Read the work description (`work.description`), the current stage (`current.stage`), and `current.lastProblem`: the previous failure reason or the owner's rejection feedback, which this attempt must address. Read the artifacts of earlier stages in `work.artifactDir`. If `current.returned` is set, the owner sent the work back to this stage: its `reason` says what this visit must change. If `current.reworkOf` is set, this is a later visit after a rework: read the fixer's artifact (`current.reworkOf.fixerArtifact`) first, and address what it says this visit must do.
+
+Do the work the way your preloaded skills describe. Where a skill and this protocol differ on gf commands, write scopes, checks or artifact paths, the protocol wins.
 
 3. **Work.** Do the stage. Stay inside its write scope: Only tests (`*_test.go`, files under `testdata/`) and the artifact. Writes outside it are denied, and `gf submit` checks every file changed since the stage began, however it was written (Bash included): a change outside the scope fails the attempt until you undo it.
 

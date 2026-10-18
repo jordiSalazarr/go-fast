@@ -217,3 +217,96 @@ func TestDrive_OffersEveryWorkType(t *testing.T) {
 		assert.Contains(t, string(body), want)
 	}
 }
+
+// frontmatter returns a plugin file's YAML frontmatter lines.
+func frontmatter(t *testing.T, path string) []string {
+	t.Helper()
+	body, err := os.ReadFile(path)
+	require.NoError(t, err)
+	parts := strings.SplitN(string(body), "---\n", 3)
+	require.Len(t, parts, 3, "%s has frontmatter", path)
+	return strings.Split(parts[1], "\n")
+}
+
+// preloads are the skills an agent's frontmatter preloads, as written.
+func preloads(t *testing.T, stage domain.Stage) []string {
+	t.Helper()
+	var skills []string
+	in := false
+	for _, line := range frontmatter(t, instructions(stage)) {
+		switch {
+		case line == "skills:":
+			in = true
+		case in && strings.HasPrefix(line, "  - "):
+			skills = append(skills, strings.TrimPrefix(line, "  - "))
+		default:
+			in = false
+		}
+	}
+	return skills
+}
+
+// Each stage agent preloads the owner's skills for its stage, by their full
+// name: a bare name can resolve to a same-named skill outside the plugin.
+// Every preload is a skill of the plugin that Claude may load (preloading
+// can't load one with disable-model-invocation), and none is a catalog
+// skill: preloaded skills are core, never locked.
+func TestStageAgents_PreloadTheOwnersSkills(t *testing.T) {
+	want := map[domain.Stage][]string{
+		domain.StageDiscovery:    {"discovery", "code-layout"},
+		domain.StageDesign:       {"aggregate-design", "functional-domain", "value-types", "schema-evolution", "reads-and-reactions"},
+		domain.StagePlan:         {"code-layout"},
+		domain.StageCharacterize: {"specify"},
+		domain.StageSpecify:      {"specify", "functional-domain"},
+		domain.StageImplement:    {"aggregate-design", "functional-domain", "value-types", "code-layout", "schema-evolution", "reads-and-reactions"},
+		domain.StageOptimize:     {"functional-domain", "code-layout"},
+		domain.StageReview:       {"review", "aggregate-design", "functional-domain", "value-types", "code-layout", "schema-evolution", "reads-and-reactions"},
+		domain.StageFixer:        {"fixer", "discovery"},
+	}
+	catalog, _, err := skillcatalog.Load(filepath.Join("..", "..", "plugin"))
+	require.NoError(t, err)
+	for _, stage := range domain.Stages() {
+		if stage == domain.StageGrill {
+			continue // grill runs in the main session; its skill loads grilling and domain-modeling
+		}
+		var full []string
+		for _, s := range want[stage] {
+			full = append(full, "gofast:"+s)
+		}
+		assert.Equal(t, full, preloads(t, stage), stage.String())
+		body, err := os.ReadFile(instructions(stage))
+		require.NoError(t, err)
+		rule := "Do the work the way your preloaded skills describe. Where a skill and this protocol differ on gf commands, write scopes, checks or artifact paths, the protocol wins.\n\n"
+		if len(full) > 0 {
+			assert.Contains(t, string(body), rule, stage.String())
+		} else {
+			assert.NotContains(t, string(body), "preloaded skills", stage.String())
+		}
+		for _, name := range want[stage] {
+			skill := frontmatter(t, filepath.Join("..", "..", "plugin", "skills", name, "SKILL.md"))
+			assert.Contains(t, skill, "name: "+name, "%s preloads %s", stage, name)
+			assert.NotContains(t, skill, "disable-model-invocation: true", "%s preloads %s", stage, name)
+			for _, s := range domain.Stages() {
+				assert.NotContains(t, catalog.Skills(s), name, "%s is preloaded, so never a catalog skill", name)
+			}
+		}
+	}
+	assert.Contains(t, string(must(os.ReadFile(instructions(domain.StageCharacterize)))),
+		"From the specify skill, use the shape of a spec (one behaviour per test, given/when/then, observable outcomes, deterministic). Characterization tests pass against the current code; they pin behaviour, they don't specify new behaviour.")
+}
+
+// Grill loads the owner's interview method itself: the vendored grilling and
+// domain-modeling skills, kept with their licence and their source.
+func TestGrill_LoadsTheVendoredInterviewSkills(t *testing.T) {
+	body, err := os.ReadFile(instructions(domain.StageGrill))
+	require.NoError(t, err)
+	assert.Contains(t, string(body), "Load the `gofast:grilling` and `gofast:domain-modeling` skills with the Skill tool")
+	for _, name := range []string{"grilling", "domain-modeling"} {
+		dir := filepath.Join("..", "..", "plugin", "skills", name)
+		assert.Contains(t, frontmatter(t, filepath.Join(dir, "SKILL.md")), "name: "+name)
+		assert.FileExists(t, filepath.Join(dir, "LICENSE"))
+		source, err := os.ReadFile(filepath.Join(dir, "SOURCE.md"))
+		require.NoError(t, err)
+		assert.Contains(t, string(source), "49dd158")
+	}
+}

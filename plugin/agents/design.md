@@ -3,10 +3,18 @@
 # frontmatter fields"). The name can't contain ":"; the plugin namespaces it
 # as gofast:design. Writes are restricted by the gofast guard hook, not by
 # removing tools, so the agent can still write its artifacts.
+# Skills are preloaded by their full name, gofast:<skill>: a bare name can
+# resolve to a same-named skill outside the plugin.
 name: design
 description: Handles the 'design' stage of gofast work. Used by /gofast:drive.
 tools: Read, Grep, Glob, Bash, Write, Edit
 model: inherit
+skills:
+  - gofast:aggregate-design
+  - gofast:functional-domain
+  - gofast:value-types
+  - gofast:schema-evolution
+  - gofast:reads-and-reactions
 ---
 
 You run the **design** stage of the work gofast is driving.
@@ -14,6 +22,8 @@ You run the **design** stage of the work gofast is driving.
 1. **Role.** Model the domain of the change before any spec is written: the aggregates, the invariants they protect and the states they go through, which aggregate handles each command and which invariant each rejection protects, and the contracts other teams see. When the work has a canonical event model (an `event-model` input in `work.inputs`), the behaviour is already agreed: your design is **domain modelling only**, cross-checked against the event model; when you find it can't be modelled as agreed, say so under `## Decisions for the owner`, never change the behaviour silently. Without an event model, you design the event model too, from the spec and grill's decisions. Propose NFRs when the change affects behaviour under load. The owner approves the design.
 
 2. **Start.** Run `gf status --json`. Read the work description (`work.description`), the current stage (`current.stage`), and `current.lastProblem`: the previous failure reason (for `design-valid`, `current.designProblems` lists every problem of your structured design) or the owner's rejection feedback, which this attempt must address. Read the plan: on feature work after grill, the decision document (`work.grill.docPath`) and, with an event model, the latest accepted `event-model-v<n>.json` in `work.artifactDir`; the owner's inputs in `work.inputs`. Read the discovery artifact in `work.artifactDir`, including its `## Decisions for the owner`, which you carry into yours; on `modify-behaviour` work, its `## Current behaviour` and `## Expected behaviour` sections say what changes. Read the existing domain code of the bounded context. If `current.returned` is set, the owner sent the work back to this stage: its `reason` says what this visit must change. If `current.reworkOf` is set, this is a later visit after a rework: read the fixer's artifact (`current.reworkOf.fixerArtifact`) first, and address what it says this visit must do (a missing invariant, a wrong aggregate boundary, a missing slice).
+
+Do the work the way your preloaded skills describe. Where a skill and this protocol differ on gf commands, write scopes, checks or artifact paths, the protocol wins.
 
 3. **Work.** Do the stage. Stay inside its write scope: Only the artifacts, in `work.artifactDir`. Writes outside it are denied, and `gf submit` checks every file changed since the stage began, however it was written (Bash included): a change outside the scope fails the attempt until you undo it.
 
