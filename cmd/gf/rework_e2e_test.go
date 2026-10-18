@@ -53,12 +53,30 @@ func (r *repo) toReview() progress.View {
 	return r.expect("review", progress.AssignmentOpen, 0, 3)
 }
 
-// writeArtifact writes the current stage visit's artifact.
+// writeArtifact writes the current stage visit's artifact. On review, it
+// writes it in the review skill's shape: a text starting with "Blocking" is
+// a Failed verdict with that one blocking finding, any other a Passed one.
 func (r *repo) writeArtifact(text string) {
 	r.t.Helper()
 	c := r.status().Current
 	require.NotNil(r.t, c)
+	if c.Stage == "review" {
+		r.write(c.Artifact, reviewArtifact(text))
+		return
+	}
 	r.write(c.Artifact, "# "+c.Stage+"\n\n"+text+"\n")
+}
+
+// reviewArtifact is review's artifact as the review skill writes it.
+func reviewArtifact(text string) string {
+	verdict, blocking := "Passed", ""
+	if strings.HasPrefix(text, "Blocking") {
+		verdict, blocking = "Failed: 1 blocking", "## Blocking\n### B1 "+text+"\n- Where: server/server.go:3\n\n"
+	}
+	return "# review\n\n## Verdict\n" + verdict + "\n\n" +
+		"## Risk map\n| # | Rule or behaviour at stake | Where | Why risky | Protected by | Check yourself |\n|---|---|---|---|---|---|\n" +
+		"| R1 | " + text + " | server/server.go:3 | it is what changed | the specs | read the diff |\n\n" +
+		"## Agreed behaviour\n| Item | Implemented in | Proven by | OK |\n|---|---|---|---|\n| the change | server/server.go:3 | the specs | ✓ |\n\n" + blocking
 }
 
 // 1. Integration testing fails because of a code bug; the fixer sends the

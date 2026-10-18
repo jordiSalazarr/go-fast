@@ -115,6 +115,8 @@ func TestReviewAgent_DecidesStressTesting(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(body), "Decide stress testing: `--stress include` if the change can affect behaviour under load (concurrency, I/O, queries, hot paths), else `--stress skip` with a reason. If gf says it's forced")
 	assert.Contains(t, string(body), "`gf submit --passed --stress <include|skip> \"<reason>\"`")
+	assert.Contains(t, string(body), "If your verdict is Failed, run `gf submit --failed \"<n> blocking: B1 …\"`; that hands the work to the fixer. "+
+		"Submit `--passed` only with a Passed verdict and no blocking findings; `review-verdict-consistent` checks it.")
 }
 
 // The stress-testing agent writes one script per NFR, at the path gf reads,

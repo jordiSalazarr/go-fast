@@ -158,7 +158,7 @@ func TestGivenWorkOnReview_WhenRenderingStatusText_ThenItShowsTheCurrentArtifact
 	progress.RenderText(&text, v)
 
 	assert.Contains(t, text.String(), "Artifact: .gofast/works/w1/review-v1.md")
-	assert.Contains(t, text.String(), "Exit checks (run by `gf submit --passed`): artifact-written, formatted, build-passes, suite-passes\n")
+	assert.Contains(t, text.String(), "Exit checks (run by `gf submit --passed`): artifact-written, review-verdict-consistent, formatted, build-passes, suite-passes\n")
 }
 
 func TestGivenWork_WhenQueryingStatus_ThenItShowsItsBranch(t *testing.T) {

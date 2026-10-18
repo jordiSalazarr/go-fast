@@ -228,6 +228,8 @@ func (c *checkRun) check(check domain.ExitCheck) (finding, error) {
 		return c.skeletonsOnly()
 	case domain.CheckSkeletonsFilled:
 		return c.skeletonsFilled()
+	case domain.CheckReviewVerdictConsistent:
+		return c.reviewVerdictConsistent()
 	}
 	return finding{}, fmt.Errorf("gf does not know how to run %q", check)
 }

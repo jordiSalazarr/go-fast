@@ -190,7 +190,7 @@ list them.
 | design | artifact-written, design-valid, nfr-proposals-valid |
 | specify | artifact-written, skeletons-only, specs-fail; on paths with grill (v2, v3) also specs-cover-scenarios; on path v1 with design, specs-cover-slices |
 | implement | artifact-written, build-passes, formatted, skeletons-filled, specs-pass, specs-untouched, suite-passes |
-| review | artifact-written, formatted, build-passes, suite-passes |
+| review | artifact-written, review-verdict-consistent, formatted, build-passes, suite-passes |
 | integration-testing | artifact-written, integration-passes |
 | stress-testing | artifact-written, stress-scripts-valid, nfrs-met |
 | fixer | artifact-written |

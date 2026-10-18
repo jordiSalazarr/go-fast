@@ -73,6 +73,9 @@ func (r *repo) workOnStage() {
 		r.write("server/port_test.go", portSpec)
 	case "implement":
 		r.write("server/server.go", fixedServer)
+	case "review":
+		r.write(c.Artifact, reviewArtifact(fmt.Sprintf("Attempt %d.", c.AttemptsUsed+1)))
+		return
 	}
 	r.write(c.Artifact, fmt.Sprintf("# %s\n\nAttempt %d.\n", c.Stage, c.AttemptsUsed+1))
 }

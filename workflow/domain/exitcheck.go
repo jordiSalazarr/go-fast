@@ -92,6 +92,11 @@ var (
 	// CheckSkeletonsFilled: no non-test Go file of the repository declares
 	// or references errSkeleton: implement filled every skeleton.
 	CheckSkeletonsFilled = ExitCheck{name: "skeletons-filled"}
+	// CheckReviewVerdictConsistent: a passing review's artifact agrees with
+	// the pass: its `## Verdict` says Passed, `## Blocking` lists no
+	// `### B<n>` finding, and `## Risk map` and `## Agreed behaviour` aren't
+	// empty. It is about the stage's own artifact, not the code.
+	CheckReviewVerdictConsistent = ExitCheck{name: "review-verdict-consistent"}
 	// CheckDiagnosisWritten: measure's artifact has a non-empty
 	// `## Bottleneck` section that references at least one file in the
 	// work's artifact directory: a profile or a measurement.
@@ -106,7 +111,7 @@ func ExitChecks() []ExitCheck {
 		CheckStressScriptsValid, CheckNFRsMet, CheckDesignValid, CheckNFRProposalsValid, CheckBehaviourDelta,
 		CheckSpecsCoverSlices, CheckEventModelValid, CheckGrillValid, CheckSpecsCoverScenarios,
 		CheckPlanValid, CheckCharacterizationPasses, CheckCoverageSufficient, CheckTestsUntouched,
-		CheckBaselineRecorded, CheckDiagnosisWritten, CheckSkeletonsOnly, CheckSkeletonsFilled,
+		CheckBaselineRecorded, CheckDiagnosisWritten, CheckSkeletonsOnly, CheckSkeletonsFilled, CheckReviewVerdictConsistent,
 	}
 }
 
@@ -159,7 +164,7 @@ func (s Stage) checks() []ExitCheck {
 	case StageImplement:
 		return []ExitCheck{CheckArtifactWritten, CheckBuildPasses, CheckFormatted, CheckSkeletonsFilled, CheckSpecsPass, CheckSpecsUntouched, CheckSuitePasses}
 	case StageReview:
-		return []ExitCheck{CheckArtifactWritten, CheckFormatted, CheckBuildPasses, CheckSuitePasses}
+		return []ExitCheck{CheckArtifactWritten, CheckReviewVerdictConsistent, CheckFormatted, CheckBuildPasses, CheckSuitePasses}
 	case StageIntegrationTesting:
 		return []ExitCheck{CheckArtifactWritten, CheckIntegrationPasses}
 	case StageStressTesting:
@@ -414,7 +419,7 @@ func (c ExitCheck) judgesStageWork() bool {
 	switch c {
 	case CheckArtifactWritten, CheckStressScriptsValid, CheckDesignValid, CheckNFRProposalsValid, CheckBehaviourDelta,
 		CheckSpecsCoverSlices, CheckEventModelValid, CheckGrillValid, CheckSpecsCoverScenarios, CheckPlanValid,
-		CheckBaselineRecorded, CheckDiagnosisWritten:
+		CheckBaselineRecorded, CheckDiagnosisWritten, CheckReviewVerdictConsistent:
 		return true
 	}
 	return false

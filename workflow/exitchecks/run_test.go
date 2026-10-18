@@ -338,7 +338,7 @@ func TestMissingBaseline_PointsToGfReturn_UnlessOnTheFirstStage(t *testing.T) {
 func TestReview_ACleanModulePasses(t *testing.T) {
 	m := newModule(t)
 	m.begin(domain.StageReview)
-	m.writeArtifact(domain.StageReview)
+	m.write(domain.ArtifactFor(WorkID, domain.StageReview, Visit1).String(), passedReview)
 
 	for _, r := range m.check(domain.StageReview, exitchecks.Config{}) {
 		passes(t, r)

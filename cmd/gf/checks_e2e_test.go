@@ -150,7 +150,14 @@ func TestExitChecks_FixBugRun_EndToEnd(t *testing.T) {
 
 	// Review and integration testing pass on their checks, the latter running the configured command.
 	v = r.expect("review", progress.AssignmentOpen, 0, 3)
-	assert.Equal(t, []string{"artifact-written", "formatted", "build-passes", "suite-passes"}, v.Current.Checks)
+	assert.Equal(t, []string{"artifact-written", "review-verdict-consistent", "formatted", "build-passes", "suite-passes"}, v.Current.Checks)
+	// A pass whose artifact lists a blocking finding is review's own work:
+	// review tries again; the work doesn't go to the fixer.
+	r.write(v.Current.Artifact, reviewArtifact("Changed the port.")+"## Blocking\n### B1 the port is hard-coded\n")
+	out = r.submitAsAgent(reviewPass...)
+	assert.Contains(t, out, "✗ review-verdict-consistent: "+v.Current.Artifact+": the verdict says Passed but ## Blocking lists B1")
+	v = r.expect("review", progress.AssignmentOpen, 1, 3)
+	assert.Equal(t, 0, v.Work.Reworks, "not a handover to the fixer")
 	r.workOnStage()
 	r.submitAsAgent(reviewPass...)
 	v = r.expect("integration-testing", progress.AssignmentOpen, 0, 3)

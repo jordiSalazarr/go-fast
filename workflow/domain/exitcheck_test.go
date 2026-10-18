@@ -19,7 +19,7 @@ func TestEachStageRequiresItsExitChecks(t *testing.T) {
 		domain.StageSpecify:   {domain.CheckArtifactWritten, domain.CheckSkeletonsOnly, domain.CheckSpecsFail},
 		domain.StageImplement: {domain.CheckArtifactWritten, domain.CheckBuildPasses, domain.CheckFormatted, domain.CheckSkeletonsFilled, domain.CheckSpecsPass,
 			domain.CheckSpecsUntouched, domain.CheckSuitePasses},
-		domain.StageReview:             {domain.CheckArtifactWritten, domain.CheckFormatted, domain.CheckBuildPasses, domain.CheckSuitePasses},
+		domain.StageReview:             {domain.CheckArtifactWritten, domain.CheckReviewVerdictConsistent, domain.CheckFormatted, domain.CheckBuildPasses, domain.CheckSuitePasses},
 		domain.StageIntegrationTesting: {domain.CheckArtifactWritten, domain.CheckIntegrationPasses},
 		domain.StageStressTesting:      {domain.CheckArtifactWritten, domain.CheckStressScriptsValid, domain.CheckNFRsMet},
 		domain.StageFixer:              {domain.CheckArtifactWritten},
@@ -71,7 +71,7 @@ func TestExitChecksHaveStableNames(t *testing.T) {
 		"specs-untouched", "suite-passes", "formatted", "integration-passes", "stress-scripts-valid", "nfrs-met",
 		"design-valid", "nfr-proposals-valid", "behaviour-delta", "specs-cover-slices", "event-model-valid", "grill-valid", "specs-cover-scenarios",
 		"plan-valid", "characterization-passes", "coverage-sufficient", "tests-untouched",
-		"baseline-recorded", "diagnosis-written", "skeletons-only", "skeletons-filled"}, names)
+		"baseline-recorded", "diagnosis-written", "skeletons-only", "skeletons-filled", "review-verdict-consistent"}, names)
 }
 
 func TestCheckFailed_NeedsASummary(t *testing.T) {
@@ -184,9 +184,9 @@ func TestExitCheckOutcome_GivenAFailedClaim_ThenCheckResultsAreIgnored(t *testin
 // escalates, so an earlier stage on the path that can change code must
 // require that check too. These checks are exempt:
 //   - artifact-written, stress-scripts-valid, design-valid,
-//     nfr-proposals-valid and behaviour-delta are about what the stage
-//     itself writes (its artifact, its k6 scripts, its design files), not
-//     about code;
+//     nfr-proposals-valid, behaviour-delta and review-verdict-consistent
+//     are about what the stage itself writes (its artifact, its k6
+//     scripts, its design files), not about code;
 //   - integration-passes and nfrs-met are integration and stress testing's
 //     own purposes: a failure there is a finding that needs rework, not a
 //     check implement forgot.
@@ -195,7 +195,8 @@ func TestEveryCheckAboutCode_IsRequiredBeforeTheStagesThatCantChangeCode(t *test
 		domain.CheckArtifactWritten: true, domain.CheckStressScriptsValid: true,
 		domain.CheckDesignValid: true, domain.CheckNFRProposalsValid: true, domain.CheckBehaviourDelta: true, domain.CheckEventModelValid: true,
 		domain.CheckGrillValid: true, domain.CheckPlanValid: true, domain.CheckBaselineRecorded: true, domain.CheckDiagnosisWritten: true,
-		domain.CheckIntegrationPasses: true, domain.CheckNFRsMet: true,
+		domain.CheckReviewVerdictConsistent: true,
+		domain.CheckIntegrationPasses:       true, domain.CheckNFRsMet: true,
 	}
 	// Code is any Go file, tests included: specify writes test code.
 	code := []domain.RepoPath{must(domain.NewRepoPath("/repo", "server/server.go")), must(domain.NewRepoPath("/repo", "server/server_test.go"))}
@@ -257,6 +258,11 @@ func TestClassifyFailure(t *testing.T) {
 			passedAll(domain.StageReview), domain.StageWorkFailure},
 		{"review: wrote outside its scope and claims a failure", domain.StageReview, domain.ClaimFailed(reasonOf("blocking finding")),
 			scopeOf(domain.StageReview, "server/server.go"), nil, domain.StageWorkFailure},
+		{"review: its artifact lists blocking findings yet it passed", domain.StageReview, domain.ClaimPassed(), scopeOf(domain.StageReview),
+			passedAll(domain.StageReview, checkFailed(domain.CheckReviewVerdictConsistent, "the verdict says Passed but ## Blocking lists B1")), domain.StageWorkFailure},
+		{"review: blocking findings and a failing suite", domain.StageReview, domain.ClaimPassed(), scopeOf(domain.StageReview),
+			passedAll(domain.StageReview, checkFailed(domain.CheckReviewVerdictConsistent, "the verdict says Passed but ## Blocking lists B1"),
+				checkFailed(domain.CheckSuitePasses, "1 test failed")), domain.StageWorkFailure},
 		{"review: suite fails", domain.StageReview, domain.ClaimPassed(), scopeOf(domain.StageReview),
 			passedAll(domain.StageReview, checkFailed(domain.CheckSuitePasses, "1 test failed")), domain.CodeFailure},
 		{"review: agent found a blocking problem", domain.StageReview, domain.ClaimFailed(reasonOf("blocking finding")),
