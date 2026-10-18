@@ -174,6 +174,19 @@ same names elsewhere (for example in your claude.ai account), turn those off,
 so the session and the agents only see the plugin's versions. To change a
 skill, edit it in `plugin/skills/<name>/SKILL.md`.
 
+**Every version is recorded.** When a stage agent starts, gf records which
+version of the agent's definition and of each skill it preloads instructed
+it; a skill loaded later with the Skill tool is recorded with its version
+too. A version is the SHA-256 of the skill's files (every file in its
+directory, dotfiles excepted) or of the agent's file, so editing a skill
+makes a new version on its own: there is no version number to bump. gf
+keeps a copy of each version in `.gofast/instructions/<version>/`, so the
+log's history stays readable after you change a skill or never commit the
+edit. `gf status` shows the current visit's versions, and `gf checks` verifies
+that every copy still matches its version. If gf can't find the plugin
+(`$CLAUDE_PLUGIN_ROOT` unset) or a skill comes from another plugin, it is
+recorded without a version.
+
 ---
 
 ## 5. Add the deny rules
@@ -537,6 +550,7 @@ gofast creates these in your repository:
 | `.gofast/works/<work>/` | **yes**, with your branch | the artifacts: what each stage did and why |
 | `<decisionsDir>/` (default `docs/decisions/`) | **yes**, with your branch | grill's decision documents, and the index gf generates |
 | `GLOSSARY.md`, `GLOSSARY-MAP.md`, `docs/adr/*.md` | **yes**, with your branch | the glossary and ADRs grill writes while it interviews you |
+| `.gofast/instructions/<version>/` | **yes**, with your branch | a copy of each version of the plugin's skills and agents that instructed a stage, written by gf's hooks; the event log names them by version |
 | `.gofast/runtime/`, `.gofast/gf.log`, `.gofast/events.lock` | no (already ignored) | local bookkeeping: baselines, check logs, stress runs, the log's seal, gf's diagnostic log |
 
 You can commit whenever you like, including mid-work. gofast compares each
@@ -578,6 +592,7 @@ change.
 | "skeletons-only: <file>: func <name> has logic" (or "panics", or "var <name> is not `var errSkeleton = …`") | A skeleton does more than declare. Its functions may only be empty or return zero values or `errSkeleton`; it may declare `errSkeleton` once per package. Specify tries again. |
 | "skeletons-filled: errSkeleton is still in <files>" | Implement left a skeleton unfilled. It tries again until no non-test Go file uses `errSkeleton`. |
 | "review-verdict-consistent: … the verdict says Passed but ## Blocking lists B1" | Review passed while its artifact lists blocking findings (or lacks `## Verdict`, `## Risk map` or `## Agreed behaviour`). Review tries again: with blocking findings it must submit `--failed`, which sends the work to the fixer. |
+| `gf checks` warns ".gofast/instructions/<version> changed after gf kept it" | A kept copy was edited, so it no longer matches the version the event log names. Restore it with git (`git checkout -- .gofast/instructions/<version>`). To change a skill, edit `plugin/skills/`, never a kept copy. |
 | `gf checks` warns "has uncommitted changes" | Commit `checks.json` / `nfrs.json` before starting work. |
 | "The baseline for '<stage>' is missing" | The work was started with an older gf or on another machine, or `git gc` pruned an old baseline. Run `gf abandon "<reason>"` and start the work again. |
 | "The exit-check configuration … is invalid" / "The NFRs … are invalid" | The message names the field. Fix the file; `gf checks` shows the result. |

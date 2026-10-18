@@ -177,6 +177,37 @@ The plugin's copies are the source of truth: turn off same-named copies
 elsewhere (for example in your claude.ai account), and edit the skills in
 `plugin/skills/`.
 
+## Instruction versions
+
+The event log records which text instructed every stage visit, so a work's
+history can be audited after the skills change.
+
+- **A version is a content hash.** A skill's version is the SHA-256 of a
+  manifest of its directory's files (dotfiles excepted), one
+  `<sha256>  <path>` line per file, sorted by path, as `sha256sum` prints
+  them; an agent definition's is the same over its one file. Any edit is a
+  new version; nothing needs bumping.
+- **When a stage agent starts**, a second SubagentStart hook,
+  `gf hook agent-start`, records `AgentStarted` (the agent, its definition's
+  version, `plugin.json`'s version and gf's build) and, for each skill its
+  frontmatter preloads, `SkillLoaded` with load `preloaded` and the skill's
+  version. Preloads never go through the Skill tool, so the PostToolUse hook
+  can't see them.
+- **A skill loaded with the Skill tool** is recorded by the PostToolUse hook
+  as before, now with load `invoked` and its version.
+- **Each version is kept** in `.gofast/instructions/<version>/` before it is
+  recorded, once, atomically. The copies are committed with the branch, are
+  never part of a stage visit's changes, and the guard denies agents' Bash
+  commands that mention `.gofast/instructions`. In a copy,
+  `find . -type f | sed 's|^\./||' | LC_ALL=C sort | xargs sha256sum | sha256sum`
+  prints the directory's name; `gf checks` verifies every copy that way.
+- **Unversioned**: another plugin's skills, and anything recorded while
+  `$CLAUDE_PLUGIN_ROOT` is unset. Loads recorded before versions existed
+  read as invoked and unversioned.
+
+`gf status` lists the current visit's versions (`instructions` in
+`--json`), and its skills once each, preloads included.
+
 ## Observability for discovery and the fixer
 
 Discovery and the fixer have no `tools` field, so they inherit the session's
@@ -597,8 +628,9 @@ Scopes are enforced twice:
    `--failed`. The failed attempt uses one of the stage's attempts as usual.
    Committing doesn't hide a change: the comparison is with the stage's start,
    so the agent has to undo it. gf's own committed files
-   (`.gofast/events.jsonl`, `.gofast/.gitignore`, `.gofast/.gitattributes`)
-   are left out of the diff; the tamper check covers the log.
+   (`.gofast/events.jsonl`, `.gofast/.gitignore`, `.gofast/.gitattributes`,
+   and the kept versions in `.gofast/instructions/`) are left out of the
+   diff; the tamper check covers the log, and `gf checks` the kept versions.
 
 If a stage has no baseline (it began before this check existed, or on
 another machine), gf takes one when the next stage agent starts or at
@@ -612,8 +644,9 @@ checks can't work without the baseline the stage began with, so a
 Abandon the work and start it again on this machine.
 
 The guard also denies any Bash command that mentions `GF_ACTOR`,
-`events.jsonl`, `events.lock`, `gf.log`, `.gofast/event`, `.gofast/gf` or
-`.gofast/runtime` (which also catches globs like `.gofast/event?.jsonl`), and
+`events.jsonl`, `events.lock`, `gf.log`, `.gofast/event`, `.gofast/gf`,
+`.gofast/runtime` or `.gofast/instructions` (which also catches globs like
+`.gofast/event?.jsonl`), and
 any that clears the environment: `env -i`, `env --ignore-environment`,
 `env -u`, `unset`.
 
