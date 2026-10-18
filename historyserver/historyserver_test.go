@@ -268,3 +268,106 @@ func get(t *testing.T, u string, v any) {
 	require.Equal(t, 200, resp.StatusCode)
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(v))
 }
+
+// twoVersions holds two works whose discovery visits preloaded different
+// versions of the discovery skill, both kept.
+func twoVersions(t *testing.T) (base, v1, v2 string) {
+	t.Helper()
+	client, _, base := serve(t, token)
+	ctx := context.Background()
+	v1, v2 = hash("v1 manifest"), hash("v2 manifest")
+	loaded := func(id, work string, n int, version string) string {
+		return line(id, "observations-"+work, n, "SkillLoaded", `{"workId":"`+work+`","stage":"discovery","visit":1,"skill":"discovery","load":"preloaded","sha256":"`+version+`"}`)
+	}
+	events := []string{
+		line("s1", "work-w-1", 1, "WorkStarted", `{"workId":"w-1","workType":"fix-bug","description":"Login button does nothing","branch":"main"}`),
+		line("a1", "observations-w-1", 1, "AgentStarted", `{"workId":"w-1","stage":"discovery","visit":1,"agent":"gofast:discovery","sha256":"`+hash("agent")+`"}`),
+		loaded("l1", "w-1", 2, v1),
+		line("c1", "work-w-1", 2, "WorkCompleted", `{"workId":"w-1"}`),
+		line("s2", "work-w-2", 1, "WorkStarted", `{"workId":"w-2","workType":"new-feature","description":"Wallets","branch":"wallets"}`),
+		loaded("l2", "w-2", 1, v2),
+		line("l3", "observations-w-2", 2, "SkillLoaded", `{"workId":"w-2","stage":"discovery","visit":1,"skill":"discovery"}`),
+	}
+	_, err := client.SendEvents(ctx, wire.Events{Events: events})
+	require.NoError(t, err)
+	for path, content := range map[string]string{
+		".gofast/instructions/" + v1 + "/SKILL.md":        "# Discovery\n\nRead the code.\n",
+		".gofast/instructions/" + v1 + "/references/a.md": "same\n",
+		".gofast/instructions/" + v2 + "/SKILL.md":        "# Discovery\n\nRead the code and the logs.\n",
+		".gofast/instructions/" + v2 + "/references/a.md": "same\n",
+		".gofast/instructions/" + v2 + "/references/b.md": "new\n",
+	} {
+		require.NoError(t, client.PutBlob(ctx, hash(content), []byte(content)))
+		_, err := client.RecordFiles(ctx, []wire.File{{Path: path, SHA256: hash(content), Size: int64(len(content))}})
+		require.NoError(t, err)
+	}
+	return base, v1, v2
+}
+
+func TestServer_FiltersTheWorks(t *testing.T) {
+	base, _, _ := twoVersions(t)
+	for query, want := range map[string][]string{
+		"":                            {"w-1", "w-2"},
+		"?status=completed":           {"w-1"},
+		"?type=new-feature":           {"w-2"},
+		"?branch=main":                {"w-1"},
+		"?q=LOGIN":                    {"w-1"},
+		"?status=active&type=fix-bug": {},
+	} {
+		var works wire.Works
+		get(t, base+"/v1/projects/wallets/works"+query, &works)
+		ids := []string{}
+		for _, w := range works.Works {
+			ids = append(ids, w.ID)
+		}
+		assert.Equal(t, want, ids, query)
+	}
+}
+
+func TestServer_SaysWhichVersionInstructedWhichVisit(t *testing.T) {
+	base, v1, v2 := twoVersions(t)
+
+	var names wire.InstructionNames
+	get(t, base+"/v1/projects/wallets/instructions", &names)
+	require.Len(t, names.Names, 2)
+	assert.Equal(t, "gofast:discovery", names.Names[0].Name)
+	assert.Equal(t, wire.InstructionName{Name: "discovery", Kind: "skill", Versions: 3, LastSeen: names.Names[1].LastSeen}, names.Names[1], "two versions and an unversioned load")
+
+	var skill wire.Instructions
+	get(t, base+"/v1/projects/wallets/instructions?name=discovery", &skill)
+	require.Len(t, skill.Versions, 3)
+	assert.Equal(t, v1, skill.Versions[0].Version)
+	assert.Equal(t, []string{"w-1"}, uses(skill.Versions[0]))
+	assert.Len(t, skill.Versions[0].Files, 2)
+	assert.Equal(t, v2, skill.Versions[1].Version)
+	assert.Equal(t, []string{"w-2"}, uses(skill.Versions[1]))
+	assert.Equal(t, "", skill.Versions[2].Version)
+	assert.Equal(t, "invoked", skill.Versions[2].Uses[0].Load)
+
+	req, _ := http.NewRequest(http.MethodGet, base+"/v1/projects/wallets/instructions?name=postgres", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	resp.Body.Close()
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+}
+
+func TestServer_DiffsTwoKeptVersions(t *testing.T) {
+	base, v1, v2 := twoVersions(t)
+	var diff wire.VersionDiff
+	get(t, base+"/v1/projects/wallets/instructions/"+v1+"/diff/"+v2, &diff)
+	require.Len(t, diff.Files, 3)
+	assert.Equal(t, wire.FileDiff{Path: "SKILL.md", Status: "changed", Unified: "--- " + v1[:12] + "/SKILL.md\n+++ " + v2[:12] + "/SKILL.md\n" +
+		"@@ -1,3 +1,3 @@\n # Discovery\n \n-Read the code.\n+Read the code and the logs.\n"}, diff.Files[0])
+	assert.Equal(t, wire.FileDiff{Path: "references/a.md", Status: "same"}, diff.Files[1])
+	assert.Equal(t, "added", diff.Files[2].Status)
+	assert.Contains(t, diff.Files[2].Unified, "+new")
+}
+
+func uses(v wire.InstructionVersion) []string {
+	var out []string
+	for _, u := range v.Uses {
+		out = append(out, u.Work)
+	}
+	return out
+}

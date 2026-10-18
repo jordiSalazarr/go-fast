@@ -3,6 +3,7 @@ module github.com/jordiSalazarr/go-fast
 go 1.24.2
 
 require (
+	github.com/pmezard/go-difflib v1.0.0
 	github.com/spf13/cobra v1.10.1
 	github.com/stretchr/testify v1.12.1
 	go.yaml.in/yaml/v3 v3.0.5

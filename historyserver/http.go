@@ -87,6 +87,8 @@ func Handler(store *Store, projects map[string]Project, logger *slog.Logger) htt
 	mux.HandleFunc("POST "+p+"/events", h.auth(write, h.appendEvents))
 	mux.HandleFunc("GET "+p+"/works", h.auth(read, h.works))
 	mux.HandleFunc("GET "+p+"/works/{id}", h.auth(read, h.timeline))
+	mux.HandleFunc("GET "+p+"/instructions", h.auth(read, h.instructions))
+	mux.HandleFunc("GET "+p+"/instructions/{from}/diff/{to}", h.auth(read, h.diff))
 	return mux
 }
 
@@ -218,7 +220,8 @@ func (h *handler) works(w http.ResponseWriter, r *http.Request, project string) 
 		h.problem(w, r, err)
 		return
 	}
-	reply(w, http.StatusOK, works)
+	q := r.URL.Query()
+	reply(w, http.StatusOK, FilterWorks(works, WorkFilter{Status: q.Get("status"), Type: q.Get("type"), Branch: q.Get("branch"), Query: q.Get("q")}))
 }
 
 func (h *handler) timeline(w http.ResponseWriter, r *http.Request, project string) {
@@ -230,6 +233,47 @@ func (h *handler) timeline(w http.ResponseWriter, r *http.Request, project strin
 		h.problem(w, r, refuse(http.StatusNotFound, wire.ProblemNotFound, "no work %s", r.PathValue("id")))
 	default:
 		reply(w, http.StatusOK, t)
+	}
+}
+
+// instructions lists the skills and agents the history names, or, with
+// ?name=, one's versions and the stage visits each instructed.
+func (h *handler) instructions(w http.ResponseWriter, r *http.Request, project string) {
+	name := r.URL.Query().Get("name")
+	if name == "" {
+		names, err := h.store.InstructionNames(r.Context(), project)
+		if err != nil {
+			h.problem(w, r, err)
+			return
+		}
+		reply(w, http.StatusOK, names)
+		return
+	}
+	out, ok, err := h.store.Instructions(r.Context(), project, name)
+	switch {
+	case err != nil:
+		h.problem(w, r, err)
+	case !ok:
+		h.problem(w, r, refuse(http.StatusNotFound, wire.ProblemNotFound, "the history names no skill or agent %q", name))
+	default:
+		reply(w, http.StatusOK, out)
+	}
+}
+
+func (h *handler) diff(w http.ResponseWriter, r *http.Request, project string) {
+	from, to := r.PathValue("from"), r.PathValue("to")
+	if !sha256Hex.MatchString(from) || !sha256Hex.MatchString(to) {
+		h.problem(w, r, refuse(http.StatusBadRequest, wire.ProblemInvalid, "versions are SHA-256s in lowercase hex"))
+		return
+	}
+	out, ok, err := h.store.Diff(r.Context(), project, from, to)
+	switch {
+	case err != nil:
+		h.problem(w, r, err)
+	case !ok:
+		h.problem(w, r, refuse(http.StatusNotFound, wire.ProblemNotFound, "the server holds the files of neither version"))
+	default:
+		reply(w, http.StatusOK, out)
 	}
 }
 

@@ -10,6 +10,11 @@
 //	POST /v1/projects/{project}/events            ← Events → EventsAccepted (409 Problem "diverged", "tampered" or "gap")
 //	GET  /v1/projects/{project}/works             → Works
 //	GET  /v1/projects/{project}/works/{id}        → Timeline
+//	GET  /v1/projects/{project}/instructions      → InstructionNames; ?name= → Instructions
+//	GET  /v1/projects/{project}/instructions/{a}/diff/{b} → VersionDiff
+//
+// The works list takes ?status=, ?type=, ?branch= and ?q= (in the
+// description, ignoring case). The GET endpoints accept a read token.
 //
 // Blobs come before the files that name them, and files before events, so
 // the server never holds an event whose files are missing. Every write is
@@ -190,4 +195,58 @@ type FileLink struct {
 	SHA256 string `json:"sha256"`
 	Size   int64  `json:"size"`
 	URL    string `json:"url"`
+}
+
+// InstructionNames are the skills and agents the project's history names,
+// by name.
+type InstructionNames struct {
+	Names []InstructionName `json:"names"`
+}
+
+type InstructionName struct {
+	Name     string    `json:"name"`
+	Kind     string    `json:"kind"` // "agent" or "skill"
+	Versions int       `json:"versions"`
+	LastSeen time.Time `json:"lastSeen"`
+}
+
+// Instructions are one skill's or agent's versions, oldest first, and the
+// stage visits each instructed.
+type Instructions struct {
+	Name     string               `json:"name"`
+	Kind     string               `json:"kind"`
+	Versions []InstructionVersion `json:"versions"`
+}
+
+type InstructionVersion struct {
+	// Version is the SHA-256; empty for loads recorded unversioned.
+	Version   string           `json:"version"`
+	FirstSeen time.Time        `json:"firstSeen"`
+	Files     []FileLink       `json:"files"`
+	Uses      []InstructionUse `json:"uses"`
+}
+
+// InstructionUse is a stage visit a version instructed.
+type InstructionUse struct {
+	Work  string    `json:"work"`
+	Stage string    `json:"stage"`
+	Visit int       `json:"visit"`
+	Load  string    `json:"load,omitempty"`
+	At    time.Time `json:"at"`
+}
+
+// VersionDiff compares two kept versions file by file.
+type VersionDiff struct {
+	From  string     `json:"from"`
+	To    string     `json:"to"`
+	Files []FileDiff `json:"files"`
+}
+
+type FileDiff struct {
+	// Path is relative to the version's directory, e.g. "SKILL.md".
+	Path string `json:"path"`
+	// Status is "added", "removed", "changed" or "same".
+	Status string `json:"status"`
+	// Unified is the unified diff of a changed text file; empty otherwise.
+	Unified string `json:"unified,omitempty"`
 }
