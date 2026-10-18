@@ -6,6 +6,7 @@ require (
 	github.com/pmezard/go-difflib v1.0.0
 	github.com/spf13/cobra v1.10.1
 	github.com/stretchr/testify v1.12.1
+	github.com/yuin/goldmark v1.8.6
 	go.yaml.in/yaml/v3 v3.0.5
 	modernc.org/sqlite v1.40.1
 )

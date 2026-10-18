@@ -14,6 +14,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/jordiSalazarr/go-fast/workflow/remote/wire"
 )
@@ -87,9 +88,13 @@ func Handler(store *Store, projects map[string]Project, logger *slog.Logger) htt
 	mux.HandleFunc("POST "+p+"/events", h.auth(write, h.appendEvents))
 	mux.HandleFunc("GET "+p+"/works", h.auth(read, h.works))
 	mux.HandleFunc("GET "+p+"/works/{id}", h.auth(read, h.timeline))
+	mux.HandleFunc("GET "+p+"/blobs/{sha256}/html", h.auth(read, h.renderBlob))
 	mux.HandleFunc("GET "+p+"/instructions", h.auth(read, h.instructions))
 	mux.HandleFunc("GET "+p+"/instructions/{from}/diff/{to}", h.auth(read, h.diff))
-	return mux
+	viewer := viewerHandler()
+	mux.Handle("GET /{$}", viewer)
+	mux.Handle("GET /viewer/", http.StripPrefix("/viewer", viewer))
+	return secured(mux)
 }
 
 type handler struct {
@@ -163,8 +168,14 @@ func (h *handler) getBlob(w http.ResponseWriter, r *http.Request, project string
 	case !ok:
 		h.problem(w, r, refuse(http.StatusNotFound, wire.ProblemNotFound, "no blob %s", sha))
 	default:
-		w.Header().Set("Content-Type", "application/octet-stream")
-		w.Header().Set("X-Content-Type-Options", "nosniff")
+		// Never rendered by the browser: text as plain text, anything else
+		// as bytes.
+		contentType := "application/octet-stream"
+		if utf8.Valid(content) {
+			contentType = "text/plain; charset=utf-8"
+		}
+		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("Content-Disposition", "inline")
 		_, _ = w.Write(content)
 	}
 }
