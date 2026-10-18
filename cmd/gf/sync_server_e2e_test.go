@@ -40,7 +40,7 @@ func newHistoryServer(t *testing.T) *historyServer {
 	require.NoError(t, err)
 	t.Cleanup(func() { store.Close() })
 	sum := sha256Hex(syncToken)
-	inner := historyserver.Handler(store, map[string]historyserver.Project{"wallets": {TokenSHA256: sum}}, nil)
+	inner := historyserver.Handler(store, map[string]historyserver.Project{"wallets": {TokenSHA256: sum, ReadTokenSHA256s: []string{sha256Hex("r3ad")}}}, nil)
 	h := &historyServer{store: store}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h.mu.Lock()
@@ -276,4 +276,14 @@ func TestSync_TheSameWorkAdvancedInTwoClones_IsRefusedForTheSecond(t *testing.T)
 	assert.Equal(t, 1, res.code)
 	assert.Regexp(t, `Refused: stream assignment-w-[0-9a-f]+-discovery-1 at version \d+: `, res.stdout)
 	assert.Less(t, server.heldEvents(t), a.events()+b.events())
+}
+
+func TestSync_WithAReadToken_SaysItNeedsTheSyncToken(t *testing.T) {
+	server := newHistoryServer(t)
+	r := syncingRepo(t, server)
+	r.gf("start", "--type", "fix-bug", "login button does nothing")
+	res := r.run(map[string]string{"GOFAST_SYNC_TOKEN": "r3ad"}, "sync")
+	assert.Equal(t, 1, res.code)
+	assert.Equal(t, "$GOFAST_SYNC_TOKEN is a read token of project wallets: gf sync needs the project's sync token.\n", res.stderr)
+	assert.Zero(t, server.heldEvents(t))
 }

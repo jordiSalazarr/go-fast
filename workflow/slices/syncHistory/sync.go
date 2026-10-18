@@ -17,6 +17,7 @@ import (
 	"github.com/jordiSalazarr/go-fast/workflow/exitchecks"
 	"github.com/jordiSalazarr/go-fast/workflow/instructions"
 	"github.com/jordiSalazarr/go-fast/workflow/remote"
+	"github.com/jordiSalazarr/go-fast/workflow/remote/wire"
 )
 
 // Error is a sync that can't start, or didn't finish, said for the owner.
@@ -108,7 +109,9 @@ func explain(err error, c remote.Config) error {
 	case errors.As(err, &refused):
 		return &Error{Message: fmt.Sprintf("%d streams were not synced; the rest were. A refused stream's history differs from the server's: "+
 			"compare this clone's .gofast/events.jsonl with the server's timeline of that work before syncing it again.", len(refused.Refused))}
-	case errors.As(err, &problem) && problem.Problem.Error == "unauthorized":
+	case errors.As(err, &problem) && problem.Problem.Error == wire.ProblemForbidden:
+		return &Error{Message: fmt.Sprintf("$%s is a read token of project %s: gf sync needs the project's sync token.", remote.TokenEnv, c.Project)}
+	case errors.As(err, &problem) && problem.Problem.Error == wire.ProblemUnauthorized:
 		return &Error{Message: fmt.Sprintf("The history server %s refused the token for project %s. Check $%s.", c.Server, c.Project, remote.TokenEnv)}
 	case errors.As(err, &problem):
 		return &Error{Message: fmt.Sprintf("The history server %s refused the sync: %s. Run `gf sync` again; it resumes where it stopped.", c.Server, problem.Problem.Message)}

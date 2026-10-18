@@ -87,7 +87,8 @@ type EventsAccepted struct {
 // Problem is a refused request. A refused batch of events or files changes
 // nothing.
 type Problem struct {
-	// Error is the problem's kind: "unauthorized", "invalid",
+	// Error is the problem's kind: "unauthorized", "forbidden" (a read
+	// token writing), "invalid",
 	// "missing-blob", "diverged" (the server holds another event at this
 	// stream version), "tampered" (it holds this event ID with other
 	// content), "gap" (the stream's previous version is missing).
@@ -102,6 +103,7 @@ type Problem struct {
 // Problem kinds.
 const (
 	ProblemUnauthorized = "unauthorized"
+	ProblemForbidden    = "forbidden"
 	ProblemInvalid      = "invalid"
 	ProblemMissingBlob  = "missing-blob"
 	ProblemDiverged     = "diverged"

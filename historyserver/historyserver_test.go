@@ -36,7 +36,7 @@ func serve(t *testing.T, token string) (*remote.Client, *historyserver.Store, st
 	store, err := historyserver.Open(filepath.Join(t.TempDir(), "history.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { store.Close() })
-	srv := httptest.NewServer(historyserver.Handler(store, map[string]historyserver.Project{"wallets": {TokenSHA256: hash("t0ken")}}, nil))
+	srv := httptest.NewServer(historyserver.Handler(store, map[string]historyserver.Project{"wallets": {TokenSHA256: hash("t0ken"), ReadTokenSHA256s: []string{hash("r3ad")}}}, nil))
 	t.Cleanup(srv.Close)
 	u, err := url.Parse(srv.URL)
 	require.NoError(t, err)
@@ -80,6 +80,31 @@ func TestServer_WithoutTheProjectsToken_RefusesEverything(t *testing.T) {
 	assert.Equal(t, wire.ProblemUnauthorized, refusal(t, err).Error, "an unknown project looks the same as a wrong token")
 	_, err = other.Streams(context.Background())
 	assert.NoError(t, err)
+}
+
+func TestServer_AReadTokenReads_ButNeverWrites(t *testing.T) {
+	writer, _, _ := serve(t, token)
+	ctx := context.Background()
+	_, err := writer.SendEvents(ctx, wire.Events{Events: []string{started}})
+	require.NoError(t, err)
+
+	reader, _, base := serve(t, "r3ad")
+	_, err = reader.Streams(ctx)
+	require.NoError(t, err)
+	_, err = reader.SendEvents(ctx, wire.Events{Events: []string{started}})
+	p := refusal(t, err)
+	assert.Equal(t, wire.ProblemForbidden, p.Error)
+	assert.Equal(t, "a read token can't write: gf sync uses the project's sync token", p.Message)
+	assert.Equal(t, wire.ProblemForbidden, refusal(t, reader.PutBlob(ctx, hash("x"), []byte("x"))).Error)
+	_, err = reader.RecordFiles(ctx, nil)
+	assert.Equal(t, wire.ProblemForbidden, refusal(t, err).Error)
+
+	req, _ := http.NewRequest(http.MethodGet, base+"/v1/projects/wallets/works", nil)
+	req.Header.Set("Authorization", "Bearer r3ad")
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }
 
 func TestServer_AppendsEvents_Idempotently_AndKeepsEachStreamsDigest(t *testing.T) {
@@ -228,6 +253,9 @@ func TestLoadConfig(t *testing.T) {
 	require.NoError(t, os.WriteFile(path, []byte(`{"listen": ":8080", "db": "h.db", "projects": {"wallets": {"tokenSha256": "t0ken"}}}`), 0o644))
 	_, err = historyserver.LoadConfig(path)
 	assert.ErrorContains(t, err, "tokenSha256 must be the token's SHA-256")
+	require.NoError(t, os.WriteFile(path, []byte(`{"listen": ":8080", "db": "h.db", "projects": {"wallets": {"tokenSha256": "`+hash(token)+`", "readTokenSha256s": ["r3ad"]}}}`), 0o644))
+	_, err = historyserver.LoadConfig(path)
+	assert.ErrorContains(t, err, "each of readTokenSha256s must be a token's SHA-256")
 }
 
 func get(t *testing.T, u string, v any) {
