@@ -38,13 +38,28 @@ const (
 	typeBaselineMeasured          = "BaselineMeasured"
 	typeWorkFoundNothingToImprove = "WorkFoundNothingToImprove"
 	typeSkillLoaded               = "SkillLoaded"
+	typeAgentStarted              = "AgentStarted"
 )
 
+// skillLoadedV1: loads recorded before gf told them apart have no load,
+// and none has a version; they were all invoked.
 type skillLoadedV1 struct {
-	WorkID string `json:"workId"`
-	Stage  string `json:"stage"`
-	Visit  int    `json:"visit"`
-	Skill  string `json:"skill"`
+	WorkID  string `json:"workId"`
+	Stage   string `json:"stage"`
+	Visit   int    `json:"visit"`
+	Skill   string `json:"skill"`
+	Load    string `json:"load,omitempty"`
+	Version string `json:"sha256,omitempty"`
+}
+
+type agentStartedV1 struct {
+	WorkID        string `json:"workId"`
+	Stage         string `json:"stage"`
+	Visit         int    `json:"visit"`
+	Agent         string `json:"agent"`
+	Version       string `json:"sha256,omitempty"`
+	PluginVersion string `json:"pluginVersion,omitempty"`
+	GfVersion     string `json:"gfVersion,omitempty"`
 }
 
 type envelope struct {
@@ -360,6 +375,12 @@ func encodeEvent(e domain.Event) (eventType string, stream Stream, payload any, 
 	case domain.SkillLoaded:
 		return typeSkillLoaded, ObservationsStream(e.WorkID), skillLoadedV1{
 			WorkID: e.WorkID.String(), Stage: e.Stage.String(), Visit: e.Visit.Int(), Skill: e.Skill,
+			Load: e.Load.Name(), Version: e.Version.String(),
+		}, nil
+	case domain.AgentStarted:
+		return typeAgentStarted, ObservationsStream(e.WorkID), agentStartedV1{
+			WorkID: e.WorkID.String(), Stage: e.Stage.String(), Visit: e.Visit.Int(), Agent: e.Agent,
+			Version: e.Version.String(), PluginVersion: e.PluginVersion, GfVersion: e.GfVersion,
 		}, nil
 	case domain.AssignmentOpened:
 		return typeAssignmentOpened, AssignmentStream(e.AssignmentID), assignmentOpenedV1{
@@ -497,7 +518,20 @@ func decodeEvent(eventType string, payload json.RawMessage) (domain.Event, Strea
 		if p.Skill == "" {
 			d.keep(errors.New("skill must not be empty"))
 		}
-		event = domain.SkillLoaded{WorkID: d.workID(p.WorkID), Stage: d.stage(p.Stage), Visit: d.visit(p.Visit), Skill: p.Skill}
+		event = domain.SkillLoaded{
+			WorkID: d.workID(p.WorkID), Stage: d.stage(p.Stage), Visit: d.visit(p.Visit), Skill: p.Skill,
+			Load: d.skillLoad(p.Load), Version: d.version(p.Version),
+		}
+	case typeAgentStarted:
+		var p agentStartedV1
+		d.unmarshal(payload, &p)
+		if p.Agent == "" {
+			d.keep(errors.New("agent must not be empty"))
+		}
+		event = domain.AgentStarted{
+			WorkID: d.workID(p.WorkID), Stage: d.stage(p.Stage), Visit: d.visit(p.Visit), Agent: p.Agent,
+			Version: d.version(p.Version), PluginVersion: p.PluginVersion, GfVersion: p.GfVersion,
+		}
 	case typeAssignmentOpened:
 		var p assignmentOpenedV1
 		d.unmarshal(payload, &p)
@@ -652,6 +686,20 @@ func (d *decoder) repoPath(s string) domain.RepoPath {
 
 func (d *decoder) contentHash(s string) domain.ContentHash {
 	v, err := domain.ParseContentHash(s)
+	d.keep(err)
+	return v
+}
+
+// version is an instructions version; empty when gf could not read it.
+func (d *decoder) version(s string) domain.InstructionsVersion {
+	if s == "" {
+		return domain.InstructionsVersion{}
+	}
+	return d.contentHash(s)
+}
+
+func (d *decoder) skillLoad(s string) domain.SkillLoad {
+	v, err := domain.ParseSkillLoad(s)
 	d.keep(err)
 	return v
 }

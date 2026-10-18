@@ -79,6 +79,12 @@ func allEvents() []domain.Event {
 		domain.StressDecided{WorkID: workID, Decision: forcedInclude.Decision(), Reason: forcedInclude.Reason(), ForcedBy: forcedInclude.ForcedBy(), Owner: owner},
 		domain.AssignmentCancelled{AssignmentID: assignmentID, Reason: reason},
 		domain.SkillLoaded{WorkID: workID, Stage: domain.StageOptimize, Visit: domain.FirstVisit(), Skill: "concurrency"},
+		domain.SkillLoaded{WorkID: workID, Stage: domain.StageSpecify, Visit: domain.FirstVisit(), Skill: "specify",
+			Load: domain.SkillPreloaded, Version: domain.HashOf([]byte("specify manifest"))},
+		domain.SkillLoaded{WorkID: workID, Stage: domain.StageSpecify, Visit: domain.FirstVisit(), Skill: "other:pdf", Load: domain.SkillInvoked},
+		domain.AgentStarted{WorkID: workID, Stage: domain.StageSpecify, Visit: domain.FirstVisit(), Agent: "gofast:specify",
+			Version: domain.HashOf([]byte("specify agent manifest")), PluginVersion: "0.1.0", GfVersion: "v0.4.0"},
+		domain.AgentStarted{WorkID: workID, Stage: domain.StageSpecify, Visit: domain.FirstVisit(), Agent: "gofast:specify"},
 		domain.AssignmentHandedToFixer{AssignmentID: assignmentID, WorkID: workID, Stage: domain.StageReview, Visit: domain.FirstVisit(), Attempt: must(domain.NewAttempt(2)), Reason: reason},
 	}
 }
@@ -138,6 +144,27 @@ func TestCodec_AWorkStartedWithoutAPathVersion_FollowsV1(t *testing.T) {
 
 	_, _, err = decodeEvent("WorkStarted", []byte(`{"workId":"w1","workType":"fix-bug","pathVersion":9,"description":"x","branch":"main"}`))
 	assert.ErrorIs(t, err, domain.ErrUnknownPathVersion)
+}
+
+// A skill load recorded before gf told loads apart has no load and no
+// version: it was invoked, and is written back as it was.
+func TestCodec_ASkillLoadedWithoutALoad_WasInvoked(t *testing.T) {
+	payload := `{"workId":"w1","stage":"optimize","visit":1,"skill":"concurrency"}`
+	e, _, err := decodeEvent("SkillLoaded", []byte(payload))
+	require.NoError(t, err)
+	loaded := e.(domain.SkillLoaded)
+	assert.Equal(t, domain.SkillLoad{}, loaded.Load)
+	assert.Equal(t, "invoked", loaded.Load.String())
+	assert.True(t, loaded.Version.IsZero())
+
+	_, _, p, err := encodeEvent(e)
+	require.NoError(t, err)
+	assert.JSONEq(t, payload, string(must(json.Marshal(p))))
+
+	_, _, err = decodeEvent("SkillLoaded", []byte(`{"workId":"w1","stage":"optimize","visit":1,"skill":"concurrency","load":"guessed"}`))
+	assert.ErrorIs(t, err, domain.ErrInvalidInput)
+	_, _, err = decodeEvent("AgentStarted", []byte(`{"workId":"w1","stage":"specify","visit":1,"agent":"gofast:specify","sha256":"abc"}`))
+	assert.ErrorIs(t, err, domain.ErrInvalidInput)
 }
 
 func TestCodec_RejectsEventOnTheWrongStream(t *testing.T) {

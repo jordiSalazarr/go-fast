@@ -119,14 +119,17 @@ func (e *LockedSkillError) Error() string {
 
 func (e *LockedSkillError) Unwrap() error { return ErrSkillLocked }
 
-// SkillLoaded observes a skill loaded during a stage visit. It is no
-// aggregate's event: it protects no invariant, and lives on the work's
+// SkillLoaded observes a skill loaded during a stage visit: how it was
+// loaded, and the version loaded (zero when gf could not read it). It is
+// no aggregate's event: it protects no invariant, and lives on the work's
 // observations stream.
 type SkillLoaded struct {
-	WorkID WorkID
-	Stage  Stage
-	Visit  Visit
-	Skill  string
+	WorkID  WorkID
+	Stage   Stage
+	Visit   Visit
+	Skill   string
+	Load    SkillLoad
+	Version InstructionsVersion
 }
 
 func (SkillLoaded) isEvent() {}
