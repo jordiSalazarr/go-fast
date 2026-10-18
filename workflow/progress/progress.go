@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/jordiSalazarr/go-fast/workflow/domain"
@@ -310,9 +311,26 @@ type CurrentView struct {
 	// specify must cover with Test<SliceName> specs; specify on paths with
 	// design only.
 	SlicesNeedingSpecs []string `json:"slicesNeedingSpecs,omitempty"`
-	// SkillsLoaded are the skills loaded during this stage visit, in order;
-	// absent when none was.
+	// SkillsLoaded are the skills loaded during this stage visit, preloaded
+	// or invoked, each once, in order; absent when none was.
 	SkillsLoaded []string `json:"skillsLoaded,omitempty"`
+	// Instructions are the versions of what instructed this stage visit, in
+	// the order they were recorded: each agent start and each skill load.
+	Instructions []InstructionView `json:"instructions,omitempty"`
+}
+
+// InstructionView is one recorded version of an agent definition or a
+// skill.
+type InstructionView struct {
+	// Kind is "agent" or "skill".
+	Kind string `json:"kind"`
+	Name string `json:"name"`
+	// Load is how a skill was loaded: "preloaded" or "invoked"; empty for
+	// an agent.
+	Load string `json:"load,omitempty"`
+	// Version is the version's SHA-256, kept under .gofast/instructions/;
+	// empty when gf could not read it.
+	Version string `json:"version,omitempty"`
 }
 
 // StressView is what the current stage needs to know about stress testing.
@@ -656,7 +674,7 @@ func Read(log Reader, branch domain.Branch, facts Facts) (View, error) {
 		current.Assignment, current.AttemptsUsed, current.Budget = describeAssignment(state)
 	}
 	current.LastProblem = lastProblem(history.Records(eventlog.AssignmentStream(assignmentID)))
-	current.SkillsLoaded = skillsLoaded(history, work)
+	current.SkillsLoaded, current.Instructions = instructionsOf(history, work)
 	if stage == domain.StageSpecify && work.Path().Includes(domain.StageGrill) {
 		current.ScenariosToCover, current.UncoveredScenarios = scenarioCoverage(history, work, facts)
 	}
@@ -1375,6 +1393,9 @@ func RenderText(w io.Writer, v View) {
 	if len(c.SkillsLoaded) > 0 {
 		fmt.Fprintf(w, "Skills loaded this visit: %s\n", strings.Join(c.SkillsLoaded, ", "))
 	}
+	if versions := describeVersions(c.Instructions); versions != "" {
+		fmt.Fprintf(w, "Instruction versions this visit: %s\n", versions)
+	}
 	if p := c.LastProblem; p != nil {
 		label := "Last failure"
 		if p.Kind == ProblemRejection {
@@ -1512,15 +1533,26 @@ func baselineViews(baseline []domain.NFRMeasurement, frozen []domain.FrozenScrip
 	return views
 }
 
-// skillsLoaded are the skills loaded during the work's current stage visit.
-func skillsLoaded(history eventlog.History, work domain.ActiveWork) []string {
-	var skills []string
+// instructionsOf are the skills loaded during the work's current stage
+// visit, each once, and every version recorded for it.
+func instructionsOf(history eventlog.History, work domain.ActiveWork) (skills []string, versions []InstructionView) {
 	for _, r := range history.Records(eventlog.ObservationsStream(work.ID())) {
-		if e, ok := r.Event.(domain.SkillLoaded); ok && e.Stage == work.CurrentStage() && e.Visit == work.CurrentVisit() {
-			skills = append(skills, e.Skill)
+		switch e := r.Event.(type) {
+		case domain.SkillLoaded:
+			if e.Stage != work.CurrentStage() || e.Visit != work.CurrentVisit() {
+				continue
+			}
+			if !slices.Contains(skills, e.Skill) {
+				skills = append(skills, e.Skill)
+			}
+			versions = append(versions, InstructionView{Kind: "skill", Name: e.Skill, Load: e.Load.String(), Version: e.Version.String()})
+		case domain.AgentStarted:
+			if e.Stage == work.CurrentStage() && e.Visit == work.CurrentVisit() {
+				versions = append(versions, InstructionView{Kind: "agent", Name: e.Agent, Version: e.Version.String()})
+			}
 		}
 	}
-	return skills
+	return skills, versions
 }
 
 // lastFoundNothingToImprove is the baseline of the branch's last work, when
@@ -1575,4 +1607,24 @@ func againstBaseline(baseline []domain.NFRMeasurement, results []exitchecks.Stre
 		}
 	}
 	return out
+}
+
+// describeVersions names each agent and skill version once, by its
+// version's first 12 hex digits, or "unversioned".
+func describeVersions(views []InstructionView) string {
+	var parts []string
+	for _, v := range views {
+		version := "unversioned"
+		if v.Version != "" {
+			version = v.Version[:min(12, len(v.Version))]
+		}
+		part := v.Name + " " + version
+		if v.Kind == "agent" {
+			part = "agent " + part
+		}
+		if !slices.Contains(parts, part) {
+			parts = append(parts, part)
+		}
+	}
+	return strings.Join(parts, ", ")
 }

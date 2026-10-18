@@ -113,13 +113,13 @@ func (a *app) hookCommand() *cobra.Command {
 	dir := func() string { return a.dir }
 	hook.AddCommand(
 		guardagentactions.NewCommand(dir, a.getenv, gitbranch.Current),
-		observeskillloads.NewCommand(dir, a.getenv, gitbranch.Current),
 		briefagentonsessionstart.NewCommand(dir, a.getenv, gitbranch.Current),
 	)
 	ensureBaseline := func(root string, id domain.AssignmentID) (bool, error) {
 		return worktree.OpenBaselines(root).Ensure(id)
 	}
 	hook.AddCommand(keepagentonstage.NewCommands(dir, a.getenv, gitbranch.Current, ensureBaseline)...)
+	hook.AddCommand(observeskillloads.NewCommands(dir, a.getenv, gitbranch.Current)...)
 	return hook
 }
 

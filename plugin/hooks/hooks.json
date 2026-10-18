@@ -27,7 +27,10 @@
     "SubagentStart": [
       {
         "matcher": "^gofast:",
-        "hooks": [{ "type": "command", "command": "gf", "args": ["hook", "subagent-start"] }]
+        "hooks": [
+          { "type": "command", "command": "gf", "args": ["hook", "subagent-start"] },
+          { "type": "command", "command": "gf", "args": ["hook", "agent-start"] }
+        ]
       }
     ],
     "SubagentStop": [
