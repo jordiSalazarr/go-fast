@@ -1,0 +1,10 @@
+{
+  "listen": ":8080",
+  "db": "/data/history.db",
+  "projects": {
+    "wallets": {
+      "tokenSha256": "<printf %s \"$SYNC_TOKEN\" | shasum -a 256>",
+      "readTokenSha256s": ["<printf %s \"$READ_TOKEN\" | shasum -a 256>"]
+    }
+  }
+}

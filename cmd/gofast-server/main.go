@@ -1,9 +1,11 @@
 // Command gofast-server is the reference gofast history server: gf sync
-// sends it each project's work history, and it serves it back read-only.
+// sends it each project's work history, and it serves it back read-only,
+// as JSON and as a viewer at /.
 //
-//	gofast-server -config server.json
+//	gofast-server -config server.json            serve
+//	gofast-server -config server.json -backup f  write a consistent copy of the database to f, and exit
 //
-// It speaks plain HTTP; put TLS in front of it (a reverse proxy).
+// It speaks plain HTTP; put TLS in front of it (deploy/ has an example).
 package main
 
 import (
@@ -23,19 +25,37 @@ import (
 
 func main() {
 	configPath := flag.String("config", "server.json", "the server's configuration file")
+	backup := flag.String("backup", "", "write a consistent copy of the database to this file, which must not exist, and exit")
 	flag.Parse()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	if err := run(*configPath, logger); err != nil {
+	run := serve
+	if *backup != "" {
+		run = func(config historyserver.Config, logger *slog.Logger) error { return backupTo(config, *backup, logger) }
+	}
+	config, err := historyserver.LoadConfig(*configPath)
+	if err == nil {
+		err = run(config, logger)
+	}
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "gofast-server:", err)
 		os.Exit(1)
 	}
 }
 
-func run(configPath string, logger *slog.Logger) error {
-	config, err := historyserver.LoadConfig(configPath)
+func backupTo(config historyserver.Config, path string, logger *slog.Logger) error {
+	store, err := historyserver.Open(config.DB)
 	if err != nil {
 		return err
 	}
+	defer store.Close()
+	if err := store.Backup(context.Background(), path); err != nil {
+		return fmt.Errorf("back up %s to %s: %w", config.DB, path, err)
+	}
+	logger.Info("backed up", "db", config.DB, "to", path)
+	return nil
+}
+
+func serve(config historyserver.Config, logger *slog.Logger) error {
 	store, err := historyserver.Open(config.DB)
 	if err != nil {
 		return err

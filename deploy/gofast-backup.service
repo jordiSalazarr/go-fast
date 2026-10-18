@@ -1,0 +1,11 @@
+# A consistent copy of the history database, taken while the server runs.
+# Started daily by gofast-backup.timer; keeps the last 14 copies.
+[Unit]
+Description=Back up the gofast history database
+
+[Service]
+Type=oneshot
+DynamicUser=yes
+User=gofast
+StateDirectory=gofast gofast-backups
+ExecStart=/bin/sh -c '/usr/local/bin/gofast-server -config /etc/gofast/server.json -backup /var/lib/gofast-backups/history-$(date -u +%%Y%%m%%dT%%H%%M%%SZ).db && ls -1t /var/lib/gofast-backups/history-*.db | tail -n +15 | xargs -r rm --'

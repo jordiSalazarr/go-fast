@@ -1,0 +1,25 @@
+# The history server under systemd, as an alternative to Docker. Install
+# the binary in /usr/local/bin, the configuration in
+# /etc/gofast/server.json (with "db": "/var/lib/gofast/history.db"), then:
+#
+#   sudo systemctl enable --now gofast-server
+#
+# Put TLS in front of it: Caddy, nginx, or your load balancer.
+[Unit]
+Description=gofast history server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/gofast-server -config /etc/gofast/server.json
+DynamicUser=yes
+User=gofast
+StateDirectory=gofast
+Restart=on-failure
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

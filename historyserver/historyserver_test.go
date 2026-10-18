@@ -371,3 +371,23 @@ func uses(v wire.InstructionVersion) []string {
 	}
 	return out
 }
+
+func TestStore_BacksUpWhileOpen(t *testing.T) {
+	dir := t.TempDir()
+	store, err := historyserver.Open(filepath.Join(dir, "history.db"))
+	require.NoError(t, err)
+	defer store.Close()
+	_, err = store.AppendEvents(context.Background(), "wallets", wire.Events{Events: []string{started}})
+	require.NoError(t, err)
+
+	copyPath := filepath.Join(dir, "backup.db")
+	require.NoError(t, store.Backup(context.Background(), copyPath))
+	assert.Error(t, store.Backup(context.Background(), copyPath), "never over an existing file")
+
+	backup, err := historyserver.Open(copyPath)
+	require.NoError(t, err)
+	defer backup.Close()
+	heads, err := backup.Streams(context.Background(), "wallets")
+	require.NoError(t, err)
+	assert.Equal(t, 1, heads["work-w-1"].Version)
+}

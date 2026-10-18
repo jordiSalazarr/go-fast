@@ -1,0 +1,36 @@
+# The history server behind Caddy, which gets and renews a TLS certificate
+# for HISTORY_DOMAIN by itself. From deploy/:
+#
+#   cp server.example.json server.json   # then fill in the token hashes
+#   HISTORY_DOMAIN=history.example.com docker compose up -d --build
+services:
+  gofast-server:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    volumes:
+      - history:/data
+      - ./server.json:/config/server.json:ro
+    expose:
+      - "8080"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      HISTORY_DOMAIN: ${HISTORY_DOMAIN:?set HISTORY_DOMAIN to the server's domain}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - gofast-server
+
+volumes:
+  history:
+  caddy-data:
+  caddy-config:

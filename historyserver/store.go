@@ -95,6 +95,13 @@ func Open(path string) (*Store, error) {
 
 func (s *Store) Close() error { return s.db.Close() }
 
+// Backup writes a consistent copy of the database to path, which must not
+// exist, while the server keeps serving.
+func (s *Store) Backup(ctx context.Context, path string) error {
+	_, err := s.db.ExecContext(ctx, `VACUUM INTO ?`, path)
+	return err
+}
+
 func (s *Store) stamp() string { return s.now().UTC().Format(time.RFC3339Nano) }
 
 // Streams are the project's stream heads.

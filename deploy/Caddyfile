@@ -1,0 +1,10 @@
+# TLS in front of the history server. Caddy gets a certificate for the
+# domain on its own; the domain's DNS must point at this machine.
+{$HISTORY_DOMAIN} {
+	encode zstd gzip
+	# Batches of events and blobs; the server refuses more than this anyway.
+	request_body {
+		max_size 64MB
+	}
+	reverse_proxy gofast-server:8080
+}
