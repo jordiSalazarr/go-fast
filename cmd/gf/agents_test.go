@@ -65,13 +65,17 @@ func TestStageAgents_KnowAboutRework(t *testing.T) {
 	}
 }
 
-// After grill, discovery maps the agreed behaviour onto the code and leaves
-// conflicts with the plan to the owner.
-func TestDiscoveryAgent_FitsTheAgreedBehaviourToTheCode(t *testing.T) {
+// On v3 feature work, discovery maps the owner's input onto the code before
+// grill and leaves its questions to grill; on v2, after grill, it maps the
+// agreed behaviour and leaves conflicts with the plan to the owner.
+func TestDiscoveryAgent_FitsTheInputOrTheAgreedBehaviourToTheCode(t *testing.T) {
 	body, err := os.ReadFile(instructions(domain.StageDiscovery))
 	require.NoError(t, err)
-	for _, want := range []string{"**how the agreed behaviour fits the existing code**", "`work.grill.docPath`",
-		"list each conflict under `## Decisions for the owner`", "## Expected behaviour` section (what it must do instead, as the event model and grill's decisions say)"} {
+	for _, want := range []string{"(`work.pathVersion` is `v3`), discovery runs **before grill**", "**where the owner's input fits the existing code**",
+		"end the artifact with `## Questions for grill`", "It has no `## Decisions for the owner`.",
+		"on v3, as the input asks for it, which grill then settles", "on v3 a pass moves the work to grill, on v2 to design",
+		"**how the agreed behaviour fits the existing code**", "`work.grill.docPath`",
+		"list each conflict under `## Decisions for the owner`", "on v2, as the event model and grill's decisions say), neither empty"} {
 		assert.Contains(t, string(body), want)
 	}
 }
@@ -90,7 +94,9 @@ func TestDrive_AsksForTheInputs_AndRunsGrillInTheSession(t *testing.T) {
 	body, err := os.ReadFile(filepath.Join("..", "..", "plugin", "skills", "drive", "SKILL.md"))
 	require.NoError(t, err)
 	for _, want := range []string{"adding `--spec <path>` and `--event-model <path>`", "load the `gofast:grill` skill",
-		"tell the owner which decision document to read (`work.grill.docPath`)"} {
+		"tell the owner which decision document to read (`work.grill.docPath`)",
+		"New feature work goes: event modelling (only with an event model), discovery, grill (here, live with the owner), design",
+		"grill runs after discovery, starting from discovery's `## Questions for grill`"} {
 		assert.Contains(t, string(body), want)
 	}
 }

@@ -27,7 +27,7 @@ func startFeature(t *testing.T, inputs ...domain.WorkInput) []domain.WorkEvent {
 }
 
 // Given an event model, when feature work starts, then it records its
-// inputs and enters event modelling first, then grill.
+// inputs and enters event modelling first, then discovery.
 func TestStartWork_WithAnEventModel_EntersEventModellingFirst(t *testing.T) {
 	history := startFeature(t, specInput, eventModelInput)
 
@@ -42,16 +42,16 @@ func TestStartWork_WithAnEventModel_EntersEventModellingFirst(t *testing.T) {
 	assert.Equal(t, eventModelInput, model)
 
 	history = advance(t, history)
-	assert.Equal(t, domain.StageGrill, history[len(history)-1].(domain.StageEntered).Stage)
+	assert.Equal(t, domain.StageDiscovery, history[len(history)-1].(domain.StageEntered).Stage)
 }
 
 // Given no event model, when feature work starts, then it skips event
-// modelling and starts on grill.
+// modelling and starts on discovery.
 func TestStartWork_WithoutAnEventModel_SkipsEventModelling(t *testing.T) {
 	for name, inputs := range map[string][]domain.WorkInput{"a spec": {specInput}, "no input": nil} {
 		history := startFeature(t, inputs...)
 
-		assert.Equal(t, domain.StageGrill, history[1].(domain.StageEntered).Stage, name)
+		assert.Equal(t, domain.StageDiscovery, history[1].(domain.StageEntered).Stage, name)
 		w := asInProgress(t, givenWork(t, history...))
 		assert.True(t, w.Skips(domain.StageEventModelling), name)
 		_, ok := w.Input(domain.InputEventModel)

@@ -41,8 +41,9 @@ func TestEachStageRequiresItsExitChecks(t *testing.T) {
 		domain.WorkTypeImprovePerformance: {domain.PathV1: performance},
 		domain.WorkTypeRefactor:           {domain.PathV1: refactor},
 		domain.WorkTypeFixBug:             {domain.PathV1: fixBug},
-		domain.WorkTypeNewFeature:         {domain.PathV1: designed, domain.PathV2: feature},
-		domain.WorkTypeModifyBehaviour:    {domain.PathV1: with(designed, domain.StageDiscovery, behaviourDelta), domain.PathV2: with(feature, domain.StageDiscovery, behaviourDelta)},
+		domain.WorkTypeNewFeature:         {domain.PathV1: designed, domain.PathV2: feature, domain.PathV3: feature},
+		domain.WorkTypeModifyBehaviour: {domain.PathV1: with(designed, domain.StageDiscovery, behaviourDelta), domain.PathV2: with(feature, domain.StageDiscovery, behaviourDelta),
+			domain.PathV3: with(feature, domain.StageDiscovery, behaviourDelta)},
 	}
 	for _, path := range domain.Paths() {
 		for _, step := range append(path.Steps(), domain.FixerStep()) {

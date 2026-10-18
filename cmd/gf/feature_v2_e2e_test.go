@@ -99,7 +99,7 @@ func TestNewFeatureV2_FromAnEventModel_EndToEnd(t *testing.T) {
 	r.git("add", "-A")
 	r.git("commit", "-q", "-m", "initial")
 
-	r.gf("start", "--type", "new-feature", "Wallets", "--event-model", "docs/wallets-board.md")
+	r.startV2("new-feature", "Wallets", "--event-model", "docs/wallets-board.md")
 	v := r.expect("event-modelling", progress.AssignmentOpen, 0, 3)
 	id := v.Work.ID
 	assert.Equal(t, "auto", v.Current.Gate)
@@ -177,7 +177,7 @@ func TestNewFeatureV2_FromASpec_EndToEnd(t *testing.T) {
 	r.git("add", "-A")
 	r.git("commit", "-q", "-m", "initial")
 
-	r.gf("start", "--type", "new-feature", "Wallets", "--spec", "docs/wallets.md")
+	r.startV2("new-feature", "Wallets", "--spec", "docs/wallets.md")
 	v := r.expect("grill", progress.AssignmentOpen, 0, 3)
 	assert.Equal(t, "skipped", stageStatuses(v)[0])
 	assert.Equal(t, []progress.InputView{{Kind: "spec", Path: "docs/wallets.md", SHA256: v.Work.Inputs[0].SHA256}}, v.Work.Inputs)
@@ -224,7 +224,7 @@ func TestReturn_FromDesignToGrill_StartsGrillsSecondVisit(t *testing.T) {
 	r := newDesignRepo(t)
 	r.git("add", "-A")
 	r.git("commit", "-q", "-m", "initial")
-	r.gf("start", "--type", "new-feature", "Wallets")
+	r.startV2("new-feature", "Wallets")
 	r.grillWrites(d1, a1, decisionDocument(a1Document))
 	r.submitAsAgent("--passed")
 	r.gf("approve")

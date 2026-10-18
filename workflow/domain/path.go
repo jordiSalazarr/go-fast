@@ -27,12 +27,16 @@ var (
 	// PathV2 starts feature work from the owner's input: an optional event
 	// model, then a live grilling session, then discovery.
 	PathV2 = PathVersion{n: 2}
+	// PathV3 maps where the owner's input fits the code before grilling:
+	// an optional event model, then discovery, whose questions grill
+	// settles with the owner.
+	PathV3 = PathVersion{n: 3}
 )
 
 // NewPathVersion restores a recorded version; 0 is a work started before
 // paths had versions, which follows v1.
 func NewPathVersion(n int) (PathVersion, error) {
-	if n < 0 || n > PathV2.n {
+	if n < 0 || n > PathV3.n {
 		return PathVersion{}, fmt.Errorf("path version %d: %w", n, ErrUnknownPathVersion)
 	}
 	return PathVersion{n: n}, nil
@@ -67,8 +71,8 @@ var paths = map[WorkType]map[PathVersion][]PathStep{
 		{stage: StageIntegrationTesting, gate: GateAuto, budget: AttemptBudget{n: 3}},
 		{stage: StageStressTesting, gate: GateAuto, budget: AttemptBudget{n: 3}, optional: true},
 	}},
-	WorkTypeNewFeature:         {PathV1: designedPath, PathV2: featurePath},
-	WorkTypeModifyBehaviour:    {PathV1: designedPath, PathV2: featurePath},
+	WorkTypeNewFeature:         {PathV1: designedPath, PathV2: featurePath, PathV3: discoveredFeaturePath},
+	WorkTypeModifyBehaviour:    {PathV1: designedPath, PathV2: featurePath, PathV3: discoveredFeaturePath},
 	WorkTypeRefactor:           {PathV1: refactorPath},
 	WorkTypeImprovePerformance: {PathV1: performancePath},
 }
@@ -76,8 +80,8 @@ var paths = map[WorkType]map[PathVersion][]PathStep{
 // currentVersions are the versions new works start on.
 var currentVersions = map[WorkType]PathVersion{
 	WorkTypeFixBug:             PathV1,
-	WorkTypeNewFeature:         PathV2,
-	WorkTypeModifyBehaviour:    PathV2,
+	WorkTypeNewFeature:         PathV3,
+	WorkTypeModifyBehaviour:    PathV3,
 	WorkTypeRefactor:           PathV1,
 	WorkTypeImprovePerformance: PathV1,
 }
@@ -102,6 +106,23 @@ var featurePath = []PathStep{
 	{stage: StageEventModelling, gate: GateAuto, budget: AttemptBudget{n: 3}, optional: true},
 	{stage: StageGrill, gate: GateHuman, budget: AttemptBudget{n: 3}},
 	{stage: StageDiscovery, gate: GateAuto, budget: AttemptBudget{n: 3}},
+	{stage: StageDesign, gate: GateHuman, budget: AttemptBudget{n: 3}},
+	{stage: StageSpecify, gate: GateHuman, budget: AttemptBudget{n: 3}},
+	{stage: StageImplement, gate: GateAuto, budget: AttemptBudget{n: 3}},
+	{stage: StageReview, gate: GateAuto, budget: AttemptBudget{n: 3}},
+	{stage: StageIntegrationTesting, gate: GateAuto, budget: AttemptBudget{n: 3}},
+	{stage: StageStressTesting, gate: GateAuto, budget: AttemptBudget{n: 3}, optional: true},
+}
+
+// discoveredFeaturePath (v3) maps the owner's input onto the code before
+// grilling: event modelling when the work has an event model, then
+// discovery, which describes what exists and leaves the conflicts and
+// unknowns to grill; grill settles them with the owner, and its approval is
+// the owner's approval of the plan.
+var discoveredFeaturePath = []PathStep{
+	{stage: StageEventModelling, gate: GateAuto, budget: AttemptBudget{n: 3}, optional: true},
+	{stage: StageDiscovery, gate: GateAuto, budget: AttemptBudget{n: 3}},
+	{stage: StageGrill, gate: GateHuman, budget: AttemptBudget{n: 3}},
 	{stage: StageDesign, gate: GateHuman, budget: AttemptBudget{n: 3}},
 	{stage: StageSpecify, gate: GateHuman, budget: AttemptBudget{n: 3}},
 	{stage: StageImplement, gate: GateAuto, budget: AttemptBudget{n: 3}},

@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -45,12 +46,37 @@ const latencyProposal = `{"nfrs": [{"id": "server-latency", "areas": ["server/**
 // baseline.
 func (r *repo) startV1(workType, description string) {
 	r.t.Helper()
+	r.startOn(domain.PathVersion{}, "w-v1", workType, description)
+	v := r.expect("discovery", progress.AssignmentOpen, 0, 3)
+	require.Equal(r.t, "human", v.Current.Gate, "path v1")
+}
+
+// startV2 starts feature work the way gf did while new feature works started
+// on path v2, from the inputs gf start's flags name (--spec, --event-model):
+// grill first, or event modelling with an event model.
+func (r *repo) startV2(workType, description string, flags ...string) {
+	r.t.Helper()
+	var inputs []domain.WorkInput
+	for i := 0; i+1 < len(flags); i += 2 {
+		kind := map[string]domain.InputKind{"--spec": domain.InputSpec, "--event-model": domain.InputEventModel}[flags[i]]
+		content, err := os.ReadFile(filepath.Join(r.dir, filepath.FromSlash(flags[i+1])))
+		require.NoError(r.t, err)
+		inputs = append(inputs, must(domain.NewWorkInput(kind, must(domain.ParseRepoPath(flags[i+1])), domain.HashOf(content))))
+	}
+	r.startOn(domain.PathV2, "w-v2", workType, description, inputs...)
+	require.Equal(r.t, "v2", r.status().Work.PathVersion)
+}
+
+// startOn records the start of a work on a path version, as gf start did
+// when new works started on it, then runs the automations like gf start.
+func (r *repo) startOn(version domain.PathVersion, workID, workType, description string, inputs ...domain.WorkInput) {
+	r.t.Helper()
 	store, err := eventlog.Open(r.dir)
 	require.NoError(r.t, err)
-	id := must(domain.NewWorkID("w-v1"))
-	started := domain.WorkStarted{WorkID: id, WorkType: must(domain.ParseWorkType(workType)),
-		Description: must(domain.NewDescription(description)), Branch: must(domain.NewBranch("main"))}
-	first := must(domain.PathOf(started.WorkType, started.PathVersion)).Steps()[0]
+	id := must(domain.NewWorkID(workID))
+	started := domain.WorkStarted{WorkID: id, WorkType: must(domain.ParseWorkType(workType)), PathVersion: version,
+		Description: must(domain.NewDescription(description)), Branch: must(domain.NewBranch("main")), Inputs: inputs}
+	first := firstStepOf(must(domain.PathOf(started.WorkType, started.PathVersion)), inputs)
 	opened := func(a domain.AssignmentID) {
 		_, err := worktree.OpenBaselines(r.dir).Ensure(a)
 		require.NoError(r.t, err)
@@ -63,8 +89,20 @@ func (r *repo) startV1(workType, description string) {
 		}
 		return automations.Runner{AssignmentOpened: opened}.Run(s)
 	}))
-	v := r.expect("discovery", progress.AssignmentOpen, 0, 3)
-	require.Equal(r.t, "human", v.Current.Gate, "path v1")
+}
+
+// firstStepOf is the first step of a path a work with these inputs enters:
+// event modelling only with an event model, and no other optional step.
+func firstStepOf(path domain.Path, inputs []domain.WorkInput) domain.PathStep {
+	for _, step := range path.Steps() {
+		if !step.Optional() {
+			return step
+		}
+		if step.Stage() == domain.StageEventModelling && slices.ContainsFunc(inputs, func(i domain.WorkInput) bool { return i.Kind() == domain.InputEventModel }) {
+			return step
+		}
+	}
+	panic("a path without a step to enter")
 }
 
 func must[T any](v T, err error) T {

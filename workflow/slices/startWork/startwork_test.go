@@ -91,7 +91,7 @@ func TestGivenNoWork_WhenStartingFeatureWorkFromAnEventModel_ThenItRecordsItsInp
 			return err
 		}).
 		Then(
-			domain.WorkStarted{WorkID: newWorkID, WorkType: domain.WorkTypeNewFeature, PathVersion: domain.PathV2, Description: newDesc, Branch: Branch,
+			domain.WorkStarted{WorkID: newWorkID, WorkType: domain.WorkTypeNewFeature, PathVersion: domain.PathV3, Description: newDesc, Branch: Branch,
 				Inputs: []domain.WorkInput{spec, model}},
 			domain.StageEntered{WorkID: newWorkID, Stage: domain.StageEventModelling, Visit: Visit1, Gate: domain.GateAuto, Budget: Budget(3)},
 		)

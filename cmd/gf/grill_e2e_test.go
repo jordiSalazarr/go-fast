@@ -59,7 +59,7 @@ func (r *repo) grillWrites(decisions, scenarios, document string) {
 // outputs, submits, and the owner approves the plan.
 func TestGrill_TheMainSessionSubmits_AndTheOwnerApprovesThePlan(t *testing.T) {
 	r := newRepo(t)
-	r.gf("start", "--type", "new-feature", "Wallets")
+	r.startV2("new-feature", "Wallets")
 	v := r.expect("grill", progress.AssignmentOpen, 0, 3)
 	assert.Equal(t, []string{"artifact-written", "grill-valid"}, v.Current.Checks)
 	assert.Equal(t, "docs/decisions", v.Work.DecisionsDir)
@@ -102,7 +102,7 @@ func (r *repo) remove(name string) {
 // check doesn't see it change. Abandoning the work updates its status.
 func TestDecisionsIndex_IsWrittenBeforeDiscoveryBegins_AndFollowsTheWorksStatus(t *testing.T) {
 	r := newRepo(t)
-	r.gf("start", "--type", "new-feature", "Wallets")
+	r.startV2("new-feature", "Wallets")
 	r.grillWrites(d1, a1, decisionDocument(a1Document))
 	r.submitAsAgent("--passed")
 	_, err := os.Stat(filepath.Join(r.dir, "docs", "decisions", "README.md"))
@@ -137,7 +137,7 @@ func TestDecisionsIndex_IsWrittenBeforeDiscoveryBegins_AndFollowsTheWorksStatus(
 func TestDecisionsIndex_GoesInTheConfiguredDirectory(t *testing.T) {
 	r := newRepo(t)
 	r.write(".gofast/checks.json", `{"docs": {"decisionsDir": "adr"}}`)
-	r.gf("start", "--type", "new-feature", "Wallets")
+	r.startV2("new-feature", "Wallets")
 	assert.Equal(t, "adr", r.status().Work.DecisionsDir)
 	assert.Contains(t, r.gf("checks"), "  decisions    adr/ (grill's decision documents; gf generates its README.md)\n")
 
@@ -151,7 +151,7 @@ func TestDecisionsIndex_GoesInTheConfiguredDirectory(t *testing.T) {
 // change, and its pass moves the work to design without the owner.
 func TestDiscoveryAfterGrill_ModifyBehaviour_NeedsTheBehaviourDelta_OnAnAutoGate(t *testing.T) {
 	r := newRepo(t)
-	r.gf("start", "--type", "modify-behaviour", "Wallets")
+	r.startV2("modify-behaviour", "Wallets")
 	r.grillWrites(d1, a1, decisionDocument(a1Document))
 	r.submitAsAgent("--passed")
 	r.gf("approve")
@@ -171,7 +171,7 @@ func TestStatus_OnSpecifyAfterGrill_ShowsTheScenariosToCover(t *testing.T) {
 	r := newDesignRepo(t)
 	r.git("add", "-A")
 	r.git("commit", "-q", "-m", "initial")
-	r.gf("start", "--type", "new-feature", "Wallets")
+	r.startV2("new-feature", "Wallets")
 	a2 := `{"id": "A2", "given": "a wallet with 10", "when": "a credit of 5 is posted", "then": "its balance is 15"}`
 	r.grillWrites(d1, a1+", "+a2, decisionDocument(a1Document+"\n- A2: Given a wallet with 10, when a credit of 5 is posted, then its balance is 15."))
 	r.submitAsAgent("--passed")

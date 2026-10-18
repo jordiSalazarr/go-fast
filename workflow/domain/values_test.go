@@ -69,21 +69,37 @@ func TestPaths(t *testing.T) {
 		{domain.StageIntegrationTesting, domain.GateAuto, 3, false},
 		{domain.StageStressTesting, domain.GateAuto, 3, true},
 	}
+	discoveredFeature := []pathStep{
+		{domain.StageEventModelling, domain.GateAuto, 3, true},
+		{domain.StageDiscovery, domain.GateAuto, 3, false},
+		{domain.StageGrill, domain.GateHuman, 3, false},
+		{domain.StageDesign, domain.GateHuman, 3, false},
+		{domain.StageSpecify, domain.GateHuman, 3, false},
+		{domain.StageImplement, domain.GateAuto, 3, false},
+		{domain.StageReview, domain.GateAuto, 3, false},
+		{domain.StageIntegrationTesting, domain.GateAuto, 3, false},
+		{domain.StageStressTesting, domain.GateAuto, 3, true},
+	}
 	assert.Equal(t, fixBug, stepsOf(domain.WorkTypeFixBug, domain.PathV1))
 	assert.Equal(t, designed, stepsOf(domain.WorkTypeNewFeature, domain.PathV1))
 	assert.Equal(t, designed, stepsOf(domain.WorkTypeModifyBehaviour, domain.PathV1))
 	assert.Equal(t, feature, stepsOf(domain.WorkTypeNewFeature, domain.PathV2))
 	assert.Equal(t, feature, stepsOf(domain.WorkTypeModifyBehaviour, domain.PathV2))
+	assert.Equal(t, discoveredFeature, stepsOf(domain.WorkTypeNewFeature, domain.PathV3))
+	assert.Equal(t, discoveredFeature, stepsOf(domain.WorkTypeModifyBehaviour, domain.PathV3))
 	_, err := domain.PathOf(domain.WorkTypeFixBug, domain.PathV2)
+	assert.ErrorIs(t, err, domain.ErrUnknownPathVersion)
+	_, err = domain.NewPathVersion(4)
 	assert.ErrorIs(t, err, domain.ErrUnknownPathVersion)
 	assert.Equal(t, fixBug, stepsOf(domain.WorkTypeFixBug, domain.PathVersion{}), "an unrecorded version is v1")
 }
 
-// New works start on the latest path of their type: v2 for feature work,
-// v1 for bugs.
+// New works start on the latest path of their type: v3 for feature work,
+// v1 for the rest.
 func TestPathFor_IsTheVersionNewWorksStartOn(t *testing.T) {
 	for workType, want := range map[domain.WorkType]domain.PathVersion{
-		domain.WorkTypeFixBug: domain.PathV1, domain.WorkTypeNewFeature: domain.PathV2, domain.WorkTypeModifyBehaviour: domain.PathV2,
+		domain.WorkTypeFixBug: domain.PathV1, domain.WorkTypeNewFeature: domain.PathV3, domain.WorkTypeModifyBehaviour: domain.PathV3,
+		domain.WorkTypeRefactor: domain.PathV1, domain.WorkTypeImprovePerformance: domain.PathV1,
 	} {
 		assert.Equal(t, want, must(domain.PathFor(workType)).Version(), workType.String())
 	}

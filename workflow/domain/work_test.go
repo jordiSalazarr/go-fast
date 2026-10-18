@@ -264,17 +264,17 @@ func advance(t *testing.T, history []domain.WorkEvent) []domain.WorkEvent {
 	return append(history, events...)
 }
 
-// Given a feature work type, when work starts, then it follows path v2:
-// without an event model, grill (human gate), discovery (auto gate), design
+// Given a feature work type, when work starts, then it follows path v3:
+// without an event model, discovery (auto gate), grill (human gate), design
 // (human gate), then the rest of the path.
-func TestStartWork_OfAFeatureType_FollowsPathV2(t *testing.T) {
+func TestStartWork_OfAFeatureType_FollowsPathV3(t *testing.T) {
 	for _, workType := range []domain.WorkType{domain.WorkTypeNewFeature, domain.WorkTypeModifyBehaviour} {
 		history := must(domain.StartWork(workID, workType, must(domain.NewDescription("wallets")), mainBranch, activeOn(t, mainBranch)))
-		assert.Equal(t, domain.PathV2, history[0].(domain.WorkStarted).PathVersion, workType.String())
+		assert.Equal(t, domain.PathV3, history[0].(domain.WorkStarted).PathVersion, workType.String())
 		w := asInProgress(t, givenWork(t, history...))
-		assert.Equal(t, domain.StageGrill, w.CurrentStage())
-		assert.Equal(t, domain.GateHuman, w.CurrentStep().Gate())
-		assert.Equal(t, domain.AssignmentIDFor(workID, domain.StageGrill, visit1), w.FirstAssignment())
+		assert.Equal(t, domain.StageDiscovery, w.CurrentStage())
+		assert.Equal(t, domain.GateAuto, w.CurrentStep().Gate())
+		assert.Equal(t, domain.AssignmentIDFor(workID, domain.StageDiscovery, visit1), w.FirstAssignment())
 		assert.True(t, w.Skips(domain.StageEventModelling))
 
 		var stages []domain.Stage
@@ -284,8 +284,27 @@ func TestStartWork_OfAFeatureType_FollowsPathV2(t *testing.T) {
 			entered := history[len(history)-1].(domain.StageEntered)
 			stages, gates = append(stages, entered.Stage), append(gates, entered.Gate)
 		}
-		assert.Equal(t, []domain.Stage{domain.StageDiscovery, domain.StageDesign, domain.StageSpecify}, stages, workType.String())
-		assert.Equal(t, []domain.Gate{domain.GateAuto, domain.GateHuman, domain.GateHuman}, gates, workType.String())
+		assert.Equal(t, []domain.Stage{domain.StageGrill, domain.StageDesign, domain.StageSpecify}, stages, workType.String())
+		assert.Equal(t, []domain.Gate{domain.GateHuman, domain.GateHuman, domain.GateHuman}, gates, workType.String())
+	}
+}
+
+// Given a feature work started on path v2, when it is rebuilt and advanced,
+// then it finishes on v2: grill, then discovery, then design.
+func TestAWorkStartedOnPathV2_FinishesOnV2(t *testing.T) {
+	for _, workType := range []domain.WorkType{domain.WorkTypeNewFeature, domain.WorkTypeModifyBehaviour} {
+		history := []domain.WorkEvent{
+			domain.WorkStarted{WorkID: workID, WorkType: workType, PathVersion: domain.PathV2, Description: description, Branch: mainBranch},
+			domain.StageEntered{WorkID: workID, Stage: domain.StageGrill, Visit: visit1, Gate: domain.GateHuman, Budget: budget3},
+		}
+		w := asInProgress(t, givenWork(t, history...))
+		assert.Equal(t, domain.PathV2, w.Path().Version(), workType.String())
+		var stages []domain.Stage
+		for range 2 {
+			history = advance(t, history)
+			stages = append(stages, history[len(history)-1].(domain.StageEntered).Stage)
+		}
+		assert.Equal(t, []domain.Stage{domain.StageDiscovery, domain.StageDesign}, stages, workType.String())
 	}
 }
 

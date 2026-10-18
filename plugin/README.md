@@ -3,7 +3,7 @@
 Drives an agent along gofast's paths: fix-bug (discovery → specify →
 implement → review → integration-testing → [stress-testing]), and new-feature
 and modify-behaviour, which start from the owner's input: [event-modelling]
-→ grill → discovery → design → specify → implement → review →
+→ discovery → grill → design → specify → implement → review →
 integration-testing → [stress-testing]. A fixer sends work back when a later
 stage finds the code (or the design) wrong. The `gf` CLI decides where the work is and refuses invalid moves; this
 plugin connects it to Claude Code:
@@ -144,13 +144,14 @@ The guard hook and `gf`'s own owner check (below) cover those.
 ## Paths
 
 Paths have versions, and a work keeps the version it started on, so
-changing a path never changes work in progress. New fix-bug work follows v1
-and new feature work v2:
+changing a path never changes work in progress (`gf status --json` shows
+it as `work.pathVersion`). New fix-bug work follows v1 and new feature work
+v3; v1 and v2 works finish on their path:
 
-| Work type | v1 (works started before path versions) | v2 |
-|---|---|---|
-| fix-bug | discovery (human) → specify (human) → implement → review → integration-testing → [stress-testing] | — |
-| new-feature, modify-behaviour | discovery (human) → design (human) → specify (human) → implement → review → integration-testing → [stress-testing] | [event-modelling] → grill (human) → discovery → design (human) → specify (human) → implement → review → integration-testing → [stress-testing] |
+| Work type | v1 (works started before path versions) | v2 | v3 (new works) |
+|---|---|---|---|
+| fix-bug | discovery (human) → specify (human) → implement → review → integration-testing → [stress-testing] | — | — |
+| new-feature, modify-behaviour | discovery (human) → design (human) → specify (human) → implement → review → integration-testing → [stress-testing] | [event-modelling] → grill (human) → discovery → design (human) → specify (human) → implement → review → integration-testing → [stress-testing] | [event-modelling] → discovery → grill (human) → design (human) → specify (human) → implement → review → integration-testing → [stress-testing] |
 
 Stages in brackets are optional. Unmarked gates are auto.
 
@@ -187,7 +188,7 @@ list them.
 | grill | artifact-written, grill-valid |
 | discovery | artifact-written; on modify-behaviour also behaviour-delta |
 | design | artifact-written, design-valid, nfr-proposals-valid |
-| specify | artifact-written, specs-fail; after grill (path v2) also specs-cover-scenarios; on path v1 with design, specs-cover-slices |
+| specify | artifact-written, specs-fail; on paths with grill (v2, v3) also specs-cover-scenarios; on path v1 with design, specs-cover-slices |
 | implement | artifact-written, build-passes, formatted, specs-pass, specs-untouched, suite-passes |
 | review | artifact-written, formatted, build-passes, suite-passes |
 | integration-testing | artifact-written, integration-passes |
@@ -229,7 +230,8 @@ problems as `current.eventModelProblems`.
 
 ## Grill
 
-Grill (human gate) always runs on feature work, **in the main session,
+Grill (human gate) always runs on feature work, after discovery on v3
+(before it on v2), **in the main session,
 live with you**, not in a subagent: `/gofast:drive` loads the
 `gofast:grill` skill. It asks in rounds, each with every open question whose
 prerequisites are settled, numbered, with a recommended answer you accept
@@ -265,7 +267,20 @@ it from your terminal: **approving grill approves the plan**. A rejection
 starts another round on the next `/gofast:drive`, and `gf return grill
 "<reason>"` sends the work back to grill from a later stage.
 
-## Discovery after grill
+## Discovery before grill
+
+On path v3, discovery runs first (after event modelling, when there is an
+event model), on an auto gate, with no decision document yet. It reads the
+owner's inputs (`work.inputs`) and, with an event model, the accepted
+event-modelling artifacts, and maps where the input fits the code: the
+slices it touches, what exists and what would be new. It describes and
+never decides: its artifact ends with `## Questions for grill`, each
+conflict between the input and the code and each unknown only you can
+settle, with its evidence, and grill puts them to you on its first round.
+On modify-behaviour work, `behaviour-delta` applies: `## Current behaviour`,
+and `## Expected behaviour` as the input asks for it, which grill settles.
+
+## Discovery after grill (v2)
 
 On path v2, discovery runs after grill, on an auto gate: the plan is agreed,
 so discovery finds how it fits the existing code: where each slice lands,
@@ -284,8 +299,8 @@ completed or abandoned), and links to the decision document and the event
 model, if any. Its header says gf generated it; nobody else writes it (the
 guard and every stage's scope refuse it). gf rewrites it only between
 stages, never while a stage visit of the branch's work is in progress: when
-you approve grill, it is written before discovery's visit begins (so
-discovery's baseline has it); when a work completes or is abandoned, its
+you approve grill, it is written before the next stage's visit begins and
+its baseline is taken (design's on v3, discovery's on v2); when a work completes or is abandoned, its
 status is updated then; any other change waits for the next stage boundary.
 Commit it with the rest of your changes.
 

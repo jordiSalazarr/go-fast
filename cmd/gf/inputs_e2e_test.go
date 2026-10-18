@@ -82,11 +82,13 @@ func TestStart_RecordsTheInputs_AndStatusWarnsWhenOneChanges(t *testing.T) {
 }
 
 // Without an event model, feature work skips event modelling and starts on
-// grill.
-func TestStart_WithoutAnEventModel_StartsOnGrill(t *testing.T) {
+// discovery, on path v3.
+func TestStart_WithoutAnEventModel_StartsOnDiscovery(t *testing.T) {
 	r := newRepo(t)
 	r.gf("start", "--type", "modify-behaviour", "The server listens on 8080")
-	v := r.expect("grill", progress.AssignmentOpen, 0, 3)
+	v := r.expect("discovery", progress.AssignmentOpen, 0, 3)
+	assert.Equal(t, "v3", v.Work.PathVersion)
+	assert.Equal(t, "auto", v.Current.Gate)
 	assert.Equal(t, []progress.InputView{}, v.Work.Inputs)
 	assert.Equal(t, []string{"skipped", "current", "pending", "pending", "pending", "pending", "pending", "pending", "pending"}, stageStatuses(v))
 }

@@ -100,8 +100,11 @@ type OtherBranchView struct {
 }
 
 type WorkView struct {
-	ID          string `json:"id"`
-	Type        string `json:"type"`
+	ID   string `json:"id"`
+	Type string `json:"type"`
+	// PathVersion is the version of the path the work follows ("v1", "v2",
+	// …): it keeps the one it started on.
+	PathVersion string `json:"pathVersion"`
 	Description string `json:"description"`
 	Branch      string `json:"branch"`
 	ArtifactDir string `json:"artifactDir"` // relative to the repository root, ends in "/"
@@ -514,7 +517,8 @@ func Read(log Reader, branch domain.Branch, facts Facts) (View, error) {
 	}
 
 	view := View{Schema: 1, OtherBranches: others, Work: &WorkView{
-		ID: work.ID().String(), Type: work.Type().String(), Description: work.Description().String(),
+		ID: work.ID().String(), Type: work.Type().String(), PathVersion: work.Path().Version().String(),
+		Description: work.Description().String(),
 		Branch:      work.Branch().String(),
 		ArtifactDir: domain.ArtifactDir(work.ID()).String() + "/",
 		Reworks:     work.Reworks().Int(), ReworkBudget: work.ReworkBudget().Int(),
@@ -704,6 +708,20 @@ func Read(log Reader, branch domain.Branch, facts Facts) (View, error) {
 		}
 	case stage == domain.StressDecider():
 		view.Next = reviewNext(current.Stress)
+	case stage == domain.StageDiscovery && discoversBeforeGrill(work.Path()):
+		view.Next = NextView{
+			Actor: NextAgent,
+			Message: "Work on 'discovery': map where the owner's input fits the code, describing what exists without deciding, and end the artifact with `## Questions for grill`; grill settles them with the owner next. " +
+				"Then run `gf submit --passed` or `gf submit --failed \"<reason>\"`.",
+			Commands: []string{"gf submit --passed", `gf submit --failed "<reason>"`},
+		}
+	case stage == domain.StageGrill && discoversBeforeGrill(work.Path()):
+		view.Next = NextView{
+			Actor: NextAgent,
+			Message: "Grill with the owner in this session, not in a subagent: load the gofast:grill skill, start from discovery's `## Questions for grill`, ask in rounds until no question is open, " +
+				"write the decision document and " + strings.TrimSuffix(current.Artifact, ".md") + ".json, then run `gf submit --passed` or `gf submit --failed \"<reason>\"`.",
+			Commands: []string{"gf submit --passed", `gf submit --failed "<reason>"`},
+		}
 	case stage == domain.StageGrill:
 		view.Next = NextView{
 			Actor: NextAgent,
@@ -770,6 +788,25 @@ func grillView(history eventlog.History, work domain.WorkID, visit domain.Visit,
 	v.DocPath, v.Decisions, v.AcceptanceScenarios = grill.DocPath().String(), len(grill.Decisions()), len(grill.AcceptanceScenarios())
 	v.MustNotChange = grill.MustNotChange()
 	return v
+}
+
+// discoversBeforeGrill reports whether a feature path maps the owner's
+// input onto the code before grilling (path v3): discovery comes before
+// grill, and design after it. A refactor's discovery is before grill too,
+// but maps the code about to move.
+func discoversBeforeGrill(path domain.Path) bool {
+	if !path.Includes(domain.StageDesign) {
+		return false
+	}
+	for _, step := range path.Steps() {
+		switch step.Stage() {
+		case domain.StageDiscovery:
+			return path.Includes(domain.StageGrill)
+		case domain.StageGrill:
+			return false
+		}
+	}
+	return false
 }
 
 // grillAwaitsApproval tells the owner to read the decision document: its
