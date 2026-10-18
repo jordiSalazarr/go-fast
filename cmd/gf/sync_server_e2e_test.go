@@ -287,3 +287,68 @@ func TestSync_WithAReadToken_SaysItNeedsTheSyncToken(t *testing.T) {
 	assert.Equal(t, "$GOFAST_SYNC_TOKEN is a read token of project wallets: gf sync needs the project's sync token.\n", res.stderr)
 	assert.Zero(t, server.heldEvents(t))
 }
+
+// copyPlugin copies this repository's plugin, so a test can edit a skill.
+func copyPlugin(t *testing.T) string {
+	t.Helper()
+	dst := filepath.Join(t.TempDir(), "plugin")
+	out, err := exec.Command("cp", "-R", filepath.Join("..", "..", "plugin"), dst).CombinedOutput()
+	require.NoError(t, err, string(out))
+	return dst
+}
+
+func TestSync_TheServerSaysWhichWorksEachSkillVersionInstructed_AndWhatChanged(t *testing.T) {
+	server := newHistoryServer(t)
+	r := syncingRepo(t, server)
+	plugin := copyPlugin(t)
+	env := map[string]string{"CLAUDE_PLUGIN_ROOT": plugin}
+
+	r.git("checkout", "-q", "-b", "a")
+	r.gf("start", "--type", "fix-bug", "login button does nothing")
+	r.hook(env, "agent-start", subagentEvent("SubagentStart", "gofast:discovery", false))
+	first := r.status().Work.ID
+
+	// The owner sharpens the discovery skill before the next work.
+	skill := filepath.Join(plugin, "skills", "discovery", "SKILL.md")
+	before, err := os.ReadFile(skill)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(skill, append(before, []byte("\nAlways read the last 24 hours of error logs first.\n")...), 0o644))
+
+	r.git("checkout", "-q", "-b", "b")
+	r.gf("start", "--type", "fix-bug", "checkout times out")
+	r.hook(env, "agent-start", subagentEvent("SubagentStart", "gofast:discovery", false))
+	second := r.status().Work.ID
+
+	res := r.sync()
+	require.Equal(t, 0, res.code, res.stderr)
+
+	var it wire.Instructions
+	getJSON(t, server.url+"/v1/projects/wallets/instructions?name=discovery", &it)
+	require.Len(t, it.Versions, 2, "the skill changed between the works")
+	works := func(v wire.InstructionVersion) []string {
+		var out []string
+		for _, u := range v.Uses {
+			out = append(out, u.Work+" "+u.Stage)
+		}
+		return out
+	}
+	assert.Equal(t, []string{first + " discovery"}, works(it.Versions[0]))
+	assert.Equal(t, []string{second + " discovery"}, works(it.Versions[1]))
+	assert.NotEmpty(t, it.Versions[0].Files, "the version's kept files reached the server")
+
+	var diff wire.VersionDiff
+	getJSON(t, server.url+"/v1/projects/wallets/instructions/"+it.Versions[0].Version+"/diff/"+it.Versions[1].Version, &diff)
+	var changed []string
+	for _, f := range diff.Files {
+		if f.Status != "same" {
+			changed = append(changed, f.Path)
+			assert.Contains(t, f.Unified, "+Always read the last 24 hours of error logs first.")
+		}
+	}
+	assert.Equal(t, []string{"SKILL.md"}, changed)
+
+	var layout wire.Instructions
+	getJSON(t, server.url+"/v1/projects/wallets/instructions?name=code-layout", &layout)
+	require.Len(t, layout.Versions, 1, "an unchanged skill keeps its version")
+	assert.Len(t, layout.Versions[0].Uses, 2)
+}
