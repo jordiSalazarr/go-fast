@@ -99,6 +99,7 @@ func TestRule1_EachOwnerOnlyCommandHasItsOwnReason(t *testing.T) {
 		"gf abandon 'give up'":                   "Only the owner can abandon work. Ask the owner to run `gf abandon \"<reason>\"` in their own terminal.",
 		"gf return specify 'specs miss refunds'": "Only the owner can send work back to an earlier stage. Ask the owner to run `gf return <stage> \"<reason>\"` in their own terminal.",
 		"gf log accept":                          "Only the owner can accept a changed event log. Ask the owner to run `gf log accept` in their own terminal.",
+		"gf sync --dry-run":                      "Only the owner can sync the work history: it sends data outside this machine. Ask the owner to run `gf sync` in their own terminal.",
 		"gf nfrs adopt --yes":                    "Only the owner can adopt NFR proposals. Write them in the design's nfrs.proposed-v<visit>.json and ask the owner to run `gf nfrs adopt` in their own terminal.",
 	}
 	for command, reason := range cases {

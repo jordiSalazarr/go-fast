@@ -103,6 +103,7 @@ var ownerOnlyReasons = map[string]string{
 	"abandon":       "Only the owner can abandon work. Ask the owner to run `gf abandon \"<reason>\"` in their own terminal.",
 	"log":           "Only the owner can accept a changed event log. Ask the owner to run `gf log accept` in their own terminal.",
 	"return":        "Only the owner can send work back to an earlier stage. Ask the owner to run `gf return <stage> \"<reason>\"` in their own terminal.",
+	"sync":          "Only the owner can sync the work history: it sends data outside this machine. Ask the owner to run `gf sync` in their own terminal.",
 	"nfrs":          "Only the owner can adopt NFR proposals. Write them in the design's nfrs.proposed-v<visit>.json and ask the owner to run `gf nfrs adopt` in their own terminal.",
 }
 

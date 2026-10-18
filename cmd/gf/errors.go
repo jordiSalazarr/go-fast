@@ -14,6 +14,7 @@ import (
 	"github.com/jordiSalazarr/go-fast/workflow/gitbranch"
 	"github.com/jordiSalazarr/go-fast/workflow/remote"
 	startwork "github.com/jordiSalazarr/go-fast/workflow/slices/startWork"
+	synchistory "github.com/jordiSalazarr/go-fast/workflow/slices/syncHistory"
 	"github.com/jordiSalazarr/go-fast/workflow/worktree"
 )
 
@@ -29,6 +30,7 @@ func friendly(err error, cmd *cobra.Command, ran bool) string {
 		malformed *eventlog.MalformedLogError
 		config    *exitchecks.ConfigError
 		sync      *remote.ConfigError
+		syncing   *synchistory.Error
 		nfrs      *exitchecks.NFRsError
 		route     *domain.InvalidRouteError
 		noRoute   *domain.RouteMissingError
@@ -142,6 +144,8 @@ func friendly(err error, cmd *cobra.Command, ran bool) string {
 		return "The event log .gofast/events.jsonl has the same work advanced on two branches, which usually comes from a merge. Resolve it by hand, keeping one branch's events for that work. " + seeLog
 	case errors.As(err, &malformed):
 		return fmt.Sprintf("The event log .gofast/events.jsonl is damaged at line %d. Restore it from git. %s", malformed.Line, seeLog)
+	case errors.As(err, &syncing):
+		return syncing.Message
 	case errors.As(err, &sync):
 		return fmt.Sprintf("The sync configuration %s is invalid: %s. The owner fixes it; `gf checks` shows the result.", remote.ConfigPath, sync.Problem)
 	case errors.As(err, &config):

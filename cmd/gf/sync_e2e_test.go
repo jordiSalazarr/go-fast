@@ -25,3 +25,18 @@ func TestChecks_ShowsTheSyncConfiguration(t *testing.T) {
 	r.write(".gofast/sync.json", `{"server": "https://history.example.com", "project": "Wallets"}`)
 	assert.Contains(t, r.gfFails(nil, "checks").stderr, "The sync configuration .gofast/sync.json is invalid: \"project\" must be the project's id on the server")
 }
+
+func TestSync_IsTheOwnersFromTheirTerminal_AndNeedsAConfigurationAndAToken(t *testing.T) {
+	r := newRepo(t)
+	res := r.runWithoutTerminal(nil, "sync")
+	assert.Equal(t, 1, res.code)
+	assert.Equal(t, "Only the owner can sync the work history, from their own terminal. Run `gf sync` there.\n", res.stderr)
+	res = r.gfFails(asAgent, "sync")
+	assert.Equal(t, "Only the owner can sync the work history. Ask the owner to run `gf sync`.\n", res.stderr)
+
+	res = r.gfFails(nil, "sync")
+	assert.Equal(t, "Sync is not configured: create .gofast/sync.json with the server's URL and the project's id. `gf checks` shows the result.\n", res.stderr)
+	r.write(".gofast/sync.json", `{"server": "https://history.example.com", "project": "wallets"}`)
+	res = r.gfFails(nil, "sync", "--dry-run")
+	assert.Equal(t, "Set $GOFAST_SYNC_TOKEN to the project's token in your own shell, then run `gf sync` again.\n", res.stderr)
+}

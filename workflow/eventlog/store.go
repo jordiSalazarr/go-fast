@@ -273,7 +273,7 @@ func (s *Store) Shared(fn func(*Snapshot) error) error {
 	if err != nil {
 		return err
 	}
-	return fn(&Snapshot{records: records, changedOutsideGf: changed != nil})
+	return fn(&Snapshot{records: records, data: data, changedOutsideGf: changed != nil})
 }
 
 func (s *Store) lock(how int) (unlock func(), err error) {
@@ -433,7 +433,25 @@ func (s *Session) reseal(appended []byte) {
 // Snapshot is what a reader sees while holding the shared lock.
 type Snapshot struct {
 	records          []Recorded
+	data             []byte // the log's complete lines, as read
 	changedOutsideGf bool
+}
+
+// Lines are the log's lines exactly as written, without their newline, in
+// log order: Lines()[i] is the line of ReadAll()[i].
+func (s *Snapshot) Lines() [][]byte {
+	lines := bytes.Split(s.data, []byte("\n"))
+	out := make([][]byte, 0, len(lines))
+	for _, l := range lines[:len(lines)-1] {
+		out = append(out, append([]byte(nil), l...))
+	}
+	return out
+}
+
+// Seal is the SHA-256 of the log's complete lines, in lowercase hex.
+func (s *Snapshot) Seal() string {
+	sum := sha256.Sum256(s.data)
+	return hex.EncodeToString(sum[:])
 }
 
 // ChangedOutsideGf reports that the sealed log was changed outside gf since

@@ -12,7 +12,7 @@ import (
 // a command that clears the environment. It is a cheap first layer: gf itself
 // refuses owner-only commands without a terminal.
 
-var ownerOnlySubcommands = map[string]bool{"approve": true, "reject": true, "extend": true, "rework-extend": true, "stress": true, "abandon": true, "log": true, "nfrs": true, "return": true}
+var ownerOnlySubcommands = map[string]bool{"approve": true, "reject": true, "extend": true, "rework-extend": true, "stress": true, "abandon": true, "log": true, "nfrs": true, "return": true, "sync": true}
 
 // ownerOnlyCommand returns the first owner-only gf subcommand the command runs.
 func ownerOnlyCommand(command string) (string, bool) {

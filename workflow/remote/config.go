@@ -58,6 +58,16 @@ func (c Config) Included() []string {
 	return out
 }
 
+// NewConfig is a configuration that syncs project to server, sending the
+// events and what else include lists.
+func NewConfig(server *url.URL, project string, include ...string) Config {
+	c := Config{Configured: true, Server: server, Project: project, include: map[string]bool{IncludeEvents: true}}
+	for _, i := range include {
+		c.include[i] = true
+	}
+	return c
+}
+
 // ConfigError says what is wrong with ConfigPath.
 type ConfigError struct{ Problem string }
 

@@ -35,6 +35,7 @@ import (
 	startwork "github.com/jordiSalazarr/go-fast/workflow/slices/startWork"
 	"github.com/jordiSalazarr/go-fast/workflow/slices/status"
 	submitforacceptance "github.com/jordiSalazarr/go-fast/workflow/slices/submitForAcceptance"
+	synchistory "github.com/jordiSalazarr/go-fast/workflow/slices/syncHistory"
 	"github.com/jordiSalazarr/go-fast/workflow/worktree"
 )
 
@@ -98,6 +99,7 @@ func (a *app) rootCommand() *cobra.Command {
 		status.NewCommand(a.openStore, a.currentBranch, a.repositoryRoot),
 		checks.NewCommand(a.repositoryRoot, a.getenv),
 		accepteventlog.NewCommand(a.openStore, a.resolveCaller),
+		synchistory.NewCommand(a.openStore, a.resolveCaller, a.repositoryRoot, a.getenv, nil),
 		a.hookCommand(),
 	)
 	a.markRun(root)

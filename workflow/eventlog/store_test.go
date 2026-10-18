@@ -2,6 +2,8 @@ package eventlog
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -525,4 +527,34 @@ func mustLine(t *testing.T, r Recorded) []byte {
 	line, err := encodeLine(r)
 	require.NoError(t, err)
 	return append(line, '\n')
+}
+
+func TestSnapshot_LinesAreTheLogAsWritten(t *testing.T) {
+	root := mergedLog(t)
+	s, err := Open(root)
+	require.NoError(t, err)
+	file, err := os.ReadFile(eventsPath(root))
+	require.NoError(t, err)
+
+	require.NoError(t, s.Shared(func(snap *Snapshot) error {
+		records, _ := snap.ReadAll()
+		lines := snap.Lines()
+		require.Len(t, lines, len(records))
+		for i, l := range lines {
+			r, err := decodeLine(l)
+			require.NoError(t, err)
+			assert.Equal(t, records[i].ID, r.ID)
+		}
+		assert.Equal(t, string(file), string(bytes.Join(lines, []byte("\n")))+"\n")
+		sum := sha256.Sum256(file)
+		assert.Equal(t, hex.EncodeToString(sum[:]), snap.Seal())
+		return nil
+	}))
+
+	empty, err := Open(t.TempDir())
+	require.NoError(t, err)
+	require.NoError(t, empty.Shared(func(snap *Snapshot) error {
+		assert.Empty(t, snap.Lines())
+		return nil
+	}))
 }
