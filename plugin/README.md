@@ -11,6 +11,13 @@ plugin connects it to Claude Code:
 - **Stage agents** `gofast:discovery`, `gofast:design`, `gofast:specify`,
   `gofast:implement`, `gofast:review`, `gofast:integration-testing`,
   `gofast:stress-testing` and `gofast:fixer`: one subagent per stage.
+- **The owner's skills** (`plugin/skills/`): the conventions library
+  (`aggregate-design`, `functional-domain`, `value-types`, `code-layout`,
+  `schema-evolution`, `reads-and-reactions`), the method skills for
+  `discovery`, `review`, `specify` and `fixer`, and grill's interview
+  (`grilling` and `domain-modeling`, vendored from `mattpocock/skills` at
+  `49dd158`, MIT). Each stage agent preloads its skills (see
+  [Skills](#skills)); the plugin's copies are the source of truth.
 - **`/gofast:drive`**: the orchestrator. It reads `gf status`, runs the right
   stage agent and repeats until the owner is needed.
 - **Hooks** (`gf hook <event>`): the agent can't approve, can't touch the
@@ -139,6 +146,48 @@ The guard hook and `gf`'s own owner check (below) cover those.
    do, the session behaves like any other and is never held. Drive mode also
    ends when there is no active work left on the branch.
 
+## Skills
+
+Each stage agent preloads the owner's skills for its stage through its
+`skills` frontmatter, by their full name: `gofast:review`, not `review`. (In
+a scratch plugin, a bare `review` preloaded a built-in review skill instead
+of the plugin's.)
+
+| Agent | Preloads |
+|---|---|
+| `discovery` | discovery, code-layout |
+| `design` | aggregate-design, functional-domain, value-types, schema-evolution, reads-and-reactions |
+| `plan` | code-layout |
+| `characterize` | specify (the shape of a spec only) |
+| `specify` | specify, functional-domain |
+| `implement` | aggregate-design, functional-domain, value-types, code-layout, schema-evolution, reads-and-reactions |
+| `optimize` | functional-domain, code-layout |
+| `review` | review, aggregate-design, functional-domain, value-types, code-layout, schema-evolution, reads-and-reactions |
+| `fixer` | fixer, discovery |
+| `event-modelling`, `measure`, `integration-testing`, `stress-testing` | none |
+
+Grill isn't an agent: `gofast:grill` loads `gofast:grilling` and
+`gofast:domain-modeling` with the Skill tool. Each agent's body says that
+where a skill and the protocol differ on gf commands, write scopes, checks
+or artifact paths, the protocol wins. Preloaded skills are core: the skill
+catalog's lock never applies to them, and none of them is a catalog skill
+(`catalog.json` ships empty).
+
+The plugin's copies are the source of truth: turn off same-named copies
+elsewhere (for example in your claude.ai account), and edit the skills in
+`plugin/skills/`.
+
+## Observability for discovery and the fixer
+
+Discovery and the fixer have no `tools` field, so they inherit the session's
+tools, MCP tools included: the servers in the repository's `.mcp.json` or
+your own configuration. They use them read-only on errors, incidents and
+slowness, and never copy secrets or personal data into their artifacts,
+which are committed. Writes are still governed by the guard and the
+submit-time scope check. `docs/SETUP.md` shows how to add a read-only
+Logfire server; use read-only credentials, because the agents' "read-only"
+is advice and the token is the control.
+
 ## Exit checks
 
 ## Paths
@@ -253,6 +302,11 @@ document, the glossaries and the ADRs, nothing else):
   `addresses`, the ids of the event model's assumptions each settles),
   `acceptanceScenarios`, `openQuestions` and `docPath`;
 - `grill-v<n>.md`, a pointer to the document and a summary.
+- while it runs, as `gofast:domain-modeling` resolves terms and decisions:
+  the repository's `GLOSSARY.md` (or per-context glossaries mapped by
+  `GLOSSARY-MAP.md`) and ADRs under `docs/adr/` (or a context's
+  `…/docs/adr/`), only when an ADR is hard to reverse, surprising and a real
+  trade-off. Commit them with the branch.
 
 `grill-valid` checks that the JSON parses, no question is open, decision ids
 are unique, the document is this work's and has its sections, acceptance
@@ -266,6 +320,35 @@ session submits with `gf submit --passed`; you read the document and approve
 it from your terminal: **approving grill approves the plan**. A rejection
 starts another round on the next `/gofast:drive`, and `gf return grill
 "<reason>"` sends the work back to grill from a later stage.
+
+## Skeletons
+
+Specs must compile, and domain specs for new behaviour need types that don't
+exist yet. Specify may add **skeleton files**: new non-test Go files that
+declare only what the specs need. `skeletons-only` (specify, every path with
+specify) checks, with `go/parser`, that every non-test Go file changed in the
+visit was added in it, and that each holds only the package clause, imports,
+`type` and `const` declarations, at most one `var errSkeleton =
+errors.New("…")` per package, and functions whose body is empty (no results)
+or a single `return` of zero values (`nil`, `0`, `0.0`, `""`, `false`, `T{}`)
+or `errSkeleton`. It names each offending file and declaration
+(`domain/wallet_freeze.go: func Freeze has logic`); `panic` is refused, since
+it aborts the package's other tests. A spec failing on a skeleton's zero
+value or `errSkeleton` is a failing spec. `skeletons-filled` (implement)
+fails while any non-test Go file declares or references `errSkeleton`.
+Both are their stages' own work: a failure retries the stage.
+
+## Review's verdict
+
+The review skill's artifact has `## Verdict` (first line `Passed` or
+`Failed: <n> blocking`), `## Risk map`, `## Agreed behaviour`, and each
+blocking finding as `### B<n>` under `## Blocking`. On `gf submit --passed`,
+`review-verdict-consistent` checks that the verdict starts with `Passed`,
+`## Blocking` lists no `### B<n>`, and the risk map and agreed behaviour
+aren't empty, naming what disagrees ("the verdict says Passed but
+## Blocking lists B1, B2"). It is about review's own artifact, so a failure
+retries review; it never sends the work to the fixer. A Failed verdict is
+`gf submit --failed "<n> blocking: B1 …"`, which does.
 
 ## Discovery before grill
 

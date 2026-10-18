@@ -145,6 +145,35 @@ alias claude-gofast='claude --plugin-dir /path/to/go-fast/plugin'
 The plugin is harmless in other repositories. Its hooks do nothing where
 there is no `.gofast/` directory.
 
+### The owner's skills
+
+The plugin ships your skills, and each stage agent preloads the ones for its
+stage, by their full name (`gofast:review`, `gofast:aggregate-design`, …):
+
+| Agent | Preloads |
+|---|---|
+| `discovery` | discovery, code-layout |
+| `design` | aggregate-design, functional-domain, value-types, schema-evolution, reads-and-reactions |
+| `plan` | code-layout |
+| `characterize` | specify (the shape of a spec only) |
+| `specify` | specify, functional-domain |
+| `implement` | aggregate-design, functional-domain, value-types, code-layout, schema-evolution, reads-and-reactions |
+| `optimize` | functional-domain, code-layout |
+| `review` | review, aggregate-design, functional-domain, value-types, code-layout, schema-evolution, reads-and-reactions |
+| `fixer` | fixer, discovery |
+| `event-modelling`, `measure`, `integration-testing`, `stress-testing` | none |
+
+Grill runs in the main session and loads `gofast:grilling` and
+`gofast:domain-modeling` itself (vendored from `mattpocock/skills`, MIT, with
+their `LICENSE` and `SOURCE.md`). Where a skill and an agent's protocol
+differ on gf commands, write scopes, checks or artifact paths, the protocol
+wins.
+
+**The plugin's copies are the source of truth.** If you have skills with the
+same names elsewhere (for example in your claude.ai account), turn those off,
+so the session and the agents only see the plugin's versions. To change a
+skill, edit it in `plugin/skills/<name>/SKILL.md`.
+
 ---
 
 ## 5. Add the deny rules
@@ -370,7 +399,8 @@ The session starts with a briefing from `gf status`. Then run:
 
 With no active work on the branch, Claude asks for:
 
-- **the work type**: `fix-bug`, `new-feature` or `modify-behaviour`;
+- **the work type**: `fix-bug`, `new-feature`, `modify-behaviour`,
+  `refactor` or `improve-performance`;
 - **a one-line description**, e.g. "The server listens on 8081 instead of
   8080".
 
@@ -392,6 +422,13 @@ git switch -c fix/port
 From here the drive loops by itself. Each agent does its stage, writes its
 artifact to `.gofast/works/<work>/<stage>-v<n>.md`, and submits. `gf` runs
 the stage's exit checks. The loop continues until you are needed.
+
+New feature work (path v3) runs: event modelling (only with an event model),
+discovery, which maps your input onto the code and ends with
+`## Questions for grill`, then **grill, live with you in the session**, then
+design, specify, implement, review, integration testing, and stress testing
+when review includes it. Works started on an earlier path finish on it (`gf
+status --json` shows `work.pathVersion`).
 
 ---
 
@@ -498,6 +535,8 @@ gofast creates these in your repository:
 | `.gofast/events.jsonl` | **yes**, with your branch | the event log: every step of every work. Git merges it across branches without conflicts |
 | `.gofast/.gitignore`, `.gofast/.gitattributes` | **yes** | created by gf; keep local files out of git and set up the event log's merge driver |
 | `.gofast/works/<work>/` | **yes**, with your branch | the artifacts: what each stage did and why |
+| `<decisionsDir>/` (default `docs/decisions/`) | **yes**, with your branch | grill's decision documents, and the index gf generates |
+| `GLOSSARY.md`, `GLOSSARY-MAP.md`, `docs/adr/*.md` | **yes**, with your branch | the glossary and ADRs grill writes while it interviews you |
 | `.gofast/runtime/`, `.gofast/gf.log`, `.gofast/events.lock` | no (already ignored) | local bookkeeping: baselines, check logs, stress runs, the log's seal, gf's diagnostic log |
 
 You can commit whenever you like, including mid-work. gofast compares each
@@ -535,6 +574,10 @@ change.
 | "There is already active work on branch …" | Finish it, or run `gf abandon "<reason>"`, or switch to another branch. |
 | "integration-passes: No integration command is configured." | Add `integration.command` to `.gofast/checks.json` and commit it. |
 | "Changed files outside the '<stage>' write scope: …" | Something changed files the stage may not touch. If it was you, undo the change: the comparison is with the stage's start, so committing doesn't help. |
+| "skeletons-only: <file>: an existing production file changed; specify may only add skeleton files" | Specify edited code that existed before. It may only add new skeleton files; the change belongs to implement. Undo it. |
+| "skeletons-only: <file>: func <name> has logic" (or "panics", or "var <name> is not `var errSkeleton = …`") | A skeleton does more than declare. Its functions may only be empty or return zero values or `errSkeleton`; it may declare `errSkeleton` once per package. Specify tries again. |
+| "skeletons-filled: errSkeleton is still in <files>" | Implement left a skeleton unfilled. It tries again until no non-test Go file uses `errSkeleton`. |
+| "review-verdict-consistent: … the verdict says Passed but ## Blocking lists B1" | Review passed while its artifact lists blocking findings (or lacks `## Verdict`, `## Risk map` or `## Agreed behaviour`). Review tries again: with blocking findings it must submit `--failed`, which sends the work to the fixer. |
 | `gf checks` warns "has uncommitted changes" | Commit `checks.json` / `nfrs.json` before starting work. |
 | "The baseline for '<stage>' is missing" | The work was started with an older gf or on another machine, or `git gc` pruned an old baseline. Run `gf abandon "<reason>"` and start the work again. |
 | "The exit-check configuration … is invalid" / "The NFRs … are invalid" | The message names the field. Fix the file; `gf checks` shows the result. |
@@ -542,14 +585,14 @@ change.
 | "The event log was changed outside gf …" | See [section 8](#the-event-log-was-changed-outside-gf). |
 | Anything else: "Something went wrong." | Details are in `.gofast/gf.log`. |
 
-### A known limitation for new features
+### Specs for code that doesn't exist yet
 
-Specify may only write tests, and its tests must compile and fail. On a
-`new-feature` whose functions don't exist yet, specs that call them won't
-compile, and specify fails with "specs don't compile". For now, before
-starting the work, commit a minimal skeleton of the new API: types and
-functions with empty or placeholder bodies. Specify can then write tests
-against it, and implement fills it in.
+Specs must compile and fail. When they need types or functions that don't
+exist yet, specify writes **skeletons**: new non-test Go files that declare
+only what the specs need, with bodies that return zero values or
+`errSkeleton`. `skeletons-only` checks them, and implement must fill every
+one (`skeletons-filled`). You don't need to commit a skeleton yourself any
+more.
 
 ---
 
