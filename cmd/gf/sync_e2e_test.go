@@ -1,9 +1,13 @@
 package main
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/jordiSalazarr/go-fast/workflow/progress"
 )
 
 func TestChecks_ShowsTheSyncConfiguration(t *testing.T) {
@@ -39,4 +43,22 @@ func TestSync_IsTheOwnersFromTheirTerminal_AndNeedsAConfigurationAndAToken(t *te
 	r.write(".gofast/sync.json", `{"server": "https://history.example.com", "project": "wallets"}`)
 	res = r.gfFails(nil, "sync", "--dry-run")
 	assert.Equal(t, "Set $GOFAST_SYNC_TOKEN to the project's token in your own shell, then run `gf sync` again.\n", res.stderr)
+}
+
+func TestStatus_SaysHowFarTheHistoryIsSynced(t *testing.T) {
+	r := newRepo(t)
+	r.gf("start", "--type", "fix-bug", "login button does nothing")
+	assert.Contains(t, r.gf("status"), "\n\nSync: not configured.\n")
+	v := r.status()
+	require.NotNil(t, v.Sync)
+	assert.False(t, v.Sync.Configured)
+
+	r.write(".gofast/sync.json", `{"server": "https://history.example.com", "project": "wallets"}`)
+	pending := len(r.eventTypes())
+	assert.Contains(t, r.gf("status"), fmt.Sprintf("\n\nSync: never synced; %d events pending. The owner runs `gf sync` in their own terminal.\n", pending))
+	v = r.status()
+	assert.Equal(t, &progress.SyncView{Configured: true, Pending: pending}, v.Sync)
+
+	r.write(".gofast/sync.json", `{"server": "ftp://x", "project": "wallets"}`)
+	assert.Contains(t, r.gf("status"), "\n\nSync: .gofast/sync.json is invalid. `gf checks` says why.\n", "a bad configuration never stops gf status")
 }

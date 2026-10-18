@@ -141,6 +141,8 @@ func TestHookSessionStart_EndToEnd(t *testing.T) {
 	r.gf("start", "--type", "fix-bug", "login button does nothing")
 	envFile := filepath.Join(t.TempDir(), "claude-env")
 	statusText := r.gf("status")
+	require.True(t, strings.HasSuffix(statusText, "\n\nSync: not configured.\n"))
+	statusText = strings.TrimSuffix(statusText, "\n\nSync: not configured.\n") // the owner's business, not the agent's
 
 	out := r.hook(map[string]string{"CLAUDE_ENV_FILE": envFile}, "session-start",
 		map[string]any{"hook_event_name": "SessionStart", "source": "startup", "model": "claude-opus-5-5"})

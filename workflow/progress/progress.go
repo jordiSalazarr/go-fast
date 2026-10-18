@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/jordiSalazarr/go-fast/workflow/domain"
 	"github.com/jordiSalazarr/go-fast/workflow/eventlog"
@@ -77,6 +78,22 @@ type View struct {
 	OtherBranches []OtherBranchView `json:"otherBranches"`
 	// LogWarning is set when the event log was changed outside gf.
 	LogWarning string `json:"logWarning,omitempty"`
+	// Sync says how far the history server holds this repository's
+	// history, as of the last gf sync; absent when gf status didn't look.
+	Sync *SyncView `json:"sync,omitempty"`
+}
+
+// SyncView is what gf knows, without asking the server, about syncing the
+// history.
+type SyncView struct {
+	Configured bool `json:"configured"`
+	// Problem is set when .gofast/sync.json can't be used.
+	Problem string `json:"problem,omitempty"`
+	// SyncedAt is when the last sync finished; absent before the first.
+	SyncedAt *time.Time `json:"syncedAt,omitempty"`
+	// Pending are the events the server didn't hold at the last sync, or
+	// all of them before the first.
+	Pending int `json:"pending"`
 }
 
 // LogChangedWarning is the view's LogWarning for an event log changed
@@ -1247,6 +1264,28 @@ func RenderJSON(w io.Writer, v View) error {
 
 // RenderText writes the view as the text `gf status` prints.
 func RenderText(w io.Writer, v View) {
+	renderText(w, v)
+	if s := v.Sync; s != nil {
+		fmt.Fprintf(w, "\n%s\n", describeSync(s))
+	}
+}
+
+// describeSync is the status's sync line.
+func describeSync(s *SyncView) string {
+	switch {
+	case s.Problem != "":
+		return "Sync: " + s.Problem + " `gf checks` says why."
+	case !s.Configured:
+		return "Sync: not configured."
+	case s.SyncedAt == nil:
+		return fmt.Sprintf("Sync: never synced; %d events pending. The owner runs `gf sync` in their own terminal.", s.Pending)
+	case s.Pending == 0:
+		return fmt.Sprintf("Sync: synced up to %s; nothing pending.", s.SyncedAt.UTC().Format("2006-01-02 15:04 UTC"))
+	}
+	return fmt.Sprintf("Sync: synced up to %s; %d events pending. The owner runs `gf sync` in their own terminal.", s.SyncedAt.UTC().Format("2006-01-02 15:04 UTC"), s.Pending)
+}
+
+func renderText(w io.Writer, v View) {
 	if v.LogWarning != "" {
 		fmt.Fprintf(w, "Warning: %s\n\n", v.LogWarning)
 	}
