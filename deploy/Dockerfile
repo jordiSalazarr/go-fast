@@ -16,9 +16,9 @@ RUN mkdir /data
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /gofast-server /gofast-server
 COPY --from=build --chown=65532:65532 /data /data
-# /data holds history.db; mount a volume there. The configuration is
-# mounted at /config/server.json.
-VOLUME ["/data"]
+# /data holds history.db; mount a volume there (no VOLUME line: Railway
+# refuses one). The configuration is mounted at /config/server.json, or
+# set whole in $GOFAST_SERVER_CONFIG.
 EXPOSE 8080
 USER nonroot:nonroot
 ENTRYPOINT ["/gofast-server", "-config", "/config/server.json"]

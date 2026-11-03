@@ -32,26 +32,34 @@ Keep the backups off the machine, and try restoring one.
 
 ## On Railway
 
-`railway.json`, at the repository's root, builds `deploy/Dockerfile`.
-Railway's domain gives you TLS, and it sets `$PORT`, which the server
-listens on.
+Railway builds `deploy/Dockerfile`, gives the service a domain with TLS,
+and keeps the database on a volume. From the repository's root:
 
-1. Create a project and a service from this repository (the dashboard, or
-   `railway init` then `railway up` from the repository's root).
-2. Attach a **volume** to the service, mounted at `/data`.
-3. Set the service's variables:
-   - `GOFAST_SERVER_CONFIG`: the whole `server.json`, as JSON, with `"db":
-     "/data/history.db"` and no `listen`. It holds only hashes.
-   - `RAILWAY_RUN_UID=0`: the image runs as a non-root user, and Railway
-     mounts volumes for root.
-4. Generate a public domain for the service (Settings → Networking).
-5. Turn on the volume's **backups** (the service's Backups tab): daily is
-   kept 6 days, weekly a month, monthly three months. They are the
-   assessments' only copy.
+```sh
+railway init --name gofast-history
+railway add --service gofast-server \
+  --variables "RAILWAY_DOCKERFILE_PATH=deploy/Dockerfile" \
+  --variables "RAILWAY_RUN_UID=0" \
+  --variables "GOFAST_SERVER_CONFIG=$(cat server.json)"
+railway volume --service gofast-server add --mount-path /data
+railway up --service gofast-server --ci
+railway domain --service gofast-server
+```
+
+- `GOFAST_SERVER_CONFIG` is the whole `server.json`, with `"db":
+  "/data/history.db"` and no `listen` (the server listens on `$PORT`, or
+  `:8080`, which Railway's domain finds). It holds only hashes.
+- `RAILWAY_RUN_UID=0`: the image runs as a non-root user, and Railway
+  mounts volumes for root.
+- Turn on the volume's **backups** in the dashboard (the service's Backups
+  tab): daily is kept 6 days, weekly a month, monthly three months. They
+  are the assessments' only copy.
 
 Run one replica only: the database is one SQLite file on one volume.
-Changing `GOFAST_SERVER_CONFIG` (a new member, a rotated secret)
-redeploys the service, with a few seconds' downtime.
+Changing `GOFAST_SERVER_CONFIG` (a new member, a rotated secret) with
+`railway variables --service gofast-server --set "GOFAST_SERVER_CONFIG=…"`
+redeploys the service, with a few seconds' downtime. `railway up` deploys
+the working tree as it is, committed or not.
 
 ## With systemd
 
