@@ -88,7 +88,7 @@ func (a *app) rootCommand() *cobra.Command {
 	root.AddCommand(
 		startwork.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch, a.repositoryRoot, exitchecks.LoadNFRs),
 		submitforacceptance.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch, a.changedFiles, a.scopeFacts, a.runChecks, a.stressFacts, a.baseline()),
-		approve.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch),
+		approve.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch, synchistory.AfterApprove(a.openStore, a.repositoryRoot, a.getenv, nil)),
 		reject.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch),
 		extendbudget.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch),
 		extendreworkbudget.NewCommand(a.openStore, a.automations(), a.resolveCaller, a.currentBranch),

@@ -51,9 +51,13 @@ func Approve(log Log, actor eventlog.Actor, branch domain.Branch, owner domain.O
 	return waiting.Stage(), nil
 }
 
-func NewCommand(openStore func() (*eventlog.Store, error), automate automations.Runner, resolveCaller func() (caller.Caller, error), currentBranch func() (domain.Branch, error)) *cobra.Command {
-	return &cobra.Command{
-		Use:   "approve",
+// NewCommand is `gf approve`. Once the approval is recorded it runs sync,
+// unless the owner passes --no-sync.
+func NewCommand(openStore func() (*eventlog.Store, error), automate automations.Runner, resolveCaller func() (caller.Caller, error), currentBranch func() (domain.Branch, error),
+	sync func(cmd *cobra.Command)) *cobra.Command {
+	var noSync bool
+	cmd := &cobra.Command{
+		Use:   "approve [--no-sync]",
 		Short: "Approve the submission waiting for the owner (owner only)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -84,7 +88,12 @@ func NewCommand(openStore func() (*eventlog.Store, error), automate automations.
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Approved '%s'. Run `gf status` to see what happens next.\n", stage)
+			if !noSync {
+				sync(cmd)
+			}
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&noSync, "no-sync", false, "don't send the history to the history server after approving")
+	return cmd
 }

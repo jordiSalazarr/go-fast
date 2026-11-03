@@ -444,7 +444,10 @@ and nothing comes back from it.
    the file. `gf checks` warns when gf has no secret, and when the server
    isn't https (localhost excepted).
 
-5. **Sync** from your own terminal, whenever you like:
+5. **Sync.** `gf approve` syncs on its own once the approval is recorded
+   (`gf approve --no-sync` skips it). If that sync fails, the approval
+   still stands and gf says so; run `gf sync` later. To sync at any other
+   time, from your own terminal:
 
    ```sh
    gf sync --dry-run   # asks the server what it holds; sends nothing
@@ -755,7 +758,7 @@ terminal.
 | `gf status [--json]` | anyone | where the work is, what to read, what comes next |
 | `gf checks` | anyone | shows and validates `checks.json`, `nfrs.json` and `sync.json` |
 | `gf submit --passed` / `--failed "<reason>"` | agents | submits the current stage; a pass runs its exit checks |
-| `gf approve` | owner | approves a stage waiting for you |
+| `gf approve [--no-sync]` | owner | approves a stage waiting for you, then syncs if `.gofast/sync.json` exists |
 | `gf reject "<feedback>"` | owner | sends it back (uses an attempt) |
 | `gf extend <n>` | owner | gives an escalated stage more attempts |
 | `gf rework-extend <n>` | owner | allows more trips through the fixer |

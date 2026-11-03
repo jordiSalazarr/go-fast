@@ -53,38 +53,69 @@ func NewCommand(openStore func() (*eventlog.Store, error), resolveCaller func() 
 			if !config.Configured {
 				return &Error{Message: "Sync is not configured: create " + remote.ConfigPath + " with the server's URL and the project's id. `gf checks` shows the result."}
 			}
-			secret, err := remote.LoadSecret(root, getenv)
-			if err != nil {
-				return err
-			}
-			if secret.Value == "" && getenv(remote.OldSecretEnv) != "" {
-				return &Error{Message: fmt.Sprintf("$%s is now $%s. Better: run `gf sync secret` and paste the project secret, then run `gf sync` again.", remote.OldSecretEnv, remote.SecretEnv)}
-			}
-			if secret.Value == "" {
-				return &Error{Message: "gf sync has no project secret: run `gf sync secret` and paste the one the history server showed when the project was created, then run `gf sync` again."}
-			}
-			checks, err := exitchecks.LoadConfig(root)
-			if err != nil {
-				return err
-			}
-			store, err := openStore()
-			if err != nil {
-				return err
-			}
-			log, err := remote.ReadLog(store)
-			if err != nil {
-				return err
-			}
-			gf := instructions.GfVersion()
-			server := remote.NewClient(config, secret.Value, "gf/"+gf, httpClient)
-			report, err := remote.Sync(cmd.Context(), root, config, checks.Decisions, log, server, remote.Options{DryRun: dryRun, Client: gf})
-			render(cmd.OutOrStdout(), config, report)
-			return explain(err, config, secret)
+			return run(cmd, root, config, openStore, getenv, httpClient, dryRun)
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "ask the server what it holds and list what would be sent, sending nothing")
 	cmd.AddCommand(newSecretCommand(resolveCaller, repositoryRoot, getenv))
 	return cmd
+}
+
+// AfterApprove is the sync `gf approve` runs once the approval is recorded,
+// so the server hears of it without the owner typing `gf sync`. The owner
+// typed `gf approve` in their terminal, so it is still the owner who sends.
+// Without a sync configuration it does nothing. A sync that fails doesn't
+// fail the approval: it says so on stderr, and `gf sync` resumes it.
+func AfterApprove(openStore func() (*eventlog.Store, error), repositoryRoot func() (string, error), getenv func(string) string,
+	httpClient *http.Client) func(cmd *cobra.Command) {
+	return func(cmd *cobra.Command) {
+		err := func() error {
+			root, err := repositoryRoot()
+			if err != nil {
+				return err
+			}
+			config, err := remote.LoadConfig(root)
+			if err != nil || !config.Configured {
+				return err
+			}
+			return run(cmd, root, config, openStore, getenv, httpClient, false)
+		}()
+		if err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "The approval is recorded, but the history isn't synced: %v\n", err)
+		}
+	}
+}
+
+// run sends the history to the configured server, and says what it sent.
+func run(cmd *cobra.Command, root string, config remote.Config, openStore func() (*eventlog.Store, error), getenv func(string) string,
+	httpClient *http.Client, dryRun bool) error {
+	secret, err := remote.LoadSecret(root, getenv)
+	if err != nil {
+		return err
+	}
+	if secret.Value == "" && getenv(remote.OldSecretEnv) != "" {
+		return &Error{Message: fmt.Sprintf("$%s is now $%s. Better: run `gf sync secret` and paste the project secret, then run `gf sync` again.", remote.OldSecretEnv, remote.SecretEnv)}
+	}
+	if secret.Value == "" {
+		return &Error{Message: "gf sync has no project secret: run `gf sync secret` and paste the one the history server showed when the project was created, then run `gf sync` again."}
+	}
+	checks, err := exitchecks.LoadConfig(root)
+	if err != nil {
+		return err
+	}
+	store, err := openStore()
+	if err != nil {
+		return err
+	}
+	log, err := remote.ReadLog(store)
+	if err != nil {
+		return err
+	}
+	gf := instructions.GfVersion()
+	server := remote.NewClient(config, secret.Value, "gf/"+gf, httpClient)
+	report, err := remote.Sync(cmd.Context(), root, config, checks.Decisions, log, server, remote.Options{DryRun: dryRun, Client: gf})
+	render(cmd.OutOrStdout(), config, report)
+	return explain(err, config, secret)
 }
 
 // newSecretCommand is `gf sync secret`: the owner pastes the project

@@ -5,6 +5,7 @@ import (
 	"io"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -51,6 +52,7 @@ func TestGivenAnAgent_WhenRunningApprove_ThenItIsRefusedBeforeTouchingTheLog(t *
 		automations.Runner{},
 		func() (caller.Caller, error) { return agent, nil },
 		func() (domain.Branch, error) { return Branch, nil },
+		func(*cobra.Command) { t.Error("an agent's refused approval must not sync") },
 	)
 	cmd.SetArgs(nil)
 	cmd.SetOut(io.Discard)

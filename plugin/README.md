@@ -742,6 +742,9 @@ heads rebuild.
 **Why owner only:** a sync sends data outside the machine, so the agent
 mustn't be able to start one. `gf sync` needs a terminal and refuses
 `GF_ACTOR=agent`, and the guard denies agents' commands that run it.
+`gf approve` also syncs once the approval is recorded (`--no-sync` skips
+it). It is still the owner who sends: the owner typed `gf approve` in their
+terminal. A failed sync doesn't undo the approval; `gf sync` resumes it.
 
 ## How the owner approves
 

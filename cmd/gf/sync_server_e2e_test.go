@@ -406,3 +406,58 @@ func TestSync_AMemberAssessesASyncedVisit_AndTheRepositoryNeverHearsOfIt(t *test
 	require.Len(t, timeline.Assessments, 1)
 	assert.Equal(t, "jordi", timeline.Assessments[0].Member)
 }
+
+// approvable starts a work in r and brings its first stage to the owner's
+// gate.
+func approvable(r *repo) {
+	r.t.Helper()
+	r.gf("start", "--type", "fix-bug", "login button does nothing")
+	r.workOnStage()
+	r.gf("submit", "--passed")
+}
+
+func TestApprove_SyncsTheHistory_WhenSyncIsConfigured(t *testing.T) {
+	server := newHistoryServer(t)
+	r := syncingRepo(t, server)
+	approvable(r)
+
+	out := r.gf("approve")
+	assert.Contains(t, out, "Approved 'discovery'.")
+	assert.Contains(t, out, "Synced with "+server.url+" (project wallets):")
+	assert.Equal(t, r.events(), server.heldEvents(t), "the approval and what it set off are on the server")
+}
+
+func TestApprove_NoSync_LeavesTheServerAlone(t *testing.T) {
+	server := newHistoryServer(t)
+	r := syncingRepo(t, server)
+	approvable(r)
+
+	out := r.gf("approve", "--no-sync")
+	assert.NotContains(t, out, "Synced")
+	assert.Zero(t, server.heldEvents(t))
+}
+
+func TestApprove_ASyncThatFails_StillApproves_AndSaysToSyncAgain(t *testing.T) {
+	server := newHistoryServer(t)
+	r := syncingRepo(t, server)
+	approvable(r)
+	server.dropEvents = 1
+
+	res := r.run(nil, "approve")
+	require.Equal(t, 0, res.code, "the approval is recorded whatever the sync does")
+	assert.Contains(t, res.stdout, "Approved 'discovery'.")
+	assert.Contains(t, res.stderr, "The approval is recorded, but the history isn't synced: gf could not reach the history server "+server.url)
+	assert.Contains(t, res.stderr, "Run `gf sync` again; it resumes where it stopped.")
+	r.expect("specify", "open", 0, 3)
+}
+
+func TestApprove_WithoutTheSecret_SaysHowToSave_ButApproves(t *testing.T) {
+	server := newHistoryServer(t)
+	r := syncingRepo(t, server)
+	require.NoError(t, os.Remove(filepath.Join(r.dir, ".gofast", "sync.secret")))
+	approvable(r)
+
+	res := r.run(nil, "approve")
+	require.Equal(t, 0, res.code, res.stderr)
+	assert.Contains(t, res.stderr, "The approval is recorded, but the history isn't synced: gf sync has no project secret: run `gf sync secret`")
+}
