@@ -551,6 +551,7 @@ function watchVisits() {
   review.observer = new IntersectionObserver((entries) => {
     for (const e of entries) seen.set(e.target, e.isIntersecting ? e.boundingClientRect.top : null);
     if (review.lock) return;
+    if (atBottom()) { setCurrent(review.cards.length - 1); return; }
     let best = -1, top = Infinity;
     review.cards.forEach((c, i) => { const y = seen.get(c); if (y !== null && y !== undefined && Math.abs(y - 120) < top) { top = Math.abs(y - 120); best = i; } });
     if (best >= 0) setCurrent(best);
@@ -558,13 +559,22 @@ function watchVisits() {
   for (const c of review.cards) review.observer.observe(c);
 }
 
+const atBottom = () => innerHeight + scrollY >= document.documentElement.scrollHeight - 4;
+
 function setCurrent(i) {
   if (!review) return;
   review.index = i;
   review.cards.forEach((c, j) => c.classList.toggle("current", j === i));
   const stations = document.querySelectorAll(".stations .station");
   stations.forEach((s, j) => s.classList.toggle("current", j === i));
-  stations[i]?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  // Keep the station in sight by scrolling the map sideways only: the
+  // page itself must stay where the member scrolled it.
+  const station = stations[i], map = station?.closest(".route");
+  if (station && map) {
+    const left = station.offsetLeft, right = left + station.offsetWidth;
+    if (left < map.scrollLeft) map.scrollLeft = left;
+    else if (right > map.scrollLeft + map.clientWidth) map.scrollLeft = right - map.clientWidth;
+  }
 }
 
 function focusVisit(i, scroll = true) {
@@ -965,6 +975,12 @@ async function filePage(sha, path) {
 
 window.addEventListener("hashchange", route);
 window.addEventListener("keydown", onKey);
+// At the bottom of a work, the last visit is the one being read, though it
+// can't scroll up to where the observer looks.
+window.addEventListener("scroll", () => {
+  if (!review || review.lock || !review.cards.length || !review.cards[0].isConnected) return;
+  if (atBottom()) setCurrent(review.cards.length - 1);
+}, { passive: true });
 window.addEventListener("DOMContentLoaded", () => {
   document.getElementById("logout").addEventListener("click", () => { clearSession(); location.hash = ""; login(); });
   document.getElementById("keys").addEventListener("click", (e) => { if (e.target.id === "keys") e.currentTarget.hidden = true; });
