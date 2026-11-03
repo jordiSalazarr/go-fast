@@ -5,9 +5,6 @@
     "acme": {
       "members": {
         "jordi": { "tokenSha256": "<printf %s \"$MEMBER_TOKEN\" | shasum -a 256>" }
-      },
-      "projects": {
-        "wallets": { "secretSha256": "<printf %s \"$PROJECT_SECRET\" | shasum -a 256>" }
       }
     }
   }

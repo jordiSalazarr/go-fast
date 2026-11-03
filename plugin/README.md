@@ -646,10 +646,12 @@ Abandon the work and start it again on this machine.
 
 The guard also denies any Bash command that mentions `GF_ACTOR`,
 `events.jsonl`, `events.lock`, `gf.log`, `.gofast/event`, `.gofast/gf`,
-`.gofast/runtime` or `.gofast/instructions` (which also catches globs like
-`.gofast/event?.jsonl`), and
+`.gofast/runtime`, `.gofast/instructions` or `sync.secret` (which also
+catches globs like `.gofast/event?.jsonl`), and
 any that clears the environment: `env -i`, `env --ignore-environment`,
-`env -u`, `unset`.
+`env -u`, `unset`. No agent may read or write `.gofast/sync.secret`, the
+project secret, with any tool: Read, Write, Edit, NotebookEdit, and Grep or
+Glob of it or of `.gofast/` are denied, in every session.
 
 ## Syncing the history
 
@@ -684,6 +686,12 @@ The protocol, `/v1` (`workflow/remote/wire`):
 - `GET /v1/projects/{p}/blobs/{sha256}/html`: a Markdown file rendered for
   the viewer (goldmark: raw HTML left out, dangerous links dropped).
 - `GET /v1/me`: the member a token is, their organisation and its projects.
+- `POST /v1/projects` (`{"id": "wallets"}`): a member creates a project in
+  their organisation; the server answers `201` with its secret, once, and
+  keeps only the hash. `409 taken` when the id exists, in any
+  organisation.
+- `POST /v1/projects/{p}/secret`: a member rotates the project's secret;
+  the old one stops syncing at once.
 - `GET /v1/projects/{p}/troubles`: every failed attempt, rejection,
   escalation, rework, return and abandon, newest first, with the stage visit
   it happened in (`?type=`, `?stage=`). A timeline lists its work's too.
@@ -696,9 +704,12 @@ The protocol, `/v1` (`workflow/remote/wire`):
   newest first (`?verdict=`, `?stage=`, `?member=`, `?work=`). A timeline
   lists its work's too.
 
-Credentials (`docs/adr/0002`): the server's configuration groups projects
-and members into organisations. Each project has one **project secret**,
-which every clone syncs with: it reaches only the sync endpoints (`streams`,
+Credentials (`docs/adr/0002`, `docs/adr/0003`): the server's configuration
+lists organisations and their members; members create the projects, which
+live in the database. Each project has one **project secret**, made by
+the server (`gfps_` and 64 hex digits), which every clone syncs with. gf
+reads it from `.gofast/sync.secret` (`gf sync secret`, git-ignored, denied
+to every agent tool) or `$GOFAST_PROJECT_SECRET`. It reaches only the sync endpoints (`streams`,
 `HEAD` and `PUT` a blob, `files`, `events`) and is refused (`403
 forbidden`) everywhere else. Each **member** has a personal token, which
 reads and assesses every project of their organisation; it is refused

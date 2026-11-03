@@ -48,11 +48,11 @@ The group of people who share a history server's projects.
 _Avoid_: Team, workspace, tenant
 
 **Project**:
-One repository's history on the history server, belonging to exactly one organisation.
+One repository's history on the history server, belonging to exactly one organisation; a member creates it in the viewer.
 _Avoid_: Repo (on the server side), stream
 
 **Project secret**:
-The one secret every clone of a project syncs with; it names the project and grants nothing else.
+The one secret every clone of a project syncs with, made by the server when the project is created or its secret rotated; it names the project and grants nothing else.
 _Avoid_: Sync token, API key
 
 **Member**:
