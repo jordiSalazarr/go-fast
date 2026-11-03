@@ -40,7 +40,7 @@ async function api(path, { text = false, body, method } = {}) {
 }
 
 // el builds an element: attrs are properties or attributes, children are
-// nodes or strings (set as text).
+// nodes or strings (set as text), or arrays of them, at any depth.
 function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
@@ -49,7 +49,7 @@ function el(tag, attrs = {}, ...children) {
     else if (k.startsWith("on")) node.addEventListener(k.slice(2), v);
     else node.setAttribute(k, v === true ? "" : v);
   }
-  for (const c of children.flat()) {
+  for (const c of children.flat(Infinity)) {
     if (c === undefined || c === null || c === false) continue;
     node.append(c instanceof Node ? c : document.createTextNode(String(c)));
   }
@@ -276,10 +276,12 @@ async function workPage(id) {
     sections.map((s) => el("div", { class: "card", id: `visit-${s.stage}-${s.visit}` },
       el("h2", {}, `${s.stage} · visit ${s.visit}`,
         troubles(s).length > 0 && el("span", { class: "trouble" }, ` ${troubles(s).length} ${troubles(s).length === 1 ? "trouble" : "troubles"}`)),
-      (instructions.get(`${s.stage} ${s.visit}`) || []).length > 0 && el("div", { class: "chips" },
-        instructions.get(`${s.stage} ${s.visit}`).map((i) => el("span", { class: "chip" },
-          `${i.kind} `, link(`#/instructions/${encodeURIComponent(i.name)}`, i.name),
-          i.load ? ` (${i.load})` : "", " ", el("span", { class: "hash" }, short(i.version))))),
+      (instructions.get(`${s.stage} ${s.visit}`) || []).length > 0
+        ? el("div", { class: "chips" },
+          instructions.get(`${s.stage} ${s.visit}`).map((i) => el("span", { class: "chip" },
+            `${i.kind} `, link(`#/instructions/${encodeURIComponent(i.name)}`, i.name),
+            i.load ? ` (${i.load})` : "", " ", el("span", { class: "hash" }, short(i.version)))))
+        : el("p", { class: "muted" }, "No agent or skill recorded for this visit: the clone that ran it recorded none (an older gf, or the plugin's hooks weren't loaded)."),
       artifacts(s).length > 0 && el("p", {}, "Artifacts: ", artifacts(s).map((f, i) => [i ? ", " : "", fileLink(f)])),
       el("ol", { class: "events" }, s.events.map(eventItem)),
       assessBox(t, s.stage, s.visit))),
