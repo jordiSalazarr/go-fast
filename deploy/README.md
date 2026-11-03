@@ -30,6 +30,29 @@ be synced again; the members' assessments are written on the server and
 exist nowhere else (`docs/adr/0001-assessments-live-only-on-the-server.md`).
 Keep the backups off the machine, and try restoring one.
 
+## On Railway
+
+`railway.json`, at the repository's root, builds `deploy/Dockerfile`.
+Railway's domain gives you TLS, and it sets `$PORT`, which the server
+listens on.
+
+1. Create a project and a service from this repository (the dashboard, or
+   `railway init` then `railway up` from the repository's root).
+2. Attach a **volume** to the service, mounted at `/data`.
+3. Set the service's variables:
+   - `GOFAST_SERVER_CONFIG`: the whole `server.json`, as JSON, with `"db":
+     "/data/history.db"` and no `listen`. It holds only hashes.
+   - `RAILWAY_RUN_UID=0`: the image runs as a non-root user, and Railway
+     mounts volumes for root.
+4. Generate a public domain for the service (Settings → Networking).
+5. Turn on the volume's **backups** (the service's Backups tab): daily is
+   kept 6 days, weekly a month, monthly three months. They are the
+   assessments' only copy.
+
+Run one replica only: the database is one SQLite file on one volume.
+Changing `GOFAST_SERVER_CONFIG` (a new member, a rotated secret)
+redeploys the service, with a few seconds' downtime.
+
 ## With systemd
 
 Copy `gofast-server` to `/usr/local/bin/`, write `/etc/gofast/server.json`

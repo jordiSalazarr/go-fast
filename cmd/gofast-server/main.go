@@ -6,6 +6,11 @@
 //	gofast-server -config server.json            serve
 //	gofast-server -config server.json -backup f  write a consistent copy of the database to f, and exit
 //
+// With $GOFAST_SERVER_CONFIG set, it reads the configuration from it, as
+// JSON, instead of from the file: for hosts that set environment variables
+// but mount no files, like Railway. Without "listen" in the configuration
+// it listens on $PORT, or on :8080.
+//
 // It speaks plain HTTP; put TLS in front of it (deploy/ has an example).
 package main
 
@@ -33,7 +38,7 @@ func main() {
 	if *backup != "" {
 		run = func(config historyserver.Config, logger *slog.Logger) error { return backupTo(config, *backup, logger) }
 	}
-	config, err := historyserver.LoadConfig(*configPath)
+	config, err := loadConfig(*configPath, os.Getenv)
 	if err == nil {
 		err = run(config, logger)
 	}
@@ -41,6 +46,26 @@ func main() {
 		fmt.Fprintln(os.Stderr, "gofast-server:", err)
 		os.Exit(1)
 	}
+}
+
+// configEnv holds the whole configuration, as JSON, when set.
+const configEnv = "GOFAST_SERVER_CONFIG"
+
+func loadConfig(path string, getenv func(string) string) (historyserver.Config, error) {
+	var config historyserver.Config
+	var err error
+	if data := getenv(configEnv); data != "" {
+		config, err = historyserver.ParseConfig([]byte(data), "$"+configEnv)
+	} else {
+		config, err = historyserver.LoadConfig(path)
+	}
+	if err == nil && config.Listen == "" {
+		config.Listen = ":8080"
+		if port := getenv("PORT"); port != "" {
+			config.Listen = ":" + port
+		}
+	}
+	return config, err
 }
 
 func backupTo(config historyserver.Config, path string, logger *slog.Logger) error {

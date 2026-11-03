@@ -317,11 +317,17 @@ func TestLoadConfig(t *testing.T) {
 		"members acme/ana and acme/jordi have the same token":             `{"acme": {"members": {"jordi": {"tokenSha256": "` + hash(token) + `"}, "ana": {"tokenSha256": "` + hash(token) + `"}}, "projects": {"wallets": {"secretSha256": "` + hash(secret) + `"}}}}`,
 		"a member's token and project wallets's secret are the same":      `{"acme": {"members": {"jordi": {"tokenSha256": "` + hash(secret) + `"}}, "projects": {"wallets": {"secretSha256": "` + hash(secret) + `"}}}}`,
 		`project "Wallets": ids are lowercase letters, digits and dashes`: `{"acme": {"projects": {"Wallets": {"secretSha256": "` + hash(secret) + `"}}}}`,
-		"set listen, db and at least one organisation with a project":     `{}`,
+		"set db and at least one organisation with a project":             `{}`,
 	} {
 		_, err := load(organisations)
 		assert.ErrorContains(t, err, want)
 	}
+
+	c, err = historyserver.ParseConfig([]byte(`{"db": "h.db", "organisations": {"acme": {"projects": {"wallets": {"secretSha256": "`+hash(secret)+`"}}}}}`), "$GOFAST_SERVER_CONFIG")
+	require.NoError(t, err, "listen is optional: gofast-server listens on $PORT, or :8080")
+	assert.Equal(t, "", c.Listen)
+	_, err = historyserver.ParseConfig([]byte(`{"db": ""}`), "$GOFAST_SERVER_CONFIG")
+	assert.ErrorContains(t, err, "$GOFAST_SERVER_CONFIG: set db")
 
 	require.NoError(t, os.WriteFile(path, []byte(`{"listen": ":8080", "db": "h.db", "projects": {"wallets": {"tokenSha256": "`+hash(token)+`"}}}`), 0o644))
 	_, err = historyserver.LoadConfig(path)

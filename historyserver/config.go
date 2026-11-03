@@ -14,7 +14,8 @@ import (
 // Config is the server's configuration file.
 type Config struct {
 	// Listen is the address to listen on, e.g. ":8080". Put TLS in front.
-	Listen string `json:"listen"`
+	// Empty, gofast-server listens on $PORT, or on :8080.
+	Listen string `json:"listen,omitempty"`
 	// DB is the SQLite database's path.
 	DB string `json:"db"`
 	// Organisations are the groups of people who share the server, by id.
@@ -54,6 +55,12 @@ func LoadConfig(path string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	return ParseConfig(data, path)
+}
+
+// ParseConfig reads a configuration; source names it in errors.
+func ParseConfig(data []byte, source string) (Config, error) {
+	path := source
 	var old struct {
 		Projects json.RawMessage `json:"projects"`
 	}
@@ -78,8 +85,8 @@ func (c Config) validate() error {
 	for _, o := range c.Organisations {
 		projects += len(o.Projects)
 	}
-	if c.Listen == "" || c.DB == "" || projects == 0 {
-		return fmt.Errorf("set listen, db and at least one organisation with a project")
+	if c.DB == "" || projects == 0 {
+		return fmt.Errorf("set db and at least one organisation with a project")
 	}
 	for _, org := range sortedKeys(c.Organisations) {
 		o := c.Organisations[org]
