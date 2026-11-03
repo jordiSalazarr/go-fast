@@ -4,11 +4,13 @@
 package synchistory
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -51,12 +53,15 @@ func NewCommand(openStore func() (*eventlog.Store, error), resolveCaller func() 
 			if !config.Configured {
 				return &Error{Message: "Sync is not configured: create " + remote.ConfigPath + " with the server's URL and the project's id. `gf checks` shows the result."}
 			}
-			secret := getenv(remote.SecretEnv)
-			if secret == "" && getenv(remote.OldSecretEnv) != "" {
-				return &Error{Message: fmt.Sprintf("$%s is now $%s: set $%[2]s to the project secret in your own shell, then run `gf sync` again.", remote.OldSecretEnv, remote.SecretEnv)}
+			secret, err := remote.LoadSecret(root, getenv)
+			if err != nil {
+				return err
 			}
-			if secret == "" {
-				return &Error{Message: fmt.Sprintf("Set $%s to the project secret in your own shell, then run `gf sync` again.", remote.SecretEnv)}
+			if secret.Value == "" && getenv(remote.OldSecretEnv) != "" {
+				return &Error{Message: fmt.Sprintf("$%s is now $%s. Better: run `gf sync secret` and paste the project secret, then run `gf sync` again.", remote.OldSecretEnv, remote.SecretEnv)}
+			}
+			if secret.Value == "" {
+				return &Error{Message: "gf sync has no project secret: run `gf sync secret` and paste the one the history server showed when the project was created, then run `gf sync` again."}
 			}
 			checks, err := exitchecks.LoadConfig(root)
 			if err != nil {
@@ -71,14 +76,63 @@ func NewCommand(openStore func() (*eventlog.Store, error), resolveCaller func() 
 				return err
 			}
 			gf := instructions.GfVersion()
-			server := remote.NewClient(config, secret, "gf/"+gf, httpClient)
+			server := remote.NewClient(config, secret.Value, "gf/"+gf, httpClient)
 			report, err := remote.Sync(cmd.Context(), root, config, checks.Decisions, log, server, remote.Options{DryRun: dryRun, Client: gf})
 			render(cmd.OutOrStdout(), config, report)
-			return explain(err, config)
+			return explain(err, config, secret)
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "ask the server what it holds and list what would be sent, sending nothing")
+	cmd.AddCommand(newSecretCommand(resolveCaller, repositoryRoot, getenv))
 	return cmd
+}
+
+// newSecretCommand is `gf sync secret`: the owner pastes the project
+// secret the history server showed, and gf keeps it in remote.SecretPath,
+// which git ignores. It reads the secret from stdin, so it never lands in
+// the shell's history.
+func newSecretCommand(resolveCaller func() (caller.Caller, error), repositoryRoot func() (string, error), getenv func(string) string) *cobra.Command {
+	return &cobra.Command{
+		Use:   "secret",
+		Short: "Save the project secret for gf sync, in " + remote.SecretPath + ", which git ignores (owner only)",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := resolveCaller()
+			if err != nil {
+				return err
+			}
+			if _, err := c.RequireOwner("save the project secret", "gf sync secret"); err != nil {
+				return err
+			}
+			root, err := repositoryRoot()
+			if err != nil {
+				return err
+			}
+			config, err := remote.LoadConfig(root)
+			if err != nil {
+				return err
+			}
+			if !config.Configured {
+				return &Error{Message: "Sync is not configured: create " + remote.ConfigPath + " with the server's URL and the project's id first. The history server shows both when you create the project."}
+			}
+			out := cmd.OutOrStdout()
+			fmt.Fprintf(out, "Paste the secret of project %s (it begins gfps_), then press Enter: ", config.Project)
+			line, _ := bufio.NewReader(cmd.InOrStdin()).ReadString('\n')
+			fmt.Fprintln(out)
+			secret := strings.TrimSpace(line)
+			if !remote.ValidSecret(secret) {
+				return &Error{Message: "That isn't a project secret: they begin gfps_ and are 69 characters long. Copy it from the history server, where the project was created or its secret rotated; a member's token never syncs."}
+			}
+			if err := remote.SaveSecret(root, secret); err != nil {
+				return err
+			}
+			fmt.Fprintf(out, "Saved the secret of project %s in %s, which git ignores. `gf sync` uses it.\n", config.Project, remote.SecretPath)
+			if getenv(remote.SecretEnv) != "" {
+				fmt.Fprintf(out, "$%s is set too, and wins over the file: unset it to use the saved secret.\n", remote.SecretEnv)
+			}
+			return nil
+		},
+	}
 }
 
 func render(w io.Writer, c remote.Config, r remote.Report) {
@@ -100,7 +154,7 @@ func render(w io.Writer, c remote.Config, r remote.Report) {
 }
 
 // explain turns what stopped a sync into what the owner does next.
-func explain(err error, c remote.Config) error {
+func explain(err error, c remote.Config, secret remote.Secret) error {
 	var (
 		refused     *remote.RefusedError
 		problem     *remote.ProblemError
@@ -113,9 +167,9 @@ func explain(err error, c remote.Config) error {
 		return &Error{Message: fmt.Sprintf("%d streams were not synced; the rest were. A refused stream's history differs from the server's: "+
 			"compare this clone's .gofast/events.jsonl with the server's timeline of that work before syncing it again.", len(refused.Refused))}
 	case errors.As(err, &problem) && problem.Problem.Error == wire.ProblemForbidden:
-		return &Error{Message: fmt.Sprintf("$%s is a member's token: gf sync needs project %s's secret, the one every clone of it syncs with.", remote.SecretEnv, c.Project)}
+		return &Error{Message: fmt.Sprintf("The secret in %s is a member's token: gf sync needs project %s's secret, the one every clone of it syncs with. Run `gf sync secret` and paste it.", secret.Source, c.Project)}
 	case errors.As(err, &problem) && problem.Problem.Error == wire.ProblemUnauthorized:
-		return &Error{Message: fmt.Sprintf("The history server %s refused the secret for project %s. Check $%s: if the secret was rotated, ask for the new one.", c.Server, c.Project, remote.SecretEnv)}
+		return &Error{Message: fmt.Sprintf("The history server %s refused the secret in %s for project %s. If it was rotated, run `gf sync secret` and paste the new one.", c.Server, secret.Source, c.Project)}
 	case errors.As(err, &problem):
 		return &Error{Message: fmt.Sprintf("The history server %s refused the sync: %s. Run `gf sync` again; it resumes where it stopped.", c.Server, problem.Problem.Message)}
 	case errors.As(err, &unreachable):

@@ -21,10 +21,7 @@ import (
 	"github.com/jordiSalazarr/go-fast/workflow/remote/wire"
 )
 
-const (
-	projectSecret = "s3cret"
-	memberToken   = "j0rdi"
-)
+const memberToken = "j0rdi"
 
 // historyServer is a running reference server with the project wallets of
 // organisation acme, whose member is jordi, and the requests it served, in
@@ -32,8 +29,10 @@ const (
 type historyServer struct {
 	url   string
 	store *historyserver.Store
-	mu    gosync.Mutex
-	seen  []string
+	// secret is the project's, as the server made it.
+	secret string
+	mu     gosync.Mutex
+	seen   []string
 	// dropEvents is how many event batches to drop, as a lost connection.
 	dropEvents int
 }
@@ -43,12 +42,13 @@ func newHistoryServer(t *testing.T) *historyServer {
 	store, err := historyserver.Open(filepath.Join(t.TempDir(), "history.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { store.Close() })
+	created, err := store.CreateProject(context.Background(), "acme", "wallets", "jordi")
+	require.NoError(t, err)
 	inner, err := historyserver.Handler(store, map[string]historyserver.Organisation{"acme": {
-		Members:  map[string]historyserver.Member{"jordi": {TokenSHA256: sha256Hex(memberToken)}},
-		Projects: map[string]historyserver.Project{"wallets": {SecretSHA256: sha256Hex(projectSecret)}},
+		Members: map[string]historyserver.Member{"jordi": {TokenSHA256: sha256Hex(memberToken)}},
 	}}, nil)
 	require.NoError(t, err)
-	h := &historyServer{store: store}
+	h := &historyServer{store: store, secret: created.Secret}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h.mu.Lock()
 		h.seen = append(h.seen, r.Method+" "+strings.TrimPrefix(r.URL.Path, "/v1/projects/wallets"))
@@ -97,12 +97,14 @@ func syncingRepo(t *testing.T, server *historyServer) *repo {
 	r := newRepo(t)
 	r.write(".gofast/sync.json", `{"server": "`+server.url+`", "project": "wallets"}`)
 	r.gf("status") // creates .gofast/ with .gitignore and .gitattributes
+	require.Equal(r.t, 0, r.runWithInput(server.secret+"\n", "sync", "secret").code)
 	r.git("add", ".")
 	r.git("commit", "-q", "-m", "gofast")
 	return r
 }
 
-// clone is another clone of r, as a teammate's or another machine's.
+// clone is another clone of r, as a teammate's or another machine's, with
+// r's project secret saved in it.
 func (r *repo) clone() *repo {
 	r.t.Helper()
 	dir := r.t.TempDir()
@@ -111,12 +113,17 @@ func (r *repo) clone() *repo {
 	c := &repo{t: r.t, dir: dir}
 	c.git("config", "user.name", "Jordi")
 	c.git("config", "user.email", "jordi@example.com")
+	// git leaves the project secret behind: the owner saves it in each
+	// clone once.
+	if secret, err := os.ReadFile(filepath.Join(r.dir, ".gofast", "sync.secret")); err == nil {
+		require.Equal(r.t, 0, c.runWithInput(string(secret), "sync", "secret").code)
+	}
 	return c
 }
 
 func (r *repo) sync(args ...string) result {
 	r.t.Helper()
-	return r.run(map[string]string{"GOFAST_PROJECT_SECRET": projectSecret}, append([]string{"sync"}, args...)...)
+	return r.run(nil, append([]string{"sync"}, args...)...)
 }
 
 func (r *repo) events() int { return len(r.eventTypes()) }
@@ -291,7 +298,7 @@ func TestSync_WithAMembersToken_SaysItNeedsTheProjectSecret(t *testing.T) {
 	r.gf("start", "--type", "fix-bug", "login button does nothing")
 	res := r.run(map[string]string{"GOFAST_PROJECT_SECRET": memberToken}, "sync")
 	assert.Equal(t, 1, res.code)
-	assert.Equal(t, "$GOFAST_PROJECT_SECRET is a member's token: gf sync needs project wallets's secret, the one every clone of it syncs with.\n", res.stderr)
+	assert.Equal(t, "The secret in $GOFAST_PROJECT_SECRET is a member's token: gf sync needs project wallets's secret, the one every clone of it syncs with. Run `gf sync secret` and paste it.\n", res.stderr)
 	assert.Zero(t, server.heldEvents(t))
 }
 

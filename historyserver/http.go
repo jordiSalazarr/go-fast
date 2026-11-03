@@ -18,16 +18,17 @@ const (
 	maxBlob  = 64 << 20
 )
 
-// Handler serves the protocol for the organisations' projects.
+// Handler serves the protocol for the organisations' members, and for
+// the projects they create.
 func Handler(store *Store, organisations map[string]Organisation, logger *slog.Logger) (http.Handler, error) {
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
 	}
-	a, err := newAccess(organisations)
+	m, err := newMembers(organisations)
 	if err != nil {
 		return nil, err
 	}
-	h := &handler{store: store, access: a, logger: logger}
+	h := &handler{store: store, members: m, logger: logger}
 	mux := http.NewServeMux()
 	p := wire.Version + "/projects/{project}"
 	mux.HandleFunc("GET "+p+"/streams", h.syncs(h.streams))
@@ -44,7 +45,9 @@ func Handler(store *Store, organisations map[string]Organisation, logger *slog.L
 	mux.HandleFunc("GET "+p+"/blobs/{sha256}/html", h.inspects(h.renderBlob))
 	mux.HandleFunc("GET "+p+"/instructions", h.inspects(h.instructions))
 	mux.HandleFunc("GET "+p+"/instructions/{from}/diff/{to}", h.inspects(h.diff))
-	mux.HandleFunc("GET "+wire.Version+"/me", h.me)
+	mux.HandleFunc("POST "+p+"/secret", h.inspects(h.rotateSecret))
+	mux.HandleFunc("POST "+wire.Version+"/projects", h.asMember(h.createProject))
+	mux.HandleFunc("GET "+wire.Version+"/me", h.asMember(h.me))
 	viewer := viewerHandler()
 	mux.Handle("GET /{$}", viewer)
 	mux.Handle("GET /viewer/", http.StripPrefix("/viewer", viewer))
@@ -52,14 +55,29 @@ func Handler(store *Store, organisations map[string]Organisation, logger *slog.L
 }
 
 type handler struct {
-	store  *Store
-	access access
-	logger *slog.Logger
+	store   *Store
+	members members
+	logger  *slog.Logger
 }
 
-func (h *handler) credential(r *http.Request) credential {
+// credential is who a bearer token is: a member, by their token, or a
+// project, by its secret; both empty for nobody.
+type credential struct {
+	project string
+	member  memberOf
+}
+
+func (h *handler) credential(r *http.Request) (credential, error) {
 	token, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-	return h.access.of(token)
+	if token == "" {
+		return credential{}, nil
+	}
+	hash := sha256Of(token)
+	if m, ok := h.members[hash]; ok {
+		return credential{member: m}, nil
+	}
+	project, _, err := h.store.projectOfSecret(r.Context(), hash)
+	return credential{project: project}, err
 }
 
 // syncs lets a request through only with its project's secret. Another
@@ -68,7 +86,10 @@ func (h *handler) credential(r *http.Request) credential {
 func (h *handler) syncs(next func(w http.ResponseWriter, r *http.Request, project string)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		project := r.PathValue("project")
-		switch c := h.credential(r); {
+		c, err := h.credential(r)
+		switch {
+		case err != nil:
+			h.problem(w, r, err)
 		case c.project != "" && c.project == project:
 			next(w, r, project)
 		case c.member.name != "":
@@ -79,23 +100,39 @@ func (h *handler) syncs(next func(w http.ResponseWriter, r *http.Request, projec
 	}
 }
 
-// inspects lets a request through only with the token of a member of the
-// project's organisation. To a member, another organisation's project
-// looks like no project.
-func (h *handler) inspects(next func(w http.ResponseWriter, r *http.Request, project string, member string)) http.HandlerFunc {
+// asMember lets a request through only with a member's token.
+func (h *handler) asMember(next func(w http.ResponseWriter, r *http.Request, m memberOf)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		project := r.PathValue("project")
-		switch c := h.credential(r); {
+		c, err := h.credential(r)
+		switch {
+		case err != nil:
+			h.problem(w, r, err)
 		case c.project != "":
 			h.problem(w, r, refuse(http.StatusForbidden, wire.ProblemForbidden, "the project secret only syncs: read with a member's token"))
 		case c.member.name == "":
 			h.problem(w, r, refuse(http.StatusUnauthorized, wire.ProblemUnauthorized, "unknown token: sign in with your member token"))
-		case h.access.orgOf[project] != c.member.org:
-			h.problem(w, r, refuse(http.StatusNotFound, wire.ProblemNotFound, "organisation %s has no project %s", c.member.org, project))
 		default:
-			next(w, r, project, c.member.name)
+			next(w, r, c.member)
 		}
 	}
+}
+
+// inspects lets a request through only with the token of a member of the
+// project's organisation. To a member, another organisation's project
+// looks like no project.
+func (h *handler) inspects(next func(w http.ResponseWriter, r *http.Request, project, member string)) http.HandlerFunc {
+	return h.asMember(func(w http.ResponseWriter, r *http.Request, m memberOf) {
+		project := r.PathValue("project")
+		org, err := h.store.organisationOf(r.Context(), project)
+		switch {
+		case err != nil:
+			h.problem(w, r, err)
+		case org != m.org:
+			h.problem(w, r, refuse(http.StatusNotFound, wire.ProblemNotFound, "organisation %s has no project %s", m.org, project))
+		default:
+			next(w, r, project, m.name)
+		}
+	})
 }
 
 // blob is HEAD, which gf sync asks, and GET, which members read.
@@ -107,18 +144,41 @@ func (h *handler) blob(w http.ResponseWriter, r *http.Request) {
 	h.inspects(h.getBlob)(w, r)
 }
 
-// me is who the member is, and the projects they inspect.
-func (h *handler) me(w http.ResponseWriter, r *http.Request) {
-	c := h.credential(r)
-	switch {
-	case c.project != "":
-		h.problem(w, r, refuse(http.StatusForbidden, wire.ProblemForbidden, "the project secret only syncs: sign in with a member's token"))
-		return
-	case c.member.name == "":
-		h.problem(w, r, refuse(http.StatusUnauthorized, wire.ProblemUnauthorized, "unknown token: sign in with your member token"))
+// me is who the member is, and their organisation's projects.
+func (h *handler) me(w http.ResponseWriter, r *http.Request, m memberOf) {
+	projects, err := h.store.Projects(r.Context(), m.org)
+	if err != nil {
+		h.problem(w, r, err)
 		return
 	}
-	reply(w, http.StatusOK, wire.Me{Member: c.member.name, Organisation: c.member.org, Projects: append([]string{}, h.access.projects[c.member.org]...)})
+	reply(w, http.StatusOK, wire.Me{Member: m.name, Organisation: m.org, Projects: projects})
+}
+
+// createProject makes a project in the member's organisation, and shows
+// its secret, once.
+func (h *handler) createProject(w http.ResponseWriter, r *http.Request, m memberOf) {
+	var p wire.NewProject
+	if !h.decode(w, r, &p) {
+		return
+	}
+	out, err := h.store.CreateProject(r.Context(), m.org, p.ID, m.name)
+	if err != nil {
+		h.problem(w, r, err)
+		return
+	}
+	h.logger.Info("project created", "project", out.Project, "organisation", m.org, "member", m.name)
+	reply(w, http.StatusCreated, out)
+}
+
+// rotateSecret gives the project a new secret, and shows it, once.
+func (h *handler) rotateSecret(w http.ResponseWriter, r *http.Request, project, member string) {
+	out, err := h.store.RotateSecret(r.Context(), project, member)
+	if err != nil {
+		h.problem(w, r, err)
+		return
+	}
+	h.logger.Info("project secret rotated", "project", project, "member", member)
+	reply(w, http.StatusOK, out)
 }
 
 func (h *handler) streams(w http.ResponseWriter, r *http.Request, project string) {

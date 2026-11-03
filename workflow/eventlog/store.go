@@ -101,7 +101,8 @@ func FindRoot(start string) (string, error) {
 }
 
 // Init creates .gofast/ under root if needed, and makes sure of two files in
-// it: .gitignore lists what stays local (the lock, the log, runtime markers),
+// it: .gitignore lists what stays local (the lock, the log, runtime markers,
+// the project secret),
 // and .gitattributes merges the event log with git's union driver, so work
 // appended on two branches merges without conflicts.
 func Init(root string) error {
@@ -115,8 +116,12 @@ func Init(root string) error {
 	return ensureLines(filepath.Join(dir, ".gitattributes"), attributes)
 }
 
-// ignored lists what .gofast/.gitignore keeps out of git.
-var ignored = []string{lockFile, logFile, RuntimeDir + "/"}
+// ignored lists what .gofast/.gitignore keeps out of git: and the project
+// secret gf sync reads (remote.SecretPath), which never leaves the machine.
+var ignored = []string{lockFile, logFile, RuntimeDir + "/", SecretFile}
+
+// SecretFile is the project secret's file in .gofast/.
+const SecretFile = "sync.secret"
 
 // attributes are .gofast/.gitattributes: union merges keep both branches' lines.
 var attributes = []string{eventsFile + " merge=union"}

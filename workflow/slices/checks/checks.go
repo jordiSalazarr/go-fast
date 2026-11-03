@@ -95,7 +95,11 @@ func NewCommand(repositoryRoot func() (string, error), getenv func(string) strin
 			if err != nil {
 				return err
 			}
-			for _, w := range syncConfig.Warnings(getenv(remote.SecretEnv)) {
+			secret, err := remote.LoadSecret(root, getenv)
+			if err != nil {
+				return err
+			}
+			for _, w := range syncConfig.Warnings(secret) {
 				fmt.Fprintf(cmd.OutOrStdout(), "Warning: %s\n\n", w)
 			}
 			kept, problems, err := instructions.Verify(root)
@@ -109,7 +113,7 @@ func NewCommand(repositoryRoot func() (string, error), getenv func(string) strin
 			renderNFRs(cmd.OutOrStdout(), nfrs)
 			renderCatalog(cmd.OutOrStdout(), catalog)
 			renderKept(cmd.OutOrStdout(), kept, len(problems))
-			renderSync(cmd.OutOrStdout(), syncConfig, getenv(remote.SecretEnv) != "")
+			renderSync(cmd.OutOrStdout(), syncConfig, secret)
 			return nil
 		},
 	}
@@ -149,18 +153,18 @@ func renderKept(w io.Writer, kept, changed int) {
 }
 
 // renderSync says where gf sync sends the history, and what it sends.
-func renderSync(w io.Writer, c remote.Config, secret bool) {
+func renderSync(w io.Writer, c remote.Config, secret remote.Secret) {
 	if !c.Configured {
 		fmt.Fprintf(w, "\nSync: not configured (%s does not exist); the history stays in this repository.\n", remote.ConfigPath)
 		return
 	}
-	state := "set"
-	if !secret {
-		state = "missing"
+	state := "missing: run `gf sync secret`"
+	if secret.Value != "" {
+		state = "from " + secret.Source
 	}
 	fmt.Fprintf(w, "\nSync (%s): project %s on %s\n", remote.ConfigPath, c.Project, c.Server)
 	fmt.Fprintf(w, "  sends        %s\n", strings.Join(c.Included(), ", "))
-	fmt.Fprintf(w, "  secret       $%s %s\n", remote.SecretEnv, state)
+	fmt.Fprintf(w, "  secret       %s\n", state)
 }
 
 func render(w io.Writer, config exitchecks.Config) {

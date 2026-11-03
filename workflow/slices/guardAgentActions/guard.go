@@ -76,6 +76,8 @@ type toolInput struct {
 	FilePath     string `json:"file_path"`
 	NotebookPath string `json:"notebook_path"`
 	Skill        string `json:"skill"`
+	// Path is Grep's and Glob's directory or file.
+	Path string `json:"path"`
 }
 
 // protectedNames are what a Bash command may not mention: text, then how the
@@ -90,7 +92,14 @@ var protectedNames = []struct{ text, name string }{
 	{".gofast/gf", ".gofast/gf.*"},
 	{".gofast/runtime", ".gofast/runtime/"},
 	{".gofast/instructions", ".gofast/instructions/"},
+	{"sync.secret", ".gofast/sync.secret"},
 }
+
+// secretFile is the project secret (remote.SecretPath), which no agent
+// reads or writes with any tool.
+const secretFile = ".gofast/sync.secret"
+
+const secretReason = "Agents may not touch " + secretFile + ": it is the project secret gf sync sends to the history server. Ask the owner to run `gf sync`."
 
 const clearEnvironmentReason = "Agents may not clear the environment while gofast is active."
 
@@ -120,6 +129,9 @@ var ownerOnlyReasons = map[string]string{
 //  5. Skill loading a skill of the stage's catalog before the work has a
 //     diagnosis (SkillCatalog.MayLoad): deny, for the same callers as rule 4;
 //     so is a Read of that skill's SKILL.md, on a best-effort basis.
+//  6. Any tool reading or writing the project secret, .gofast/sync.secret
+//     (Read, Write, Edit, NotebookEdit, and Grep of it or of .gofast/):
+//     deny, everywhere, for every agent. Bash is rule 2's.
 //
 // Rules 1 to 3 need no workflow state, so they hold even when it cannot be
 // read (fail closed); a Bash call whose input cannot be read is denied too.
@@ -127,6 +139,9 @@ var ownerOnlyReasons = map[string]string{
 func decide(in claudehooks.Input, facts stageFacts, driving bool, root string) claudehooks.Output {
 	var tool toolInput
 	inputErr := json.Unmarshal(in.ToolInput, &tool)
+	if inputErr == nil && touchesSecret(in, tool, root) {
+		return claudehooks.Deny(secretReason)
+	}
 
 	switch in.ToolName {
 	case "Bash":
@@ -202,6 +217,36 @@ func decide(in claudehooks.Input, facts stageFacts, driving bool, root string) c
 		return claudehooks.Nothing()
 	}
 	return claudehooks.Nothing()
+}
+
+// touchesSecret: rule 6.
+func touchesSecret(in claudehooks.Input, tool toolInput, root string) bool {
+	var targets []string
+	switch in.ToolName {
+	case "Read", "Write", "Edit":
+		targets = []string{tool.FilePath}
+	case "NotebookEdit":
+		targets = []string{tool.NotebookPath}
+	case "Grep", "Glob":
+		targets = []string{tool.Path}
+	}
+	for _, target := range targets {
+		if target == "" {
+			continue
+		}
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(in.CWD, target)
+		}
+		p, err := domain.NewRepoPath(root, target)
+		if err != nil {
+			continue
+		}
+		s := p.String()
+		if s == secretFile || ((in.ToolName == "Grep" || in.ToolName == "Glob") && s == ".gofast") {
+			return true
+		}
+	}
+	return false
 }
 
 // scopeApplies: rule 4 covers gofast stage agents, and the main session while

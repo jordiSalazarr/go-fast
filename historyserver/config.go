@@ -22,24 +22,17 @@ type Config struct {
 	Organisations map[string]Organisation `json:"organisations"`
 }
 
-// Organisation is its members and its projects. A member inspects and
-// assesses every project of their organisation, and no other.
+// Organisation is its members. A member inspects and assesses every
+// project of their organisation, and creates its projects in the viewer;
+// the projects live in the database (docs/adr/0003).
 type Organisation struct {
-	Members  map[string]Member  `json:"members,omitempty"`
-	Projects map[string]Project `json:"projects"`
+	Members map[string]Member `json:"members"`
 }
 
 // Member is a person's token, by its SHA-256, so the file holds no token.
 // It reads and assesses; it never syncs.
 type Member struct {
 	TokenSHA256 string `json:"tokenSha256"`
-}
-
-// Project is the project secret, by its SHA-256: every clone of the
-// project syncs with it, and it does nothing else. Each project's secret
-// is its own, so the hash names the project.
-type Project struct {
-	SecretSHA256 string `json:"secretSha256"`
 }
 
 var (
@@ -62,11 +55,18 @@ func LoadConfig(path string) (Config, error) {
 func ParseConfig(data []byte, source string) (Config, error) {
 	path := source
 	var old struct {
-		Projects json.RawMessage `json:"projects"`
+		Projects      json.RawMessage                       `json:"projects"`
+		Organisations map[string]map[string]json.RawMessage `json:"organisations"`
 	}
-	if json.Unmarshal(data, &old) == nil && old.Projects != nil {
-		return Config{}, fmt.Errorf("%s: projects now belong to an organisation, and read tokens are members' tokens: see deploy/server.example.json "+
-			"(a project's tokenSha256 becomes its secretSha256)", path)
+	if json.Unmarshal(data, &old) == nil {
+		if old.Projects != nil {
+			return Config{}, fmt.Errorf("%s: projects are created in the viewer now, and read tokens are members' tokens: list each organisation's members, as in deploy/server.example.json", path)
+		}
+		for _, org := range sortedKeys(old.Organisations) {
+			if _, ok := old.Organisations[org]["projects"]; ok {
+				return Config{}, fmt.Errorf("%s: organisation %s lists projects: members create them in the viewer now, which makes each one's secret. Remove \"projects\" and create them there", path, org)
+			}
+		}
 	}
 	var c Config
 	dec := json.NewDecoder(bytes.NewReader(data))
@@ -81,12 +81,12 @@ func ParseConfig(data []byte, source string) (Config, error) {
 }
 
 func (c Config) validate() error {
-	projects := 0
+	members := 0
 	for _, o := range c.Organisations {
-		projects += len(o.Projects)
+		members += len(o.Members)
 	}
-	if c.DB == "" || projects == 0 {
-		return fmt.Errorf("set db and at least one organisation with a project")
+	if c.DB == "" || members == 0 {
+		return fmt.Errorf("set db and at least one organisation with a member")
 	}
 	for _, org := range sortedKeys(c.Organisations) {
 		o := c.Organisations[org]
@@ -101,16 +101,8 @@ func (c Config) validate() error {
 				return fmt.Errorf("member %s/%s: tokenSha256 must be the token's SHA-256 in lowercase hex (printf %%s \"$TOKEN\" | shasum -a 256)", org, name)
 			}
 		}
-		for _, p := range sortedKeys(o.Projects) {
-			if !idPattern.MatchString(p) {
-				return fmt.Errorf("project %q: ids are lowercase letters, digits and dashes", p)
-			}
-			if !sha256Hex.MatchString(o.Projects[p].SecretSHA256) {
-				return fmt.Errorf("project %s: secretSha256 must be the secret's SHA-256 in lowercase hex (printf %%s \"$SECRET\" | shasum -a 256)", p)
-			}
-		}
 	}
-	_, err := newAccess(c.Organisations)
+	_, err := newMembers(c.Organisations)
 	return err
 }
 
@@ -123,71 +115,31 @@ func sortedKeys[V any](m map[string]V) []string {
 	return out
 }
 
-// access says who a bearer token is: a project, by its secret, or a
-// member, by their token.
-type access struct {
-	// orgOf is each project's organisation.
-	orgOf map[string]string
-	// secrets and members are by the SHA-256 of the secret or token.
-	secrets map[string]string
-	members map[string]memberOf
-	// projects are each organisation's projects, sorted.
-	projects map[string][]string
-}
+// members are the organisations' members, by the SHA-256 of their token.
+type members map[string]memberOf
 
 type memberOf struct{ org, name string }
 
-// newAccess indexes the organisations. A project belongs to one
-// organisation, and no two credentials are the same, so each names one
-// project or one member.
-func newAccess(orgs map[string]Organisation) (access, error) {
-	a := access{orgOf: map[string]string{}, secrets: map[string]string{}, members: map[string]memberOf{}, projects: map[string][]string{}}
+// newMembers indexes the organisations' members. No two have the same
+// token, so a token names one member.
+func newMembers(orgs map[string]Organisation) (members, error) {
+	out := members{}
 	for _, org := range sortedKeys(orgs) {
-		o := orgs[org]
-		for _, name := range sortedKeys(o.Members) {
-			h := o.Members[name].TokenSHA256
-			if other, ok := a.members[h]; ok {
-				return access{}, fmt.Errorf("members %s/%s and %s/%s have the same token: each member needs their own", other.org, other.name, org, name)
+		for _, name := range sortedKeys(orgs[org].Members) {
+			h := orgs[org].Members[name].TokenSHA256
+			if other, ok := out[h]; ok {
+				return nil, fmt.Errorf("members %s/%s and %s/%s have the same token: each member needs their own", other.org, other.name, org, name)
 			}
-			a.members[h] = memberOf{org: org, name: name}
-		}
-		for _, p := range sortedKeys(o.Projects) {
-			if other, ok := a.orgOf[p]; ok {
-				return access{}, fmt.Errorf("project %s is in both %s and %s: a project belongs to one organisation", p, other, org)
-			}
-			a.orgOf[p] = org
-			a.projects[org] = append(a.projects[org], p)
-			h := o.Projects[p].SecretSHA256
-			if other, ok := a.secrets[h]; ok {
-				return access{}, fmt.Errorf("projects %s and %s have the same secret: each project needs its own", other, p)
-			}
-			a.secrets[h] = p
+			out[h] = memberOf{org: org, name: name}
 		}
 	}
-	for h, p := range a.secrets {
-		if _, ok := a.members[h]; ok {
-			return access{}, fmt.Errorf("a member's token and project %s's secret are the same: they must differ", p)
-		}
-	}
-	return a, nil
+	return out, nil
 }
 
-// credential is who a bearer token is; both empty for nobody.
-type credential struct {
-	project string // the project whose secret it is
-	member  memberOf
-}
-
-// of looks the token up by its SHA-256: a map lookup on a hash leaks
-// nothing usable about the token, so no constant-time compare is needed.
-func (a access) of(token string) credential {
-	if token == "" {
-		return credential{}
-	}
-	sum := sha256.Sum256([]byte(token))
-	h := hex.EncodeToString(sum[:])
-	if p, ok := a.secrets[h]; ok {
-		return credential{project: p}
-	}
-	return credential{member: a.members[h]}
+// sha256Of is a credential's SHA-256, as the configuration and the
+// database hold it. Looking a credential up by its hash leaks nothing
+// usable about it, so no constant-time compare is needed.
+func sha256Of(credential string) string {
+	sum := sha256.Sum256([]byte(credential))
+	return hex.EncodeToString(sum[:])
 }

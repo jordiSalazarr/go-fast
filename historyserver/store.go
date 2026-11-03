@@ -5,8 +5,9 @@
 // of a newer gf. It can't change any workflow state; nothing it holds goes
 // back to a repository.
 //
-// It also keeps the members' assessments, which are written here and exist
-// nowhere else (docs/adr/0001): its backups are their only copy.
+// It also keeps what is written here and exists nowhere else: the
+// members' assessments (docs/adr/0001) and the projects, with their
+// secrets' hashes (docs/adr/0003). Its backups are their only copy.
 package historyserver
 
 import (
@@ -75,6 +76,15 @@ CREATE TABLE IF NOT EXISTS syncs (
 	client      TEXT NOT NULL,
 	accepted    INTEGER NOT NULL,
 	duplicates  INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS projects (
+	id            TEXT PRIMARY KEY,
+	organisation  TEXT NOT NULL,
+	secret_sha256 TEXT NOT NULL UNIQUE,
+	created_by    TEXT NOT NULL,
+	created_at    TEXT NOT NULL,
+	secret_by     TEXT NOT NULL,
+	secret_at     TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS assessments (
 	seq         INTEGER PRIMARY KEY AUTOINCREMENT,

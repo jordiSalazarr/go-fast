@@ -32,3 +32,13 @@ func CountForTest(t *testing.T, path, query string) int {
 	}
 	return n
 }
+
+// CreateProjectForTest makes project id in org with a secret the test
+// chose, as if a member had created it.
+func CreateProjectForTest(t *testing.T, s *Store, org, id, secret string) {
+	t.Helper()
+	if _, err := s.db.Exec(`INSERT INTO projects (id, organisation, secret_sha256, created_by, created_at, secret_by, secret_at) VALUES (?, ?, ?, 'test', '2026-10-18T09:00:00Z', 'test', '2026-10-18T09:00:00Z')`,
+		id, org, sha256Of(secret)); err != nil {
+		t.Fatal(err)
+	}
+}

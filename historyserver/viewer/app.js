@@ -23,13 +23,13 @@ function clearSession() {
 class Unauthorized extends Error {}
 
 // api calls the project's path; a path from the root (/v1/...) is called
-// as is. A body is sent as JSON with PUT.
-async function api(path, { text = false, body } = {}) {
+// as is. A body is sent as JSON, with PUT unless method says otherwise.
+async function api(path, { text = false, body, method } = {}) {
   const s = session();
   const url = path.startsWith("/v1/") ? path : `/v1/projects/${encodeURIComponent(s.project)}${path}`;
   const headers = { Authorization: `Bearer ${s.token}` };
   if (body !== undefined) headers["Content-Type"] = "application/json";
-  const resp = await fetch(url, { method: body === undefined ? "GET" : "PUT", headers, body: body === undefined ? undefined : JSON.stringify(body) });
+  const resp = await fetch(url, { method: method || (body === undefined ? "GET" : "PUT"), headers, body: body === undefined ? undefined : JSON.stringify(body) });
   if (resp.status === 401) throw new Unauthorized();
   if (!resp.ok) {
     let message = `${resp.status} ${resp.statusText}`;
@@ -85,9 +85,8 @@ function login(message) {
     e.preventDefault();
     saveSession({ token: token.value });
     try {
-      const me = await api("/v1/me");
-      if (!me.projects.length) { clearSession(); login(`Organisation ${me.organisation} has no project yet.`); return; }
-      saveSession({ token: token.value, member: me.member, organisation: me.organisation, projects: me.projects, project: me.projects[0] });
+      await refreshMe(token.value);
+      if (!session().project) location.hash = "#/projects";
       route();
     } catch (err) {
       clearSession();
@@ -103,13 +102,26 @@ function login(message) {
   token.focus();
 }
 
+// refreshMe keeps who the member is, and their organisation's projects, in
+// the session; it stays on the project it was on while that exists.
+async function refreshMe(token) {
+  saveSession({ ...(session() || {}), token });
+  const me = await api("/v1/me");
+  const ids = me.projects.map((p) => p.id);
+  const current = session().project;
+  saveSession({ token, member: me.member, organisation: me.organisation, projects: ids,
+    project: ids.includes(current) ? current : ids[0] || "" });
+  return me;
+}
+
 function renderNav(s) {
   document.getElementById("nav").hidden = false;
   const picker = document.getElementById("project");
   picker.replaceChildren(...s.projects.map((p) => el("option", { value: p }, p)));
   picker.value = s.project;
   picker.hidden = s.projects.length < 2;
-  document.getElementById("who").textContent = `${s.projects.length < 2 ? `project ${s.project} · ` : ""}${s.member} of ${s.organisation}`;
+  const on = s.projects.length === 1 ? `project ${s.project} · ` : "";
+  document.getElementById("who").textContent = `${on}${s.member} of ${s.organisation}`;
 }
 
 // Routes: #/works[?filters], #/works/<id>, #/troubles[?filters],
@@ -123,8 +135,10 @@ async function route() {
   const [path, query] = (location.hash.slice(1) || "/works").split("?");
   const params = new URLSearchParams(query || "");
   const parts = path.split("/").filter(Boolean).map(decodeURIComponent);
+  if (!s.project && parts[0] !== "projects") { location.hash = "#/projects"; return; }
   try {
-    if (parts[0] === "works" && parts[1]) await workPage(parts[1]);
+    if (parts[0] === "projects") await projectsPage();
+    else if (parts[0] === "works" && parts[1]) await workPage(parts[1]);
     else if (parts[0] === "instructions" && parts[1]) await instructionPage(parts.slice(1).join("/"));
     else if (parts[0] === "instructions") await instructionsPage();
     else if (parts[0] === "diff" && parts[2]) await diffPage(parts[1], parts[2]);
@@ -373,6 +387,90 @@ async function assessmentsPage(params) {
     assessments.length
       ? el("div", { class: "card" }, el("ol", { class: "events" }, assessments.map((a) => assessmentItem(a, { target: true }))))
       : el("p", { class: "muted" }, "No assessment matches."));
+}
+
+// Projects: members create them here, and the server makes each one's
+// secret, which it shows once and then keeps only as a hash.
+
+async function projectsPage(shown) {
+  const s = session();
+  const me = await refreshMe(s.token);
+  renderNav(session());
+  const id = el("input", { name: "id", required: true, pattern: "[a-z0-9][a-z0-9\\-]{0,62}", title: "lowercase letters, digits and dashes", placeholder: "wallets", autocomplete: "off" });
+  const status = el("span", { class: "muted", role: "status" });
+  const create = el("form", { class: "filters", onsubmit: async (e) => {
+    e.preventDefault();
+    try {
+      const out = await api("/v1/projects", { method: "POST", body: { id: id.value.trim() } });
+      await projectsPage({ ...out, created: true });
+    } catch (err) {
+      if (err instanceof Unauthorized) failed(err);
+      else status.textContent = err.message;
+    }
+  } },
+  el("label", {}, "Project id", id),
+  el("button", { type: "submit" }, "Create project"),
+  status);
+
+  const rows = me.projects.map((p) => {
+    const cell = el("td", {});
+    const ask = () => cell.replaceChildren(
+      el("span", { class: "muted" }, "Every clone will need the new secret. "),
+      el("button", { type: "button", class: "bad", onclick: rotate }, "Rotate now"), " ",
+      el("button", { type: "button", onclick: idle }, "Keep it"));
+    const idle = () => cell.replaceChildren(el("button", { type: "button", onclick: ask }, "Rotate secret"));
+    const rotate = async () => {
+      try {
+        const out = await api(`/v1/projects/${encodeURIComponent(p.id)}/secret`, { method: "POST" });
+        await projectsPage(out);
+      } catch (err) {
+        if (err instanceof Unauthorized) failed(err);
+        else cell.replaceChildren(el("span", { class: "error" }, err.message));
+      }
+    };
+    idle();
+    return el("tr", {},
+      el("td", {}, p.id),
+      el("td", { class: "muted" }, `${p.createdBy} · ${when(p.createdAt)}`),
+      el("td", { class: "muted" }, `${p.secretBy} · ${when(p.secretAt)}`),
+      cell);
+  });
+
+  show(el("h1", {}, "Projects"),
+    el("p", { class: "muted" }, `Every project of ${me.organisation}. Each syncs with its own secret, which the server shows once, when it makes it.`),
+    shown && secretCard(shown),
+    el("div", { class: "card" }, el("h2", {}, "New project"),
+      el("p", { class: "muted" }, "One per repository. Its id is lowercase letters, digits and dashes, and goes in the repository's .gofast/sync.json."),
+      create),
+    me.projects.length
+      ? el("div", { class: "card scroll" }, el("table", {},
+        el("thead", {}, el("tr", {}, ["Project", "Created", "Secret set", ""].map((h) => el("th", {}, h)))),
+        el("tbody", {}, rows)))
+      : el("p", { class: "muted" }, "No project yet: create the first one above."));
+  if (!shown) id.focus();
+}
+
+// secretCard shows a project's secret, once, and how a repository syncs
+// with it.
+function secretCard({ project, secret, created }) {
+  const value = el("input", { readonly: true, value: secret, class: "secret", "aria-label": "Project secret" });
+  const copied = el("span", { class: "muted", role: "status" });
+  const copy = async () => {
+    value.select();
+    try { await navigator.clipboard.writeText(secret); copied.textContent = "Copied."; } catch { copied.textContent = "Selected: copy it with your keyboard."; }
+  };
+  const syncJSON = JSON.stringify({ server: location.origin, project }, null, 2);
+  return el("div", { class: "card notice" },
+    el("h2", {}, created ? `Project ${project} is ready` : `Project ${project} has a new secret`),
+    el("p", {}, el("strong", {}, "Copy the secret now: the server keeps only its hash, and won't show it again."),
+      created ? "" : " The old one syncs no more: save this one in every clone."),
+    el("div", { class: "actions" }, value, el("button", { type: "button", onclick: copy }, "Copy"), copied),
+    el("h3", {}, "In the repository"),
+    el("ol", { class: "steps" },
+      created && el("li", {}, "Commit ", el("code", {}, ".gofast/sync.json"), ":", el("pre", {}, syncJSON)),
+      el("li", {}, "Run ", el("code", {}, "gf sync secret"), " and paste the secret. gf keeps it in ", el("code", {}, ".gofast/sync.secret"),
+        ", which git ignores: never commit it. Do it once in each clone."),
+      el("li", {}, "Run ", el("code", {}, "gf sync"), ".")));
 }
 
 // Skills and agents.

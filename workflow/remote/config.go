@@ -23,7 +23,8 @@ import (
 const ConfigPath = ".gofast/sync.json"
 
 // SecretEnv holds the project secret: the one secret every clone of the
-// project syncs with (docs/adr/0002). It syncs and does nothing else.
+// project syncs with (docs/adr/0002). It syncs and does nothing else. Set,
+// it wins over the one saved in SecretPath.
 const SecretEnv = "GOFAST_PROJECT_SECRET"
 
 // OldSecretEnv is what SecretEnv was called before it named the project
@@ -129,14 +130,18 @@ func LoadConfig(root string) (Config, error) {
 }
 
 // Warnings are what the owner should fix before syncing: a missing
-// secret, and a server reached without TLS anywhere but on this machine.
-func (c Config) Warnings(secret string) []string {
+// secret, or one other users can read, and a server reached without TLS
+// anywhere but on this machine.
+func (c Config) Warnings(secret Secret) []string {
 	if !c.Configured {
 		return nil
 	}
 	var out []string
-	if secret == "" {
-		out = append(out, fmt.Sprintf("$%s is not set: gf sync needs the project secret. Set it in your own shell, never in a file.", SecretEnv))
+	switch {
+	case secret.Value == "":
+		out = append(out, fmt.Sprintf("gf sync has no project secret: run `gf sync secret` and paste the one the history server showed when the project was created (or set $%s).", SecretEnv))
+	case secret.Exposed:
+		out = append(out, fmt.Sprintf("other users of this machine can read %s: run chmod 600 %[1]s.", SecretPath))
 	}
 	if c.Server.Scheme != "https" && !loopback(c.Server.Hostname()) {
 		out = append(out, fmt.Sprintf("the sync server %s is not https: the secret and the history would cross the network unencrypted.", c.Server))

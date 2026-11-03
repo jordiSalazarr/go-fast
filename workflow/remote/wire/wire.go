@@ -16,6 +16,8 @@
 // Inspecting and assessing, with a member's token:
 //
 //	GET  /v1/me                                   → Me
+//	POST /v1/projects                             ← NewProject → 201 ProjectSecret (409 Problem "taken")
+//	POST /v1/projects/{project}/secret            → ProjectSecret: a new secret, which replaces the old one
 //	GET  /v1/projects/{project}/blobs/{sha256}    → the file's bytes
 //	GET  /v1/projects/{project}/works             → Works
 //	GET  /v1/projects/{project}/works/{id}        → Timeline
@@ -133,6 +135,7 @@ const (
 	ProblemTampered     = "tampered"
 	ProblemGap          = "gap"
 	ProblemNotFound     = "not-found"
+	ProblemTaken        = "taken"
 )
 
 // Envelope is what the server reads of an event's line; the rest it keeps
@@ -277,9 +280,34 @@ type FileDiff struct {
 
 // Me is the member a token is, and the projects of their organisation.
 type Me struct {
-	Member       string   `json:"member"`
-	Organisation string   `json:"organisation"`
-	Projects     []string `json:"projects"`
+	Member       string    `json:"member"`
+	Organisation string    `json:"organisation"`
+	Projects     []Project `json:"projects"`
+}
+
+// Project is a project of the member's organisation: who created it, and
+// who last set its secret.
+type Project struct {
+	ID        string    `json:"id"`
+	CreatedBy string    `json:"createdBy"`
+	CreatedAt time.Time `json:"createdAt"`
+	SecretBy  string    `json:"secretBy"`
+	SecretAt  time.Time `json:"secretAt"`
+}
+
+// NewProject is a project a member creates in their organisation. Its id
+// is lowercase letters, digits and dashes, and the server's own: no two
+// organisations have a project of the same id.
+type NewProject struct {
+	ID string `json:"id"`
+}
+
+// ProjectSecret is a project's secret, shown once: the server keeps only
+// its hash. gf sync reads it from .gofast/sync.secret, or
+// $GOFAST_PROJECT_SECRET.
+type ProjectSecret struct {
+	Project string `json:"project"`
+	Secret  string `json:"secret"`
 }
 
 // Verdicts of an assessment.

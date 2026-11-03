@@ -8,7 +8,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Bash|Write|Edit|NotebookEdit|Skill|Read",
+        "matcher": "Bash|Write|Edit|NotebookEdit|Skill|Read|Grep|Glob",
         "hooks": [{ "type": "command", "command": "gf", "args": ["hook", "pre-tool-use"] }]
       }
     ],

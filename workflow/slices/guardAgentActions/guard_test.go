@@ -156,6 +156,8 @@ func TestRule2_GofastFilesAndGF_ACTORAreOffLimits(t *testing.T) {
 		"ls .gofast/gf*",
 		"rm -rf .gofast/instructions",
 		"echo x > .gofast/instructions/0a1b/SKILL.md",
+		"cat .gofast/sync.secret",
+		"cat sync.secret",
 	} {
 		t.Run(command, func(t *testing.T) {
 			out := decide(bash(command), on(domain.StageImplement), true, root)
@@ -390,6 +392,25 @@ func TestRule4_WithoutActiveWork_StageAgentsMayNotWrite(t *testing.T) {
 	out := decide(write("gofast:implement", "/repo/a.go"), noActiveWork(), false, root)
 
 	assert.Equal(t, denied("There is no active gofast work, so there is no stage to write for. Run /gofast:drive to start one."), out)
+}
+
+func TestRule6_TheProjectSecretIsOffLimits_ToEveryToolAndAgent(t *testing.T) {
+	const reason = "Agents may not touch .gofast/sync.secret: it is the project secret gf sync sends to the history server. Ask the owner to run `gf sync`."
+	for name, in := range map[string]claudehooks.Input{
+		"a stage agent reads it":          toolCall("gofast:review", "Read", map[string]string{"file_path": "/repo/.gofast/sync.secret"}),
+		"the main session reads it":       toolCall("", "Read", map[string]string{"file_path": ".gofast/sync.secret"}),
+		"another plugin's agent reads it": toolCall("Explore", "Read", map[string]string{"file_path": "/repo/.gofast/sync.secret"}),
+		"an agent writes it":              write("gofast:implement", "/repo/.gofast/sync.secret"),
+		"an agent edits it":               toolCall("gofast:implement", "Edit", map[string]string{"file_path": "/repo/.gofast/sync.secret"}),
+		"a grep of it":                    toolCall("Explore", "Grep", map[string]string{"pattern": "gfps", "path": "/repo/.gofast/sync.secret"}),
+		"a grep of gofast's directory":    toolCall("Explore", "Grep", map[string]string{"pattern": "gfps", "path": ".gofast"}),
+	} {
+		t.Run(name, func(t *testing.T) {
+			assert.Equal(t, denied(reason), decide(in, stageFacts{}, false, root), "even when the state can't be read")
+		})
+	}
+	other := toolCall("Explore", "Read", map[string]string{"file_path": "/repo/.gofast/sync.json"})
+	assert.Equal(t, allowed, decide(other, on(domain.StageReview), true, root))
 }
 
 func TestOtherToolsAreNotGuarded(t *testing.T) {

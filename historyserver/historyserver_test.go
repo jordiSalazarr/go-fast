@@ -33,14 +33,8 @@ const (
 )
 
 var organisations = map[string]historyserver.Organisation{
-	"acme": {
-		Members:  map[string]historyserver.Member{"jordi": {TokenSHA256: hash(token)}, "ana": {TokenSHA256: hash(ana)}},
-		Projects: map[string]historyserver.Project{"wallets": {SecretSHA256: hash(secret)}},
-	},
-	"globex": {
-		Members:  map[string]historyserver.Member{"bob": {TokenSHA256: hash(bob)}},
-		Projects: map[string]historyserver.Project{"ledger": {SecretSHA256: hash("l3dger")}},
-	},
+	"acme":   {Members: map[string]historyserver.Member{"jordi": {TokenSHA256: hash(token)}, "ana": {TokenSHA256: hash(ana)}}},
+	"globex": {Members: map[string]historyserver.Member{"bob": {TokenSHA256: hash(bob)}}},
 }
 
 func hash(s string) string {
@@ -55,6 +49,8 @@ func serve(t *testing.T, token string) (*remote.Client, *historyserver.Store, st
 	store, err := historyserver.Open(filepath.Join(t.TempDir(), "history.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { store.Close() })
+	historyserver.CreateProjectForTest(t, store, "acme", "wallets", secret)
+	historyserver.CreateProjectForTest(t, store, "globex", "ledger", "l3dger")
 	handler, err := historyserver.Handler(store, organisations, nil)
 	require.NoError(t, err)
 	srv := httptest.NewServer(handler)
@@ -159,7 +155,10 @@ func TestServer_AMemberReadsEveryProjectOfTheirOrganisation_ButNeverSyncs(t *tes
 
 	var me wire.Me
 	get(t, base+"/v1/me", &me)
-	assert.Equal(t, wire.Me{Member: "jordi", Organisation: "acme", Projects: []string{"wallets"}}, me)
+	assert.Equal(t, "jordi", me.Member)
+	assert.Equal(t, "acme", me.Organisation)
+	require.Len(t, me.Projects, 1)
+	assert.Equal(t, "wallets", me.Projects[0].ID)
 }
 
 func TestServer_AppendsEvents_Idempotently_AndKeepsEachStreamsDigest(t *testing.T) {
@@ -304,26 +303,22 @@ func TestLoadConfig(t *testing.T) {
 		require.NoError(t, os.WriteFile(path, []byte(`{"listen": ":8080", "db": "h.db", "organisations": `+organisations+`}`), 0o644))
 		return historyserver.LoadConfig(path)
 	}
-	c, err := load(`{"acme": {"members": {"jordi": {"tokenSha256": "` + hash(token) + `"}}, "projects": {"wallets": {"secretSha256": "` + hash(secret) + `"}}}}`)
+	c, err := load(`{"acme": {"members": {"jordi": {"tokenSha256": "` + hash(token) + `"}}}}`)
 	require.NoError(t, err)
-	assert.Equal(t, hash(secret), c.Organisations["acme"].Projects["wallets"].SecretSHA256)
 	assert.Equal(t, hash(token), c.Organisations["acme"].Members["jordi"].TokenSHA256)
 
 	for want, organisations := range map[string]string{
-		"project wallets: secretSha256 must be the secret's SHA-256":      `{"acme": {"projects": {"wallets": {"secretSha256": "s3cret"}}}}`,
-		"member acme/jordi: tokenSha256 must be the token's SHA-256":      `{"acme": {"members": {"jordi": {"tokenSha256": "j0rdi"}}, "projects": {"wallets": {"secretSha256": "` + hash(secret) + `"}}}}`,
-		"project wallets is in both acme and globex":                      `{"acme": {"projects": {"wallets": {"secretSha256": "` + hash(secret) + `"}}}, "globex": {"projects": {"wallets": {"secretSha256": "` + hash("x") + `"}}}}`,
-		"projects ledger and wallets have the same secret":                `{"acme": {"projects": {"wallets": {"secretSha256": "` + hash(secret) + `"}, "ledger": {"secretSha256": "` + hash(secret) + `"}}}}`,
-		"members acme/ana and acme/jordi have the same token":             `{"acme": {"members": {"jordi": {"tokenSha256": "` + hash(token) + `"}, "ana": {"tokenSha256": "` + hash(token) + `"}}, "projects": {"wallets": {"secretSha256": "` + hash(secret) + `"}}}}`,
-		"a member's token and project wallets's secret are the same":      `{"acme": {"members": {"jordi": {"tokenSha256": "` + hash(secret) + `"}}, "projects": {"wallets": {"secretSha256": "` + hash(secret) + `"}}}}`,
-		`project "Wallets": ids are lowercase letters, digits and dashes`: `{"acme": {"projects": {"Wallets": {"secretSha256": "` + hash(secret) + `"}}}}`,
-		"set db and at least one organisation with a project":             `{}`,
+		"member acme/jordi: tokenSha256 must be the token's SHA-256":              `{"acme": {"members": {"jordi": {"tokenSha256": "j0rdi"}}}}`,
+		"members acme/ana and acme/jordi have the same token":                     `{"acme": {"members": {"jordi": {"tokenSha256": "` + hash(token) + `"}, "ana": {"tokenSha256": "` + hash(token) + `"}}}}`,
+		`organisation "Acme": ids are lowercase letters, digits and dashes`:       `{"Acme": {"members": {"jordi": {"tokenSha256": "` + hash(token) + `"}}}}`,
+		"set db and at least one organisation with a member":                      `{"acme": {"members": {}}}`,
+		`organisation acme lists projects: members create them in the viewer now`: `{"acme": {"members": {"jordi": {"tokenSha256": "` + hash(token) + `"}}, "projects": {"wallets": {"secretSha256": "` + hash(secret) + `"}}}}`,
 	} {
 		_, err := load(organisations)
 		assert.ErrorContains(t, err, want)
 	}
 
-	c, err = historyserver.ParseConfig([]byte(`{"db": "h.db", "organisations": {"acme": {"projects": {"wallets": {"secretSha256": "`+hash(secret)+`"}}}}}`), "$GOFAST_SERVER_CONFIG")
+	c, err = historyserver.ParseConfig([]byte(`{"db": "h.db", "organisations": {"acme": {"members": {"jordi": {"tokenSha256": "`+hash(token)+`"}}}}}`), "$GOFAST_SERVER_CONFIG")
 	require.NoError(t, err, "listen is optional: gofast-server listens on $PORT, or :8080")
 	assert.Equal(t, "", c.Listen)
 	_, err = historyserver.ParseConfig([]byte(`{"db": ""}`), "$GOFAST_SERVER_CONFIG")
@@ -331,7 +326,7 @@ func TestLoadConfig(t *testing.T) {
 
 	require.NoError(t, os.WriteFile(path, []byte(`{"listen": ":8080", "db": "h.db", "projects": {"wallets": {"tokenSha256": "`+hash(token)+`"}}}`), 0o644))
 	_, err = historyserver.LoadConfig(path)
-	assert.ErrorContains(t, err, `projects now belong to an organisation, and read tokens are members' tokens: see deploy/server.example.json`)
+	assert.ErrorContains(t, err, `projects are created in the viewer now, and read tokens are members' tokens`)
 }
 
 func get(t *testing.T, u string, v any) {

@@ -190,7 +190,7 @@ func TestOpen_CreatesDirectoryWithGitignore(t *testing.T) {
 
 	ignore, err := os.ReadFile(filepath.Join(root, dirName, ".gitignore"))
 	require.NoError(t, err)
-	assert.Equal(t, "events.lock\ngf.log\nruntime/\n", string(ignore))
+	assert.Equal(t, "events.lock\ngf.log\nruntime/\nsync.secret\n", string(ignore))
 }
 
 func TestOpen_CreatesGitattributesForUnionMerges(t *testing.T) {
@@ -224,7 +224,7 @@ func TestInit_AddsMissingEntriesToAnExistingGitignore(t *testing.T) {
 
 	ignore, err := os.ReadFile(path)
 	require.NoError(t, err)
-	assert.Equal(t, "events.lock\ngf.log\nruntime/\n", string(ignore))
+	assert.Equal(t, "events.lock\ngf.log\nruntime/\nsync.secret\n", string(ignore))
 }
 
 func TestFindRoot(t *testing.T) {
