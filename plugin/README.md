@@ -665,7 +665,7 @@ The protocol, `/v1` (`workflow/remote/wire`):
 - `GET /v1/projects/{p}/streams`: each stream's last version and a chained
   digest of its events (`digest = sha256(previous digest ‖ sha256(line))`).
 - `HEAD`/`PUT`/`GET /v1/projects/{p}/blobs/{sha256}`: files by content, per
-  project; the server checks the hash on upload.
+  project; the server checks the hash on upload. (`GET` is a member's.)
 - `POST /v1/projects/{p}/files`: where each blob was in the repository, and
   which work it belongs to; refused (`missing-blob`) for a blob not held.
 - `POST /v1/projects/{p}/events`: a batch of the log's lines exactly as
@@ -683,22 +683,43 @@ The protocol, `/v1` (`workflow/remote/wire`):
   compared file by file, with a unified diff of each changed text file.
 - `GET /v1/projects/{p}/blobs/{sha256}/html`: a Markdown file rendered for
   the viewer (goldmark: raw HTML left out, dangerous links dropped).
+- `GET /v1/me`: the member a token is, their organisation and its projects.
+- `GET /v1/projects/{p}/troubles`: every failed attempt, rejection,
+  escalation, rework, return and abandon, newest first, with the stage visit
+  it happened in (`?type=`, `?stage=`). A timeline lists its work's too.
+- `PUT /v1/projects/{p}/works/{id}/assessment` and
+  `/works/{id}/visits/{stage}/{visit}/assessment`: a member's assessment,
+  `{"verdict": "good"}` or `{"verdict": "went-wrong", "reason": "…"}`, of a
+  work or a stage visit the server holds. It replaces the member's earlier
+  one, which stays in the database: assessments are append-only.
+- `GET /v1/projects/{p}/assessments`: each member's current assessments,
+  newest first (`?verdict=`, `?stage=`, `?member=`, `?work=`). A timeline
+  lists its work's too.
 
-Tokens: each project has one sync token, which reads and writes, and any
-number of read tokens, which read every `GET` endpoint and are refused
-(`403 forbidden`) on writes.
+Credentials (`docs/adr/0002`): the server's configuration groups projects
+and members into organisations. Each project has one **project secret**,
+which every clone syncs with: it reaches only the sync endpoints (`streams`,
+`HEAD` and `PUT` a blob, `files`, `events`) and is refused (`403
+forbidden`) everywhere else. Each **member** has a personal token, which
+reads and assesses every project of their organisation; it is refused
+(`403`) on the sync endpoints, and another organisation's project answers
+it `404`. The server doesn't check an event's actor.
+
+Assessments (`docs/adr/0001`) are the first data whose source of truth is
+the server: gf never fetches them, and they never move a work. The
+server's backups are their only copy.
 
 **The viewer**, at the server's `/`, is plain HTML, CSS and JavaScript
 embedded in `gofast-server` (`historyserver/viewer/`), with no build step. It
-keeps the project and token in `sessionStorage` and sends the token as a
-bearer token, so there are no cookies and no CSRF. Everything from the
+keeps the member's token and project in `sessionStorage` and sends the
+token as a bearer token, so there are no cookies and no CSRF. Everything from the
 history is set as text; only the server-rendered Markdown is set as HTML.
 Every response carries a strict Content-Security-Policy (`self` only, no
 inline script, no frames), `X-Frame-Options: DENY`, `nosniff` and
 `no-referrer`; blobs are served as `text/plain` or bytes, never as a page.
 
-Every request carries the project's token (`Authorization: Bearer`); the
-server's configuration holds its SHA-256. A sync copies the log under the
+Every request carries the project secret or a member's token
+(`Authorization: Bearer`); the server's configuration holds their SHA-256s. A sync copies the log under the
 shared lock, so the network never holds it, then sends blobs, then files,
 then events, so the server never holds an event whose files are missing.
 Before sending a stream it compares the server's digest with its own: a

@@ -373,8 +373,10 @@ and nothing comes back from it.
 
    ```sh
    go install github.com/jordiSalazarr/go-fast/cmd/gofast-server@latest
-   TOKEN=$(openssl rand -hex 32)                 # the project's token: keep it secret
-   printf %s "$TOKEN" | shasum -a 256            # its SHA-256, for the server's configuration
+   SECRET=$(openssl rand -hex 32)                # the project secret, which every clone syncs with
+   printf %s "$SECRET" | shasum -a 256           # its SHA-256, for the server's configuration
+   TOKEN=$(openssl rand -hex 32)                 # your member token, to read and assess
+   printf %s "$TOKEN" | shasum -a 256
    ```
 
    `server.json`:
@@ -383,7 +385,12 @@ and nothing comes back from it.
    {
      "listen": ":8080",
      "db": "/var/lib/gofast/history.db",
-     "projects": { "wallets": { "tokenSha256": "<the SHA-256 above>" } }
+     "organisations": {
+       "acme": {
+         "members": { "jordi": { "tokenSha256": "<the token's SHA-256>" } },
+         "projects": { "wallets": { "secretSha256": "<the secret's SHA-256>" } }
+       }
+     }
    }
    ```
 
@@ -392,16 +399,20 @@ and nothing comes back from it.
    ```
 
    It speaks plain HTTP: put TLS in front of it (a reverse proxy) anywhere
-   but on your own machine. The configuration holds each token's hash, never
-   the token. [`deploy/`](../deploy/README.md) has a ready setup: Docker with
+   but on your own machine. The configuration holds each secret's and
+   token's hash, never the secret or the token. [`deploy/`](../deploy/README.md) has a ready setup: Docker with
    Caddy for automatic TLS, or systemd, with daily backups
    (`gofast-server -config server.json -backup <file>` copies the database
    while it serves).
 
-   Add **read tokens** for whoever only reads the history, you in the
-   viewer included: `"readTokenSha256s": ["<SHA-256 of a read token>"]`
-   next to `tokenSha256`. A read token reads everything and writes nothing;
-   keep the sync token for `gf sync`.
+   An **organisation** is the people who share projects. Each project
+   belongs to one, and has one **project secret**: every clone of it syncs
+   with that secret, and it does nothing else. Each **member** has their own
+   token, which reads and assesses every project of their organisation and
+   can't sync. When someone who held a project's secret leaves, make a new
+   secret and give it to everyone who syncs that project (see
+   `docs/adr/0002-one-shared-secret-per-project.md`). The server doesn't
+   check who made an event: its actor is what the clone recorded.
 
 2. **Point the repository at it** with `.gofast/sync.json`, and commit it:
 
@@ -421,9 +432,10 @@ and nothing comes back from it.
    to send all four. **Artifacts and decision documents can quote code,
    logs and customer data**: list only what you're allowed to send.
 
-3. **Set the token in your own shell**, never in a file:
-   `export GOFAST_SYNC_TOKEN=<the token>`. `gf checks` warns when it is
-   missing, and when the server isn't https (localhost excepted).
+3. **Set the project secret in your own shell**, never in a file:
+   `export GOFAST_PROJECT_SECRET=<the secret>`. `gf checks` warns when it
+   is missing, and when the server isn't https (localhost excepted). It
+   used to be `GOFAST_SYNC_TOKEN`; rename it.
 
 4. **Sync** from your own terminal, whenever you like:
 
@@ -438,7 +450,8 @@ and nothing comes back from it.
    it stopped. `gf status` ends with how far the history is synced.
 
 5. **Read the history** at the server's address, `https://<domain>/`: sign
-   in with the project and a read token (kept for that browser tab only).
+   in with your member token (kept for that browser tab only), and pick a
+   project of your organisation.
    - **Works**, filtered by status, type, branch or a word of the
      description.
    - **A work**: each stage visit's attempts, failures, approvals and
@@ -448,6 +461,17 @@ and nothing comes back from it.
      instructed, and what changed from one version to the next. This answers
      "which works did the version of `specify` with the bad example
      instruct?"
+   - **Troubles**: every failed attempt, rejection, escalation, rework,
+     return and abandon, newest first, filtered by what and by stage.
+   - **Assessments**: on a work's page, mark the work or any of its stage
+     visits **good**, or **went wrong** with the reason why. Each member has
+     one current assessment of each; assessing again replaces yours. The
+     Assessments page lists them, filtered by verdict, stage and member.
+
+   Assessments live only on the server. `gf` never downloads them, and they
+   never approve, reject, reopen or route a work: only your gates move a
+   work (`docs/adr/0001-assessments-live-only-on-the-server.md`). So the
+   server's backups are their only copy.
 
 If two clones advanced the same work before merging, or a log was rewritten
 after it was synced, the server refuses that work's stream (`gf sync`
@@ -688,9 +712,10 @@ change.
 | "skeletons-only: <file>: func <name> has logic" (or "panics", or "var <name> is not `var errSkeleton = …`") | A skeleton does more than declare. Its functions may only be empty or return zero values or `errSkeleton`; it may declare `errSkeleton` once per package. Specify tries again. |
 | "skeletons-filled: errSkeleton is still in <files>" | Implement left a skeleton unfilled. It tries again until no non-test Go file uses `errSkeleton`. |
 | "review-verdict-consistent: … the verdict says Passed but ## Blocking lists B1" | Review passed while its artifact lists blocking findings (or lacks `## Verdict`, `## Risk map` or `## Agreed behaviour`). Review tries again: with blocking findings it must submit `--failed`, which sends the work to the fixer. |
-| "Set $GOFAST_SYNC_TOKEN to the project's token …" | `gf sync` needs the token in your shell: `export GOFAST_SYNC_TOKEN=<token>`. |
-| "$GOFAST_SYNC_TOKEN is a read token of project …" | Read tokens only read. Use the project's sync token for `gf sync`. |
-| "The history server … refused the token for project …" | The token's SHA-256 isn't the one in the server's configuration for that project, or the project isn't configured there. |
+| "Set $GOFAST_PROJECT_SECRET to the project secret …" | `gf sync` needs the project secret in your shell: `export GOFAST_PROJECT_SECRET=<secret>`. |
+| "$GOFAST_SYNC_TOKEN is now $GOFAST_PROJECT_SECRET …" | The variable was renamed. `export GOFAST_PROJECT_SECRET="$GOFAST_SYNC_TOKEN"`, then unset the old one. |
+| "$GOFAST_PROJECT_SECRET is a member's token …" | Member tokens read and assess; they never sync. Use the project's secret for `gf sync`. |
+| "The history server … refused the secret for project …" | The secret's SHA-256 isn't the one in the server's configuration for that project, or the project isn't configured there. If the secret was rotated, ask for the new one. |
 | "gf could not reach the history server …" | The server is down or the URL is wrong. Nothing more was sent; run `gf sync` again once it's up. |
 | "Refused: stream <stream> at version <n>: …" | The server holds a different history of that stream: the same work was advanced in two clones, or this log was rewritten after a sync. The rest synced. Compare the clones' `.gofast/events.jsonl` with the server's timeline of the work. |
 | `gf checks` warns ".gofast/instructions/<version> changed after gf kept it" | A kept copy was edited, so it no longer matches the version the event log names. Restore it with git (`git checkout -- .gofast/instructions/<version>`). To change a skill, edit `plugin/skills/`, never a kept copy. |

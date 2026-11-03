@@ -1,10 +1,14 @@
 {
   "listen": ":8080",
   "db": "/data/history.db",
-  "projects": {
-    "wallets": {
-      "tokenSha256": "<printf %s \"$SYNC_TOKEN\" | shasum -a 256>",
-      "readTokenSha256s": ["<printf %s \"$READ_TOKEN\" | shasum -a 256>"]
+  "organisations": {
+    "acme": {
+      "members": {
+        "jordi": { "tokenSha256": "<printf %s \"$MEMBER_TOKEN\" | shasum -a 256>" }
+      },
+      "projects": {
+        "wallets": { "secretSha256": "<printf %s \"$PROJECT_SECRET\" | shasum -a 256>" }
+      }
     }
   }
 }

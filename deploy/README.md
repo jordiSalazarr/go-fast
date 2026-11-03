@@ -8,10 +8,11 @@ run it, and put TLS in front of it.
 ```sh
 cd deploy
 cp server.example.json server.json
-# Make the tokens, and put their SHA-256s in server.json:
-SYNC_TOKEN=$(openssl rand -hex 32); READ_TOKEN=$(openssl rand -hex 32)
-printf %s "$SYNC_TOKEN" | shasum -a 256
-printf %s "$READ_TOKEN" | shasum -a 256
+# Make the project's secret and each member's token, and put their
+# SHA-256s in server.json:
+PROJECT_SECRET=$(openssl rand -hex 32); MEMBER_TOKEN=$(openssl rand -hex 32)
+printf %s "$PROJECT_SECRET" | shasum -a 256
+printf %s "$MEMBER_TOKEN" | shasum -a 256
 HISTORY_DOMAIN=history.example.com docker compose up -d --build
 ```
 
@@ -22,6 +23,12 @@ point at the machine). The database lives in the `history` volume.
 /config/server.json -backup /data/backup-$(date -u +%Y%m%d).db` writes a
 consistent copy while the server runs; copy it off the machine. Schedule it
 with cron on the host.
+
+**The backups hold the only copy of the assessments.** Everything else on
+the server is a copy of what the repositories hold, and a lost database can
+be synced again; the members' assessments are written on the server and
+exist nowhere else (`docs/adr/0001-assessments-live-only-on-the-server.md`).
+Keep the backups off the machine, and try restoring one.
 
 ## With systemd
 
@@ -41,7 +48,12 @@ TLS.
 
 ## Then
 
-- Give `gf sync` the **sync token** (`GOFAST_SYNC_TOKEN` in your shell).
-- Open `https://<domain>/` and sign in with the project and a **read token**
-  to browse the history. Read tokens can't write.
-- To revoke a token, remove its hash from `server.json` and restart.
+- Give everyone who syncs the project the **project secret**
+  (`GOFAST_PROJECT_SECRET` in their shell). It syncs and does nothing else.
+- Give each member their own **member token**. They sign in with it at
+  `https://<domain>/` to inspect and assess every project of their
+  organisation. A member's token can't sync.
+- **When a member leaves**, remove their hash from `server.json` and
+  restart. If they held a project secret, make a new secret, put its hash in
+  `server.json`, restart, and give it to everyone who syncs that project:
+  there is one secret per project (`docs/adr/0002-one-shared-secret-per-project.md`).
