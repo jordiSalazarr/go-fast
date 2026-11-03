@@ -16,21 +16,21 @@ func TestChecks_ShowsTheSyncConfiguration(t *testing.T) {
 
 	r.write(".gofast/sync.json", `{"server": "http://history.internal", "project": "wallets", "include": ["events", "instructions"]}`)
 	out := r.gf("checks")
-	assert.Contains(t, out, "Warning: $GOFAST_SYNC_TOKEN is not set: gf sync needs the project's token. Set it in your own shell, never in a file.\n")
+	assert.Contains(t, out, "Warning: $GOFAST_PROJECT_SECRET is not set: gf sync needs the project secret. Set it in your own shell, never in a file.\n")
 	assert.Contains(t, out, "Warning: the sync server http://history.internal is not https")
-	assert.Contains(t, out, "\nSync (.gofast/sync.json): project wallets on http://history.internal\n  sends        events, instructions\n  token        $GOFAST_SYNC_TOKEN missing\n")
+	assert.Contains(t, out, "\nSync (.gofast/sync.json): project wallets on http://history.internal\n  sends        events, instructions\n  secret       $GOFAST_PROJECT_SECRET missing\n")
 
 	r.write(".gofast/sync.json", `{"server": "https://history.example.com", "project": "wallets"}`)
-	res := r.run(map[string]string{"GOFAST_SYNC_TOKEN": "t0ken"}, "checks")
-	assert.NotContains(t, res.stdout, "GOFAST_SYNC_TOKEN is not set")
+	res := r.run(map[string]string{"GOFAST_PROJECT_SECRET": "s3cret"}, "checks")
+	assert.NotContains(t, res.stdout, "GOFAST_PROJECT_SECRET is not set")
 	assert.NotContains(t, res.stdout, "is not https")
-	assert.Contains(t, res.stdout, "  sends        events, instructions, artifacts, decisions\n  token        $GOFAST_SYNC_TOKEN set\n")
+	assert.Contains(t, res.stdout, "  sends        events, instructions, artifacts, decisions\n  secret       $GOFAST_PROJECT_SECRET set\n")
 
 	r.write(".gofast/sync.json", `{"server": "https://history.example.com", "project": "Wallets"}`)
 	assert.Contains(t, r.gfFails(nil, "checks").stderr, "The sync configuration .gofast/sync.json is invalid: \"project\" must be the project's id on the server")
 }
 
-func TestSync_IsTheOwnersFromTheirTerminal_AndNeedsAConfigurationAndAToken(t *testing.T) {
+func TestSync_IsTheOwnersFromTheirTerminal_AndNeedsAConfigurationAndTheSecret(t *testing.T) {
 	r := newRepo(t)
 	res := r.runWithoutTerminal(nil, "sync")
 	assert.Equal(t, 1, res.code)
@@ -42,7 +42,9 @@ func TestSync_IsTheOwnersFromTheirTerminal_AndNeedsAConfigurationAndAToken(t *te
 	assert.Equal(t, "Sync is not configured: create .gofast/sync.json with the server's URL and the project's id. `gf checks` shows the result.\n", res.stderr)
 	r.write(".gofast/sync.json", `{"server": "https://history.example.com", "project": "wallets"}`)
 	res = r.gfFails(nil, "sync", "--dry-run")
-	assert.Equal(t, "Set $GOFAST_SYNC_TOKEN to the project's token in your own shell, then run `gf sync` again.\n", res.stderr)
+	assert.Equal(t, "Set $GOFAST_PROJECT_SECRET to the project secret in your own shell, then run `gf sync` again.\n", res.stderr)
+	res = r.gfFails(map[string]string{"GOFAST_SYNC_TOKEN": "s3cret"}, "sync", "--dry-run")
+	assert.Equal(t, "$GOFAST_SYNC_TOKEN is now $GOFAST_PROJECT_SECRET: set $GOFAST_PROJECT_SECRET to the project secret in your own shell, then run `gf sync` again.\n", res.stderr)
 }
 
 func TestStatus_SaysHowFarTheHistoryIsSynced(t *testing.T) {

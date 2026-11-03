@@ -1,71 +1,16 @@
 package historyserver
 
 import (
-	"bytes"
-	"crypto/sha256"
-	"crypto/subtle"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
-	"os"
-	"regexp"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/jordiSalazarr/go-fast/workflow/remote/wire"
 )
-
-// Config is the server's configuration file.
-type Config struct {
-	// Listen is the address to listen on, e.g. ":8080". Put TLS in front.
-	Listen string `json:"listen"`
-	// DB is the SQLite database's path.
-	DB string `json:"db"`
-	// Projects maps each project's id to the SHA-256 of its token, so the
-	// file holds no token.
-	Projects map[string]Project `json:"projects"`
-}
-
-// Project is a project's tokens, by their SHA-256: the sync token reads
-// and writes; each read token only reads (the viewer, auditors).
-type Project struct {
-	TokenSHA256      string   `json:"tokenSha256"`
-	ReadTokenSHA256s []string `json:"readTokenSha256s,omitempty"`
-}
-
-var sha256Hex = regexp.MustCompile(`^[0-9a-f]{64}$`)
-
-// LoadConfig reads the configuration at path.
-func LoadConfig(path string) (Config, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return Config{}, err
-	}
-	var c Config
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&c); err != nil {
-		return Config{}, fmt.Errorf("%s: %w", path, err)
-	}
-	if c.Listen == "" || c.DB == "" || len(c.Projects) == 0 {
-		return Config{}, fmt.Errorf("%s: set listen, db and at least one project", path)
-	}
-	for id, p := range c.Projects {
-		if !sha256Hex.MatchString(p.TokenSHA256) {
-			return Config{}, fmt.Errorf("%s: project %s: tokenSha256 must be the token's SHA-256 in lowercase hex (printf %%s \"$TOKEN\" | shasum -a 256)", path, id)
-		}
-		for _, r := range p.ReadTokenSHA256s {
-			if !sha256Hex.MatchString(r) {
-				return Config{}, fmt.Errorf("%s: project %s: each of readTokenSha256s must be a token's SHA-256 in lowercase hex", path, id)
-			}
-		}
-	}
-	return c, nil
-}
 
 // Limits on what a request may carry.
 const (
@@ -73,69 +18,107 @@ const (
 	maxBlob  = 64 << 20
 )
 
-// Handler serves the protocol for the configured projects.
-func Handler(store *Store, projects map[string]Project, logger *slog.Logger) http.Handler {
+// Handler serves the protocol for the organisations' projects.
+func Handler(store *Store, organisations map[string]Organisation, logger *slog.Logger) (http.Handler, error) {
 	if logger == nil {
 		logger = slog.New(slog.DiscardHandler)
 	}
-	h := &handler{store: store, projects: projects, logger: logger}
+	a, err := newAccess(organisations)
+	if err != nil {
+		return nil, err
+	}
+	h := &handler{store: store, access: a, logger: logger}
 	mux := http.NewServeMux()
 	p := wire.Version + "/projects/{project}"
-	mux.HandleFunc("GET "+p+"/streams", h.auth(read, h.streams))
-	mux.HandleFunc("GET "+p+"/blobs/{sha256}", h.auth(read, h.getBlob)) // HEAD too
-	mux.HandleFunc("PUT "+p+"/blobs/{sha256}", h.auth(write, h.putBlob))
-	mux.HandleFunc("POST "+p+"/files", h.auth(write, h.recordFiles))
-	mux.HandleFunc("POST "+p+"/events", h.auth(write, h.appendEvents))
-	mux.HandleFunc("GET "+p+"/works", h.auth(read, h.works))
-	mux.HandleFunc("GET "+p+"/works/{id}", h.auth(read, h.timeline))
-	mux.HandleFunc("GET "+p+"/blobs/{sha256}/html", h.auth(read, h.renderBlob))
-	mux.HandleFunc("GET "+p+"/instructions", h.auth(read, h.instructions))
-	mux.HandleFunc("GET "+p+"/instructions/{from}/diff/{to}", h.auth(read, h.diff))
+	mux.HandleFunc("GET "+p+"/streams", h.syncs(h.streams))
+	mux.HandleFunc("GET "+p+"/blobs/{sha256}", h.blob) // HEAD too
+	mux.HandleFunc("PUT "+p+"/blobs/{sha256}", h.syncs(h.putBlob))
+	mux.HandleFunc("POST "+p+"/files", h.syncs(h.recordFiles))
+	mux.HandleFunc("POST "+p+"/events", h.syncs(h.appendEvents))
+	mux.HandleFunc("GET "+p+"/works", h.inspects(h.works))
+	mux.HandleFunc("GET "+p+"/works/{id}", h.inspects(h.timeline))
+	mux.HandleFunc("PUT "+p+"/works/{id}/assessment", h.inspects(h.assess))
+	mux.HandleFunc("PUT "+p+"/works/{id}/visits/{stage}/{visit}/assessment", h.inspects(h.assess))
+	mux.HandleFunc("GET "+p+"/assessments", h.inspects(h.assessments))
+	mux.HandleFunc("GET "+p+"/troubles", h.inspects(h.troubles))
+	mux.HandleFunc("GET "+p+"/blobs/{sha256}/html", h.inspects(h.renderBlob))
+	mux.HandleFunc("GET "+p+"/instructions", h.inspects(h.instructions))
+	mux.HandleFunc("GET "+p+"/instructions/{from}/diff/{to}", h.inspects(h.diff))
+	mux.HandleFunc("GET "+wire.Version+"/me", h.me)
 	viewer := viewerHandler()
 	mux.Handle("GET /{$}", viewer)
 	mux.Handle("GET /viewer/", http.StripPrefix("/viewer", viewer))
-	return secured(mux)
+	return secured(mux), nil
 }
 
 type handler struct {
-	store    *Store
-	projects map[string]Project
-	logger   *slog.Logger
+	store  *Store
+	access access
+	logger *slog.Logger
 }
 
-// access is what a request needs of its token.
-type access int
+func (h *handler) credential(r *http.Request) credential {
+	token, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	return h.access.of(token)
+}
 
-const (
-	read access = iota
-	write
-)
-
-// auth lets a request through only with a token of its project that may
-// do what it needs: the sync token anything, a read token only reads. An
-// unknown project is refused like a wrong token, so ids can't be probed.
-func (h *handler) auth(need access, next func(w http.ResponseWriter, r *http.Request, project string)) http.HandlerFunc {
+// syncs lets a request through only with its project's secret. Another
+// project's secret, and an unknown project, are refused like a wrong
+// secret, so ids can't be probed.
+func (h *handler) syncs(next func(w http.ResponseWriter, r *http.Request, project string)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		project := r.PathValue("project")
-		token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-		p, known := h.projects[project]
-		sum := sha256.Sum256([]byte(token))
-		given := []byte(hex.EncodeToString(sum[:]))
-		matches := func(want string) bool { return subtle.ConstantTimeCompare(given, []byte(want)) == 1 }
-		writer := ok && known && matches(p.TokenSHA256)
-		reader := false
-		for _, rt := range p.ReadTokenSHA256s {
-			reader = reader || (ok && known && matches(rt))
-		}
-		switch {
-		case !writer && !reader:
-			h.problem(w, r, &problemError{status: http.StatusUnauthorized, problem: wire.Problem{Error: wire.ProblemUnauthorized, Message: "unknown project or wrong token"}})
-		case need == write && !writer:
-			h.problem(w, r, &problemError{status: http.StatusForbidden, problem: wire.Problem{Error: wire.ProblemForbidden, Message: "a read token can't write: gf sync uses the project's sync token"}})
-		default:
+		switch c := h.credential(r); {
+		case c.project != "" && c.project == project:
 			next(w, r, project)
+		case c.member.name != "":
+			h.problem(w, r, refuse(http.StatusForbidden, wire.ProblemForbidden, "a member's token can't sync: gf sync uses the project's secret"))
+		default:
+			h.problem(w, r, refuse(http.StatusUnauthorized, wire.ProblemUnauthorized, "unknown project or wrong secret"))
 		}
 	}
+}
+
+// inspects lets a request through only with the token of a member of the
+// project's organisation. To a member, another organisation's project
+// looks like no project.
+func (h *handler) inspects(next func(w http.ResponseWriter, r *http.Request, project string, member string)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		project := r.PathValue("project")
+		switch c := h.credential(r); {
+		case c.project != "":
+			h.problem(w, r, refuse(http.StatusForbidden, wire.ProblemForbidden, "the project secret only syncs: read with a member's token"))
+		case c.member.name == "":
+			h.problem(w, r, refuse(http.StatusUnauthorized, wire.ProblemUnauthorized, "unknown token: sign in with your member token"))
+		case h.access.orgOf[project] != c.member.org:
+			h.problem(w, r, refuse(http.StatusNotFound, wire.ProblemNotFound, "organisation %s has no project %s", c.member.org, project))
+		default:
+			next(w, r, project, c.member.name)
+		}
+	}
+}
+
+// blob is HEAD, which gf sync asks, and GET, which members read.
+func (h *handler) blob(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodHead {
+		h.syncs(h.hasBlob)(w, r)
+		return
+	}
+	h.inspects(h.getBlob)(w, r)
+}
+
+// me is who the member is, and the projects they inspect.
+func (h *handler) me(w http.ResponseWriter, r *http.Request) {
+	c := h.credential(r)
+	switch {
+	case c.project != "":
+		h.problem(w, r, refuse(http.StatusForbidden, wire.ProblemForbidden, "the project secret only syncs: sign in with a member's token"))
+		return
+	case c.member.name == "":
+		h.problem(w, r, refuse(http.StatusUnauthorized, wire.ProblemUnauthorized, "unknown token: sign in with your member token"))
+		return
+	}
+	reply(w, http.StatusOK, wire.Me{Member: c.member.name, Organisation: c.member.org, Projects: append([]string{}, h.access.projects[c.member.org]...)})
 }
 
 func (h *handler) streams(w http.ResponseWriter, r *http.Request, project string) {
@@ -147,20 +130,20 @@ func (h *handler) streams(w http.ResponseWriter, r *http.Request, project string
 	reply(w, http.StatusOK, wire.Streams{Streams: heads})
 }
 
-func (h *handler) getBlob(w http.ResponseWriter, r *http.Request, project string) {
-	sha := r.PathValue("sha256")
-	if r.Method == http.MethodHead {
-		held, err := h.store.HasBlob(r.Context(), project, sha)
-		switch {
-		case err != nil:
-			h.problem(w, r, err)
-		case held:
-			w.WriteHeader(http.StatusOK)
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-		return
+func (h *handler) hasBlob(w http.ResponseWriter, r *http.Request, project string) {
+	held, err := h.store.HasBlob(r.Context(), project, r.PathValue("sha256"))
+	switch {
+	case err != nil:
+		h.problem(w, r, err)
+	case held:
+		w.WriteHeader(http.StatusOK)
+	default:
+		w.WriteHeader(http.StatusNotFound)
 	}
+}
+
+func (h *handler) getBlob(w http.ResponseWriter, r *http.Request, project, _ string) {
+	sha := r.PathValue("sha256")
 	content, ok, err := h.store.Blob(r.Context(), project, sha)
 	switch {
 	case err != nil:
@@ -225,7 +208,7 @@ func (h *handler) appendEvents(w http.ResponseWriter, r *http.Request, project s
 	reply(w, http.StatusOK, out)
 }
 
-func (h *handler) works(w http.ResponseWriter, r *http.Request, project string) {
+func (h *handler) works(w http.ResponseWriter, r *http.Request, project, _ string) {
 	works, err := h.store.Works(r.Context(), project)
 	if err != nil {
 		h.problem(w, r, err)
@@ -235,7 +218,7 @@ func (h *handler) works(w http.ResponseWriter, r *http.Request, project string) 
 	reply(w, http.StatusOK, FilterWorks(works, WorkFilter{Status: q.Get("status"), Type: q.Get("type"), Branch: q.Get("branch"), Query: q.Get("q")}))
 }
 
-func (h *handler) timeline(w http.ResponseWriter, r *http.Request, project string) {
+func (h *handler) timeline(w http.ResponseWriter, r *http.Request, project, _ string) {
 	t, ok, err := h.store.Timeline(r.Context(), project, r.PathValue("id"))
 	switch {
 	case err != nil:
@@ -249,7 +232,7 @@ func (h *handler) timeline(w http.ResponseWriter, r *http.Request, project strin
 
 // instructions lists the skills and agents the history names, or, with
 // ?name=, one's versions and the stage visits each instructed.
-func (h *handler) instructions(w http.ResponseWriter, r *http.Request, project string) {
+func (h *handler) instructions(w http.ResponseWriter, r *http.Request, project, _ string) {
 	name := r.URL.Query().Get("name")
 	if name == "" {
 		names, err := h.store.InstructionNames(r.Context(), project)
@@ -271,7 +254,7 @@ func (h *handler) instructions(w http.ResponseWriter, r *http.Request, project s
 	}
 }
 
-func (h *handler) diff(w http.ResponseWriter, r *http.Request, project string) {
+func (h *handler) diff(w http.ResponseWriter, r *http.Request, project, _ string) {
 	from, to := r.PathValue("from"), r.PathValue("to")
 	if !sha256Hex.MatchString(from) || !sha256Hex.MatchString(to) {
 		h.problem(w, r, refuse(http.StatusBadRequest, wire.ProblemInvalid, "versions are SHA-256s in lowercase hex"))

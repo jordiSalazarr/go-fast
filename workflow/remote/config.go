@@ -19,11 +19,16 @@ import (
 )
 
 // ConfigPath is the sync configuration, relative to the repository root.
-// It is committed; the token never is.
+// It is committed; the project secret never is.
 const ConfigPath = ".gofast/sync.json"
 
-// TokenEnv holds the project's token.
-const TokenEnv = "GOFAST_SYNC_TOKEN"
+// SecretEnv holds the project secret: the one secret every clone of the
+// project syncs with (docs/adr/0002). It syncs and does nothing else.
+const SecretEnv = "GOFAST_PROJECT_SECRET"
+
+// OldSecretEnv is what SecretEnv was called before it named the project
+// secret; gf says so to whoever still sets it.
+const OldSecretEnv = "GOFAST_SYNC_TOKEN"
 
 // What a sync may send, besides the events, which it always sends.
 const (
@@ -123,18 +128,18 @@ func LoadConfig(root string) (Config, error) {
 	return config, nil
 }
 
-// Warnings are what the owner should fix before syncing: a missing token,
-// and a server reached without TLS anywhere but on this machine.
-func (c Config) Warnings(token string) []string {
+// Warnings are what the owner should fix before syncing: a missing
+// secret, and a server reached without TLS anywhere but on this machine.
+func (c Config) Warnings(secret string) []string {
 	if !c.Configured {
 		return nil
 	}
 	var out []string
-	if token == "" {
-		out = append(out, fmt.Sprintf("$%s is not set: gf sync needs the project's token. Set it in your own shell, never in a file.", TokenEnv))
+	if secret == "" {
+		out = append(out, fmt.Sprintf("$%s is not set: gf sync needs the project secret. Set it in your own shell, never in a file.", SecretEnv))
 	}
 	if c.Server.Scheme != "https" && !loopback(c.Server.Hostname()) {
-		out = append(out, fmt.Sprintf("the sync server %s is not https: the token and the history would cross the network unencrypted.", c.Server))
+		out = append(out, fmt.Sprintf("the sync server %s is not https: the secret and the history would cross the network unencrypted.", c.Server))
 	}
 	return out
 }

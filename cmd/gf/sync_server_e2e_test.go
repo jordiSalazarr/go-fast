@@ -21,10 +21,14 @@ import (
 	"github.com/jordiSalazarr/go-fast/workflow/remote/wire"
 )
 
-const syncToken = "t0ken"
+const (
+	projectSecret = "s3cret"
+	memberToken   = "j0rdi"
+)
 
-// historyServer is a running reference server with the project wallets,
-// and the requests it served, in order.
+// historyServer is a running reference server with the project wallets of
+// organisation acme, whose member is jordi, and the requests it served, in
+// order.
 type historyServer struct {
 	url   string
 	store *historyserver.Store
@@ -39,8 +43,11 @@ func newHistoryServer(t *testing.T) *historyServer {
 	store, err := historyserver.Open(filepath.Join(t.TempDir(), "history.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { store.Close() })
-	sum := sha256Hex(syncToken)
-	inner := historyserver.Handler(store, map[string]historyserver.Project{"wallets": {TokenSHA256: sum, ReadTokenSHA256s: []string{sha256Hex("r3ad")}}}, nil)
+	inner, err := historyserver.Handler(store, map[string]historyserver.Organisation{"acme": {
+		Members:  map[string]historyserver.Member{"jordi": {TokenSHA256: sha256Hex(memberToken)}},
+		Projects: map[string]historyserver.Project{"wallets": {SecretSHA256: sha256Hex(projectSecret)}},
+	}}, nil)
+	require.NoError(t, err)
 	h := &historyServer{store: store}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h.mu.Lock()
@@ -109,7 +116,7 @@ func (r *repo) clone() *repo {
 
 func (r *repo) sync(args ...string) result {
 	r.t.Helper()
-	return r.run(map[string]string{"GOFAST_SYNC_TOKEN": syncToken}, append([]string{"sync"}, args...)...)
+	return r.run(map[string]string{"GOFAST_PROJECT_SECRET": projectSecret}, append([]string{"sync"}, args...)...)
 }
 
 func (r *repo) events() int { return len(r.eventTypes()) }
@@ -234,7 +241,7 @@ func getJSON(t *testing.T, url string, v any) {
 	t.Helper()
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	require.NoError(t, err)
-	req.Header.Set("Authorization", "Bearer "+syncToken)
+	req.Header.Set("Authorization", "Bearer "+memberToken)
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close()
@@ -278,13 +285,13 @@ func TestSync_TheSameWorkAdvancedInTwoClones_IsRefusedForTheSecond(t *testing.T)
 	assert.Less(t, server.heldEvents(t), a.events()+b.events())
 }
 
-func TestSync_WithAReadToken_SaysItNeedsTheSyncToken(t *testing.T) {
+func TestSync_WithAMembersToken_SaysItNeedsTheProjectSecret(t *testing.T) {
 	server := newHistoryServer(t)
 	r := syncingRepo(t, server)
 	r.gf("start", "--type", "fix-bug", "login button does nothing")
-	res := r.run(map[string]string{"GOFAST_SYNC_TOKEN": "r3ad"}, "sync")
+	res := r.run(map[string]string{"GOFAST_PROJECT_SECRET": memberToken}, "sync")
 	assert.Equal(t, 1, res.code)
-	assert.Equal(t, "$GOFAST_SYNC_TOKEN is a read token of project wallets: gf sync needs the project's sync token.\n", res.stderr)
+	assert.Equal(t, "$GOFAST_PROJECT_SECRET is a member's token: gf sync needs project wallets's secret, the one every clone of it syncs with.\n", res.stderr)
 	assert.Zero(t, server.heldEvents(t))
 }
 
@@ -351,4 +358,44 @@ func TestSync_TheServerSaysWhichWorksEachSkillVersionInstructed_AndWhatChanged(t
 	getJSON(t, server.url+"/v1/projects/wallets/instructions?name=code-layout", &layout)
 	require.Len(t, layout.Versions, 1, "an unchanged skill keeps its version")
 	assert.Len(t, layout.Versions[0].Uses, 2)
+}
+
+func TestSync_AMemberAssessesASyncedVisit_AndTheRepositoryNeverHearsOfIt(t *testing.T) {
+	server := newHistoryServer(t)
+	r := syncingRepo(t, server)
+	r.gf("start", "--type", "fix-bug", "login button does nothing")
+	r.workOnStage()
+	require.Equal(t, 0, r.sync().code)
+	var works wire.Works
+	getJSON(t, server.url+"/v1/projects/wallets/works", &works)
+	require.Len(t, works.Works, 1)
+	work := works.Works[0].ID
+
+	body := strings.NewReader(`{"verdict": "went-wrong", "reason": "discovery never read the logs"}`)
+	req, err := http.NewRequest(http.MethodPut, server.url+"/v1/projects/wallets/works/"+work+"/visits/discovery/1/assessment", body)
+	require.NoError(t, err)
+	req.Header.Set("Authorization", "Bearer "+memberToken)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	log, err := os.ReadFile(filepath.Join(r.dir, ".gofast", "events.jsonl"))
+	require.NoError(t, err)
+	before := len(server.requests())
+	res := r.sync()
+	require.Equal(t, 0, res.code, res.stderr)
+	assert.Contains(t, res.stdout, "  events   0 sent, 0 the server held already\n")
+	after, err := os.ReadFile(filepath.Join(r.dir, ".gofast", "events.jsonl"))
+	require.NoError(t, err)
+	assert.Equal(t, string(log), string(after), "the assessment never reaches the event log")
+	for _, req := range server.requests()[before:] {
+		assert.NotContains(t, req, "assess", "gf never asks for the assessments")
+	}
+	assert.NotContains(t, r.gf("status"), "went-wrong")
+
+	var timeline wire.Timeline
+	getJSON(t, server.url+"/v1/projects/wallets/works/"+work, &timeline)
+	require.Len(t, timeline.Assessments, 1)
+	assert.Equal(t, "jordi", timeline.Assessments[0].Member)
 }

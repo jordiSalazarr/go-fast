@@ -29,14 +29,14 @@ func fetch(t *testing.T, u, bearer string) (*http.Response, string) {
 }
 
 func TestViewer_IsServedWithStrictSecurityHeaders(t *testing.T) {
-	_, _, base := serve(t, token)
+	_, _, base := serve(t, secret)
 	for path, contentType := range map[string]string{
 		"/":                          "text/html",
 		"/viewer/app.js":             "text/javascript",
 		"/viewer/app.css":            "text/css",
 		"/v1/projects/wallets/works": "application/json",
 	} {
-		resp, body := fetch(t, base+path, "r3ad")
+		resp, body := fetch(t, base+path, token)
 		require.Equal(t, http.StatusOK, resp.StatusCode, path)
 		assert.Contains(t, resp.Header.Get("Content-Type"), contentType, path)
 		assert.Equal(t, "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
@@ -54,7 +54,7 @@ func TestViewer_IsServedWithStrictSecurityHeaders(t *testing.T) {
 }
 
 func TestViewer_RendersMarkdown_WithoutRawHTMLOrDangerousLinks(t *testing.T) {
-	client, _, base := serve(t, token)
+	client, _, base := serve(t, secret)
 	doc := "# Decision\n\n<script>alert(1)</script>\n\n[ok](https://example.com) [bad](javascript:alert(1)) <img src=x onerror=alert(1)>\n\n| a | b |\n|---|---|\n| 1 | 2 |\n"
 	require.NoError(t, client.PutBlob(context.Background(), hash(doc), []byte(doc)))
 

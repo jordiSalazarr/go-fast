@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/url"
+	"strings"
 
 	"github.com/jordiSalazarr/go-fast/workflow/remote/wire"
 )
@@ -98,12 +99,16 @@ func (s *Store) Timeline(ctx context.Context, project, work string) (wire.Timeli
 	if !found {
 		return wire.Timeline{}, false, nil
 	}
-	assignments := "assignment-" + work + "-"
-	events, err := s.events(ctx, project, `stream = ? OR stream = ? OR substr(stream, 1, ?) = ?`,
-		"work-"+work, "observations-"+work, len(assignments), assignments)
+	events, err := s.workEvents(ctx, project, work)
 	if err != nil {
 		return wire.Timeline{}, false, err
 	}
+	t.Troubles = troublesOf(work, events)
+	current, err := s.Assessments(ctx, project, AssessmentFilter{Work: work})
+	if err != nil {
+		return wire.Timeline{}, false, err
+	}
+	t.Assessments = current.Assessments
 	t.Events, t.Visits, t.Files = []wire.Event{}, []wire.Visit{}, []wire.FileLink{}
 	visits := map[[2]any]int{}
 	for _, e := range events {
@@ -142,6 +147,35 @@ func (s *Store) Timeline(ctx context.Context, project, work string) (wire.Timeli
 		t.Files[i].URL = blobURL(project, t.Files[i].SHA256)
 	}
 	return t, true, nil
+}
+
+// workEvents are the events of the work's own streams, in the order they
+// occurred. Its assignments' streams are those whose AssignmentOpened names
+// the work: a work's id can begin another's ("w" and "w-1"), so the
+// stream's name alone doesn't say.
+func (s *Store) workEvents(ctx context.Context, project, work string) ([]wire.Envelope, error) {
+	prefix := "assignment-" + work + "-"
+	events, err := s.events(ctx, project, `stream = ? OR stream = ? OR substr(stream, 1, ?) = ?`,
+		"work-"+work, "observations-"+work, len(prefix), prefix)
+	if err != nil {
+		return nil, err
+	}
+	owned := map[string]bool{}
+	for _, e := range events {
+		var p struct {
+			WorkID string `json:"workId"`
+		}
+		if e.Type == typeAssignmentOpened && json.Unmarshal(e.Payload, &p) == nil && p.WorkID == work {
+			owned[e.Stream] = true
+		}
+	}
+	kept := events[:0]
+	for _, e := range events {
+		if !strings.HasPrefix(e.Stream, "assignment-") || owned[e.Stream] {
+			kept = append(kept, e)
+		}
+	}
+	return kept, nil
 }
 
 // instructionsDir is where gf keeps the instruction versions in a

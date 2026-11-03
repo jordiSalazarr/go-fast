@@ -4,6 +4,9 @@
 // envelopes, never gf's domain: an older server keeps accepting the events
 // of a newer gf. It can't change any workflow state; nothing it holds goes
 // back to a repository.
+//
+// It also keeps the members' assessments, which are written here and exist
+// nowhere else (docs/adr/0001): its backups are their only copy.
 package historyserver
 
 import (
@@ -73,6 +76,22 @@ CREATE TABLE IF NOT EXISTS syncs (
 	accepted    INTEGER NOT NULL,
 	duplicates  INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS assessments (
+	seq         INTEGER PRIMARY KEY AUTOINCREMENT,
+	project     TEXT NOT NULL,
+	work        TEXT NOT NULL,
+	stage       TEXT NOT NULL,
+	visit       INTEGER NOT NULL,
+	member      TEXT NOT NULL,
+	verdict     TEXT NOT NULL,
+	reason      TEXT NOT NULL,
+	assessed_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS assessments_of ON assessments (project, work, stage, visit, member);
+CREATE TRIGGER IF NOT EXISTS assessments_append_only_update BEFORE UPDATE ON assessments
+	BEGIN SELECT RAISE(ABORT, 'assessments are append-only'); END;
+CREATE TRIGGER IF NOT EXISTS assessments_append_only_delete BEFORE DELETE ON assessments
+	BEGIN SELECT RAISE(ABORT, 'assessments are append-only'); END;
 CREATE TRIGGER IF NOT EXISTS events_append_only_update BEFORE UPDATE ON events
 	BEGIN SELECT RAISE(ABORT, 'events are append-only'); END;
 CREATE TRIGGER IF NOT EXISTS events_append_only_delete BEFORE DELETE ON events

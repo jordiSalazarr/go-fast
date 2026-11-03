@@ -59,12 +59,12 @@ func TestConfig_Warnings(t *testing.T) {
 	c, err := remote.LoadConfig(writeConfig(t, `{"server": "http://history.internal", "project": "wallets"}`))
 	require.NoError(t, err)
 	assert.Equal(t, []string{
-		"$GOFAST_SYNC_TOKEN is not set: gf sync needs the project's token. Set it in your own shell, never in a file.",
-		"the sync server http://history.internal is not https: the token and the history would cross the network unencrypted.",
+		"$GOFAST_PROJECT_SECRET is not set: gf sync needs the project secret. Set it in your own shell, never in a file.",
+		"the sync server http://history.internal is not https: the secret and the history would cross the network unencrypted.",
 	}, c.Warnings(""))
 	for _, local := range []string{"http://localhost:8080", "http://127.0.0.1:8080", "http://[::1]:8080"} {
 		c, err := remote.LoadConfig(writeConfig(t, `{"server": "`+local+`", "project": "wallets"}`))
 		require.NoError(t, err)
-		assert.Empty(t, c.Warnings("t0ken"), local)
+		assert.Empty(t, c.Warnings("s3cret"), local)
 	}
 }

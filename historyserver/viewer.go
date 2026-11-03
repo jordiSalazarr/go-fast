@@ -56,7 +56,7 @@ type Rendered struct {
 }
 
 // renderBlob serves a Markdown blob rendered to HTML, for the viewer.
-func (h *handler) renderBlob(w http.ResponseWriter, r *http.Request, project string) {
+func (h *handler) renderBlob(w http.ResponseWriter, r *http.Request, project, _ string) {
 	content, ok, err := h.store.Blob(r.Context(), project, r.PathValue("sha256"))
 	switch {
 	case err != nil:

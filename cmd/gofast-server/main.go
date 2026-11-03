@@ -1,6 +1,7 @@
 // Command gofast-server is the reference gofast history server: gf sync
-// sends it each project's work history, and it serves it back read-only,
-// as JSON and as a viewer at /.
+// sends it each project's work history, and it serves it to the members of
+// the project's organisation, who assess it there, as JSON and as a viewer
+// at /.
 //
 //	gofast-server -config server.json            serve
 //	gofast-server -config server.json -backup f  write a consistent copy of the database to f, and exit
@@ -61,9 +62,13 @@ func serve(config historyserver.Config, logger *slog.Logger) error {
 		return err
 	}
 	defer store.Close()
+	handler, err := historyserver.Handler(store, config.Organisations, logger)
+	if err != nil {
+		return err
+	}
 	srv := &http.Server{
 		Addr:              config.Listen,
-		Handler:           historyserver.Handler(store, config.Projects, logger),
+		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -74,7 +79,7 @@ func serve(config historyserver.Config, logger *slog.Logger) error {
 		defer cancel()
 		_ = srv.Shutdown(shutdown)
 	}()
-	logger.Info("listening", "addr", config.Listen, "db", config.DB, "projects", len(config.Projects))
+	logger.Info("listening", "addr", config.Listen, "db", config.DB, "organisations", len(config.Organisations))
 	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}

@@ -22,25 +22,54 @@ import (
 	"github.com/jordiSalazarr/go-fast/workflow/remote/wire"
 )
 
-const token = "t0ken"
+// The project wallets syncs with secret; jordi and ana are members of
+// its organisation, acme. bob is a member of globex, whose project is
+// ledger.
+const (
+	secret = "s3cret"
+	token  = "j0rdi"
+	ana    = "4na"
+	bob    = "b0b"
+)
+
+var organisations = map[string]historyserver.Organisation{
+	"acme": {
+		Members:  map[string]historyserver.Member{"jordi": {TokenSHA256: hash(token)}, "ana": {TokenSHA256: hash(ana)}},
+		Projects: map[string]historyserver.Project{"wallets": {SecretSHA256: hash(secret)}},
+	},
+	"globex": {
+		Members:  map[string]historyserver.Member{"bob": {TokenSHA256: hash(bob)}},
+		Projects: map[string]historyserver.Project{"ledger": {SecretSHA256: hash("l3dger")}},
+	},
+}
 
 func hash(s string) string {
 	sum := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(sum[:])
 }
 
-// serve starts a server with the project wallets, and returns a client of
-// it with token.
+// serve starts a server with the organisations, and returns a client of
+// the project wallets with token.
 func serve(t *testing.T, token string) (*remote.Client, *historyserver.Store, string) {
 	t.Helper()
 	store, err := historyserver.Open(filepath.Join(t.TempDir(), "history.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { store.Close() })
-	srv := httptest.NewServer(historyserver.Handler(store, map[string]historyserver.Project{"wallets": {TokenSHA256: hash("t0ken"), ReadTokenSHA256s: []string{hash("r3ad")}}}, nil))
+	handler, err := historyserver.Handler(store, organisations, nil)
+	require.NoError(t, err)
+	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
 	u, err := url.Parse(srv.URL)
 	require.NoError(t, err)
 	return remote.NewClient(remote.NewConfig(u, "wallets"), token, "test", nil), store, srv.URL
+}
+
+// clientOf is a client of project at base with token.
+func clientOf(t *testing.T, base, project, token string) *remote.Client {
+	t.Helper()
+	u, err := url.Parse(base)
+	require.NoError(t, err)
+	return remote.NewClient(remote.NewConfig(u, project), token, "test", nil)
 }
 
 // clock is the second each new line occurs at.
@@ -67,48 +96,74 @@ func refusal(t *testing.T, err error) wire.Problem {
 	return problem.Problem
 }
 
-func TestServer_WithoutTheProjectsToken_RefusesEverything(t *testing.T) {
+func TestServer_WithoutTheProjectsSecret_RefusesEverything(t *testing.T) {
 	client, _, _ := serve(t, "wrong")
 	_, err := client.Streams(context.Background())
 	assert.Equal(t, wire.ProblemUnauthorized, refusal(t, err).Error)
 	_, err = client.HasBlob(context.Background(), hash("x"))
 	assert.Error(t, err)
 
-	other, _, base := serve(t, token)
-	u, _ := url.Parse(base)
-	_, err = remote.NewClient(remote.NewConfig(u, "ledger"), token, "", nil).Streams(context.Background())
-	assert.Equal(t, wire.ProblemUnauthorized, refusal(t, err).Error, "an unknown project looks the same as a wrong token")
+	other, _, base := serve(t, secret)
+	_, err = clientOf(t, base, "ledger", secret).Streams(context.Background())
+	assert.Equal(t, wire.ProblemUnauthorized, refusal(t, err).Error, "another project's secret looks the same as a wrong one")
+	_, err = clientOf(t, base, "nowhere", secret).Streams(context.Background())
+	assert.Equal(t, wire.ProblemUnauthorized, refusal(t, err).Error, "an unknown project looks the same as a wrong secret")
 	_, err = other.Streams(context.Background())
 	assert.NoError(t, err)
 }
 
-func TestServer_AReadTokenReads_ButNeverWrites(t *testing.T) {
-	writer, _, _ := serve(t, token)
+func TestServer_TheSecretOnlySyncs(t *testing.T) {
+	client, _, base := serve(t, secret)
+	ctx := context.Background()
+	_, err := client.SendEvents(ctx, wire.Events{Events: []string{started}})
+	require.NoError(t, err)
+	_, err = client.Streams(ctx)
+	require.NoError(t, err)
+	_, err = client.HasBlob(ctx, hash("x"))
+	require.NoError(t, err)
+
+	for _, path := range []string{"/works", "/works/w-1", "/instructions", "/assessments", "/troubles", "/blobs/" + hash("x")} {
+		resp, body := fetch(t, base+"/v1/projects/wallets"+path, secret)
+		assert.Equal(t, http.StatusForbidden, resp.StatusCode, path)
+		assert.Contains(t, body, "the project secret only syncs: read with a member's token", path)
+	}
+	resp, _ := fetch(t, base+"/v1/me", secret)
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode, "a secret names a project, not a member")
+}
+
+func TestServer_AMemberReadsEveryProjectOfTheirOrganisation_ButNeverSyncs(t *testing.T) {
+	writer, _, base := serve(t, secret)
 	ctx := context.Background()
 	_, err := writer.SendEvents(ctx, wire.Events{Events: []string{started}})
 	require.NoError(t, err)
 
-	reader, _, base := serve(t, "r3ad")
-	_, err = reader.Streams(ctx)
-	require.NoError(t, err)
-	_, err = reader.SendEvents(ctx, wire.Events{Events: []string{started}})
+	member := clientOf(t, base, "wallets", token)
+	_, err = member.SendEvents(ctx, wire.Events{Events: []string{started}})
 	p := refusal(t, err)
 	assert.Equal(t, wire.ProblemForbidden, p.Error)
-	assert.Equal(t, "a read token can't write: gf sync uses the project's sync token", p.Message)
-	assert.Equal(t, wire.ProblemForbidden, refusal(t, reader.PutBlob(ctx, hash("x"), []byte("x"))).Error)
-	_, err = reader.RecordFiles(ctx, nil)
+	assert.Equal(t, "a member's token can't sync: gf sync uses the project's secret", p.Message)
+	_, err = member.Streams(ctx)
+	assert.Equal(t, wire.ProblemForbidden, refusal(t, err).Error)
+	assert.Equal(t, wire.ProblemForbidden, refusal(t, member.PutBlob(ctx, hash("x"), []byte("x"))).Error)
+	_, err = member.RecordFiles(ctx, nil)
 	assert.Equal(t, wire.ProblemForbidden, refusal(t, err).Error)
 
-	req, _ := http.NewRequest(http.MethodGet, base+"/v1/projects/wallets/works", nil)
-	req.Header.Set("Authorization", "Bearer r3ad")
-	resp, err := http.DefaultClient.Do(req)
-	require.NoError(t, err)
-	resp.Body.Close()
+	resp, _ := fetch(t, base+"/v1/projects/wallets/works", token)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	resp, _ = fetch(t, base+"/v1/projects/ledger/works", token)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode, "another organisation's project looks like no project")
+	resp, _ = fetch(t, base+"/v1/projects/wallets/works", bob)
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+	resp, _ = fetch(t, base+"/v1/projects/wallets/works", "wrong")
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+
+	var me wire.Me
+	get(t, base+"/v1/me", &me)
+	assert.Equal(t, wire.Me{Member: "jordi", Organisation: "acme", Projects: []string{"wallets"}}, me)
 }
 
 func TestServer_AppendsEvents_Idempotently_AndKeepsEachStreamsDigest(t *testing.T) {
-	client, _, _ := serve(t, token)
+	client, _, _ := serve(t, secret)
 	ctx := context.Background()
 
 	out, err := client.SendEvents(ctx, wire.Events{Seal: "s1", Events: []string{started, entered}})
@@ -125,7 +180,7 @@ func TestServer_AppendsEvents_Idempotently_AndKeepsEachStreamsDigest(t *testing.
 }
 
 func TestServer_RefusesAWholeBatch_ForOneBadEvent(t *testing.T) {
-	client, _, _ := serve(t, token)
+	client, _, _ := serve(t, secret)
 	ctx := context.Background()
 	_, err := client.SendEvents(ctx, wire.Events{Events: []string{started}})
 	require.NoError(t, err)
@@ -154,7 +209,7 @@ func TestServer_RefusesAWholeBatch_ForOneBadEvent(t *testing.T) {
 }
 
 func TestServer_KeepsBlobsByHash_AndFilesOnlyForHeldBlobs(t *testing.T) {
-	client, _, base := serve(t, token)
+	client, _, base := serve(t, secret)
 	ctx := context.Background()
 	content := "# Discovery\n"
 
@@ -184,7 +239,7 @@ func TestServer_KeepsBlobsByHash_AndFilesOnlyForHeldBlobs(t *testing.T) {
 }
 
 func TestServer_ServesTheWorksAndEachWorksTimeline(t *testing.T) {
-	client, _, base := serve(t, token)
+	client, _, base := serve(t, secret)
 	ctx := context.Background()
 	skill, agent := hash("skill manifest"), hash("agent manifest")
 	events := []string{
@@ -245,17 +300,32 @@ func TestStore_EventsAreAppendOnly(t *testing.T) {
 
 func TestLoadConfig(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "server.json")
-	require.NoError(t, os.WriteFile(path, []byte(`{"listen": ":8080", "db": "h.db", "projects": {"wallets": {"tokenSha256": "`+hash(token)+`"}}}`), 0o644))
-	c, err := historyserver.LoadConfig(path)
+	load := func(organisations string) (historyserver.Config, error) {
+		require.NoError(t, os.WriteFile(path, []byte(`{"listen": ":8080", "db": "h.db", "organisations": `+organisations+`}`), 0o644))
+		return historyserver.LoadConfig(path)
+	}
+	c, err := load(`{"acme": {"members": {"jordi": {"tokenSha256": "` + hash(token) + `"}}, "projects": {"wallets": {"secretSha256": "` + hash(secret) + `"}}}}`)
 	require.NoError(t, err)
-	assert.Equal(t, hash(token), c.Projects["wallets"].TokenSHA256)
+	assert.Equal(t, hash(secret), c.Organisations["acme"].Projects["wallets"].SecretSHA256)
+	assert.Equal(t, hash(token), c.Organisations["acme"].Members["jordi"].TokenSHA256)
 
-	require.NoError(t, os.WriteFile(path, []byte(`{"listen": ":8080", "db": "h.db", "projects": {"wallets": {"tokenSha256": "t0ken"}}}`), 0o644))
+	for want, organisations := range map[string]string{
+		"project wallets: secretSha256 must be the secret's SHA-256":      `{"acme": {"projects": {"wallets": {"secretSha256": "s3cret"}}}}`,
+		"member acme/jordi: tokenSha256 must be the token's SHA-256":      `{"acme": {"members": {"jordi": {"tokenSha256": "j0rdi"}}, "projects": {"wallets": {"secretSha256": "` + hash(secret) + `"}}}}`,
+		"project wallets is in both acme and globex":                      `{"acme": {"projects": {"wallets": {"secretSha256": "` + hash(secret) + `"}}}, "globex": {"projects": {"wallets": {"secretSha256": "` + hash("x") + `"}}}}`,
+		"projects ledger and wallets have the same secret":                `{"acme": {"projects": {"wallets": {"secretSha256": "` + hash(secret) + `"}, "ledger": {"secretSha256": "` + hash(secret) + `"}}}}`,
+		"members acme/ana and acme/jordi have the same token":             `{"acme": {"members": {"jordi": {"tokenSha256": "` + hash(token) + `"}, "ana": {"tokenSha256": "` + hash(token) + `"}}, "projects": {"wallets": {"secretSha256": "` + hash(secret) + `"}}}}`,
+		"a member's token and project wallets's secret are the same":      `{"acme": {"members": {"jordi": {"tokenSha256": "` + hash(secret) + `"}}, "projects": {"wallets": {"secretSha256": "` + hash(secret) + `"}}}}`,
+		`project "Wallets": ids are lowercase letters, digits and dashes`: `{"acme": {"projects": {"Wallets": {"secretSha256": "` + hash(secret) + `"}}}}`,
+		"set listen, db and at least one organisation with a project":     `{}`,
+	} {
+		_, err := load(organisations)
+		assert.ErrorContains(t, err, want)
+	}
+
+	require.NoError(t, os.WriteFile(path, []byte(`{"listen": ":8080", "db": "h.db", "projects": {"wallets": {"tokenSha256": "`+hash(token)+`"}}}`), 0o644))
 	_, err = historyserver.LoadConfig(path)
-	assert.ErrorContains(t, err, "tokenSha256 must be the token's SHA-256")
-	require.NoError(t, os.WriteFile(path, []byte(`{"listen": ":8080", "db": "h.db", "projects": {"wallets": {"tokenSha256": "`+hash(token)+`", "readTokenSha256s": ["r3ad"]}}}`), 0o644))
-	_, err = historyserver.LoadConfig(path)
-	assert.ErrorContains(t, err, "each of readTokenSha256s must be a token's SHA-256")
+	assert.ErrorContains(t, err, `projects now belong to an organisation, and read tokens are members' tokens: see deploy/server.example.json`)
 }
 
 func get(t *testing.T, u string, v any) {
@@ -273,7 +343,7 @@ func get(t *testing.T, u string, v any) {
 // versions of the discovery skill, both kept.
 func twoVersions(t *testing.T) (base, v1, v2 string) {
 	t.Helper()
-	client, _, base := serve(t, token)
+	client, _, base := serve(t, secret)
 	ctx := context.Background()
 	v1, v2 = hash("v1 manifest"), hash("v2 manifest")
 	loaded := func(id, work string, n int, version string) string {

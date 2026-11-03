@@ -51,9 +51,12 @@ func NewCommand(openStore func() (*eventlog.Store, error), resolveCaller func() 
 			if !config.Configured {
 				return &Error{Message: "Sync is not configured: create " + remote.ConfigPath + " with the server's URL and the project's id. `gf checks` shows the result."}
 			}
-			token := getenv(remote.TokenEnv)
-			if token == "" {
-				return &Error{Message: fmt.Sprintf("Set $%s to the project's token in your own shell, then run `gf sync` again.", remote.TokenEnv)}
+			secret := getenv(remote.SecretEnv)
+			if secret == "" && getenv(remote.OldSecretEnv) != "" {
+				return &Error{Message: fmt.Sprintf("$%s is now $%s: set $%[2]s to the project secret in your own shell, then run `gf sync` again.", remote.OldSecretEnv, remote.SecretEnv)}
+			}
+			if secret == "" {
+				return &Error{Message: fmt.Sprintf("Set $%s to the project secret in your own shell, then run `gf sync` again.", remote.SecretEnv)}
 			}
 			checks, err := exitchecks.LoadConfig(root)
 			if err != nil {
@@ -68,7 +71,7 @@ func NewCommand(openStore func() (*eventlog.Store, error), resolveCaller func() 
 				return err
 			}
 			gf := instructions.GfVersion()
-			server := remote.NewClient(config, token, "gf/"+gf, httpClient)
+			server := remote.NewClient(config, secret, "gf/"+gf, httpClient)
 			report, err := remote.Sync(cmd.Context(), root, config, checks.Decisions, log, server, remote.Options{DryRun: dryRun, Client: gf})
 			render(cmd.OutOrStdout(), config, report)
 			return explain(err, config)
@@ -110,9 +113,9 @@ func explain(err error, c remote.Config) error {
 		return &Error{Message: fmt.Sprintf("%d streams were not synced; the rest were. A refused stream's history differs from the server's: "+
 			"compare this clone's .gofast/events.jsonl with the server's timeline of that work before syncing it again.", len(refused.Refused))}
 	case errors.As(err, &problem) && problem.Problem.Error == wire.ProblemForbidden:
-		return &Error{Message: fmt.Sprintf("$%s is a read token of project %s: gf sync needs the project's sync token.", remote.TokenEnv, c.Project)}
+		return &Error{Message: fmt.Sprintf("$%s is a member's token: gf sync needs project %s's secret, the one every clone of it syncs with.", remote.SecretEnv, c.Project)}
 	case errors.As(err, &problem) && problem.Problem.Error == wire.ProblemUnauthorized:
-		return &Error{Message: fmt.Sprintf("The history server %s refused the token for project %s. Check $%s.", c.Server, c.Project, remote.TokenEnv)}
+		return &Error{Message: fmt.Sprintf("The history server %s refused the secret for project %s. Check $%s: if the secret was rotated, ask for the new one.", c.Server, c.Project, remote.SecretEnv)}
 	case errors.As(err, &problem):
 		return &Error{Message: fmt.Sprintf("The history server %s refused the sync: %s. Run `gf sync` again; it resumes where it stopped.", c.Server, problem.Problem.Message)}
 	case errors.As(err, &unreachable):

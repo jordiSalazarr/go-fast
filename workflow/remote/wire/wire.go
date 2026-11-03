@@ -1,20 +1,38 @@
 // Package wire is the history server's protocol, version 1: the messages gf
-// sync and the server exchange, as JSON over HTTP. Every request carries
-// the project's token as "Authorization: Bearer <token>".
+// sync and the server exchange, and those the server answers its members
+// with, as JSON over HTTP. Every request carries a bearer token
+// ("Authorization: Bearer <token>"): gf sync the project secret, which
+// only syncs; a member their own token, which reads and assesses every
+// project of their organisation and never syncs.
+//
+// Syncing, with the project secret:
 //
 //	GET  /v1/projects/{project}/streams           → Streams
 //	HEAD /v1/projects/{project}/blobs/{sha256}    → 200 held, 404 not held
 //	PUT  /v1/projects/{project}/blobs/{sha256}    ← the file's bytes; 201 (400 when they don't hash to sha256)
-//	GET  /v1/projects/{project}/blobs/{sha256}    → the file's bytes
 //	POST /v1/projects/{project}/files             ← Files → FilesRecorded (409 Problem "missing-blob")
 //	POST /v1/projects/{project}/events            ← Events → EventsAccepted (409 Problem "diverged", "tampered" or "gap")
+//
+// Inspecting and assessing, with a member's token:
+//
+//	GET  /v1/me                                   → Me
+//	GET  /v1/projects/{project}/blobs/{sha256}    → the file's bytes
 //	GET  /v1/projects/{project}/works             → Works
 //	GET  /v1/projects/{project}/works/{id}        → Timeline
 //	GET  /v1/projects/{project}/instructions      → InstructionNames; ?name= → Instructions
 //	GET  /v1/projects/{project}/instructions/{a}/diff/{b} → VersionDiff
+//	GET  /v1/projects/{project}/troubles          → Troubles
+//	PUT  /v1/projects/{project}/works/{id}/assessment                      ← Assess → Assessment
+//	PUT  /v1/projects/{project}/works/{id}/visits/{stage}/{visit}/assessment ← Assess → Assessment
+//	GET  /v1/projects/{project}/assessments       → Assessments
 //
 // The works list takes ?status=, ?type=, ?branch= and ?q= (in the
-// description, ignoring case). The GET endpoints accept a read token.
+// description, ignoring case); the troubles ?type= and ?stage=; the
+// assessments ?verdict=, ?stage=, ?member= and ?work=. To a member,
+// another organisation's project is "not-found".
+//
+// Assessments are written on the server and live only there: gf never
+// fetches them, and they never move a work.
 //
 // Blobs come before the files that name them, and files before events, so
 // the server never holds an event whose files are missing. Every write is
@@ -92,8 +110,8 @@ type EventsAccepted struct {
 // Problem is a refused request. A refused batch of events or files changes
 // nothing.
 type Problem struct {
-	// Error is the problem's kind: "unauthorized", "forbidden" (a read
-	// token writing), "invalid",
+	// Error is the problem's kind: "unauthorized", "forbidden" (a member
+	// syncing, or the project secret reading), "invalid", "not-found",
 	// "missing-blob", "diverged" (the server holds another event at this
 	// stream version), "tampered" (it holds this event ID with other
 	// content), "gap" (the stream's previous version is missing).
@@ -153,12 +171,18 @@ type Work struct {
 }
 
 // Timeline is one work's history: its events in the order they occurred,
-// the instructions each stage visit started with, and its files.
+// the instructions each stage visit started with, its files, its troubles
+// and how members assessed it.
 type Timeline struct {
 	Work   Work       `json:"work"`
 	Events []Event    `json:"events"`
 	Visits []Visit    `json:"visits"`
 	Files  []FileLink `json:"files"`
+	// Troubles are the work's, in the order they occurred.
+	Troubles []Trouble `json:"troubles"`
+	// Assessments are every member's current ones of the work and its
+	// stage visits, newest first.
+	Assessments []Assessment `json:"assessments"`
 }
 
 type Event struct {
@@ -249,4 +273,61 @@ type FileDiff struct {
 	Status string `json:"status"`
 	// Unified is the unified diff of a changed text file; empty otherwise.
 	Unified string `json:"unified,omitempty"`
+}
+
+// Me is the member a token is, and the projects of their organisation.
+type Me struct {
+	Member       string   `json:"member"`
+	Organisation string   `json:"organisation"`
+	Projects     []string `json:"projects"`
+}
+
+// Verdicts of an assessment.
+const (
+	VerdictGood      = "good"
+	VerdictWentWrong = "went-wrong"
+)
+
+// Assess is a member's judgement: good, or went wrong with the reason.
+type Assess struct {
+	Verdict string `json:"verdict"`
+	Reason  string `json:"reason,omitempty"`
+}
+
+// Assessment is a member's current judgement of a stage visit, or of the
+// whole work when Stage is empty. A member has one per stage visit or
+// work: assessing again replaces it.
+type Assessment struct {
+	Work       string    `json:"work"`
+	Stage      string    `json:"stage,omitempty"`
+	Visit      int       `json:"visit,omitempty"`
+	Member     string    `json:"member"`
+	Verdict    string    `json:"verdict"`
+	Reason     string    `json:"reason,omitempty"`
+	AssessedAt time.Time `json:"assessedAt"`
+}
+
+// Assessments are the current ones, newest first.
+type Assessments struct {
+	Assessments []Assessment `json:"assessments"`
+}
+
+// Troubles are the moments works went wrong on their own record, newest
+// first.
+type Troubles struct {
+	Troubles []Trouble `json:"troubles"`
+}
+
+// Trouble is a failed attempt, a rejection, an escalation, a rework, a
+// return or an abandon: the event that recorded it, and the stage visit
+// it happened in (none for an abandon).
+type Trouble struct {
+	Work       string    `json:"work"`
+	Stage      string    `json:"stage,omitempty"`
+	Visit      int       `json:"visit,omitempty"`
+	Type       string    `json:"type"`
+	Event      string    `json:"event"`
+	OccurredAt time.Time `json:"occurredAt"`
+	// Reason is what the event says went wrong.
+	Reason string `json:"reason"`
 }
