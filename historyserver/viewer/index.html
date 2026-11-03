@@ -3,26 +3,48 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <title>gofast history</title>
 <link rel="stylesheet" href="/viewer/app.css">
 <script src="/viewer/app.js" defer></script>
 </head>
 <body>
+<div id="progress" class="progress" hidden></div>
 <header class="bar">
-  <a class="brand" href="#/works">gofast history</a>
+  <a class="brand" href="#/works" aria-label="gofast history, works">
+    <svg class="brand-mark" viewBox="0 0 28 12" aria-hidden="true"><path d="M2 6h24"/><circle cx="3" cy="6" r="2.5"/><circle cx="14" cy="6" r="2.5"/><circle cx="25" cy="6" r="2.5"/></svg>
+    <span>gofast</span><span class="brand-sub">history</span>
+  </a>
   <nav id="nav" hidden>
-    <a href="#/works">Works</a>
-    <a href="#/troubles">Troubles</a>
-    <a href="#/assessments">Assessments</a>
-    <a href="#/instructions">Skills and agents</a>
-    <a href="#/projects">Projects</a>
-    <select id="project" aria-label="Project"></select>
-    <span id="who" class="muted"></span>
-    <button id="logout" type="button">Sign out</button>
+    <div class="nav-links">
+      <a href="#/works" data-section="works">Works</a>
+      <a href="#/troubles" data-section="troubles">Troubles</a>
+      <a href="#/assessments" data-section="assessments">Assessments</a>
+      <a href="#/instructions" data-section="instructions">Skills and agents</a>
+      <a href="#/projects" data-section="projects">Projects</a>
+    </div>
+    <div class="nav-end">
+      <label class="project-pick"><span class="sr">Project</span><select id="project" aria-label="Project"></select></label>
+      <span id="who" class="who"></span>
+      <button id="logout" type="button" class="ghost">Sign out</button>
+    </div>
   </nav>
 </header>
 <main id="main">
   <noscript>The viewer needs JavaScript.</noscript>
 </main>
+<div id="keys" class="keys" role="dialog" aria-modal="true" aria-labelledby="keys-title" hidden>
+  <div class="keys-panel">
+    <h2 id="keys-title">Keyboard</h2>
+    <dl>
+      <dt><kbd>j</kbd> <kbd>k</kbd></dt><dd>Next and previous visit</dd>
+      <dt><kbd>g</kbd></dt><dd>Assess the visit as good</dd>
+      <dt><kbd>w</kbd></dt><dd>Say what went wrong</dd>
+      <dt><kbd>o</kbd></dt><dd>Open or close its artifacts</dd>
+      <dt><kbd>?</kbd></dt><dd>Show or hide this</dd>
+      <dt><kbd>Esc</kbd></dt><dd>Close</dd>
+    </dl>
+  </div>
+</div>
 </body>
 </html>
