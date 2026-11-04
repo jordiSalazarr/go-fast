@@ -342,3 +342,45 @@ func goBinary(t *testing.T) string {
 	require.NoError(t, err)
 	return path
 }
+
+// 5. Stress testing that can't pass needn't strand the work: on the stage,
+// the owner skips it, the work completes, and the open stress-testing
+// visit is cancelled.
+func TestStress_OnStressTesting_TheOwnerSkipsIt_AndTheWorkCompletes(t *testing.T) {
+	withFakeK6(t)
+	r := newStressRepo(t, `"internal/ledger/**"`, fastWallet)
+	r.toStressReview()
+	r.workOnStage()
+	r.submitAsAgent("--passed", "--stress", "include", includeStress)
+	r.workOnStage()
+	r.submitAsAgent("--passed")
+	r.expect("stress-testing", progress.AssignmentOpen, 0, 3)
+	r.workOnStage()
+	r.submitAsAgent("--passed") // no script: stress-scripts-valid fails
+	r.expect("stress-testing", progress.AssignmentOpen, 1, 3)
+
+	res := r.gfFails(nil, "stress", "include", "after all")
+	assert.Contains(t, res.stderr, "on stress testing itself, only `gf stress skip")
+	out := r.gf("stress", "skip", "no stress setup in this repo yet")
+	assert.Contains(t, out, "Stress testing is skipped: no stress setup in this repo yet\nThe work is complete.")
+
+	assert.Nil(t, r.status().Work, "work completed")
+	assert.Equal(t, 1, count(r.eventTypes(), "AssignmentCancelled"), "the stress-testing visit")
+}
+
+// 6. Without NFRs there is nothing to stress test against: review's include
+// is recorded as a skip, and the owner can't include it either.
+func TestStress_WithoutNFRs_ReviewsIncludeIsASkip(t *testing.T) {
+	r := newRepo(t)
+	r.toStressReview()
+	r.workOnStage()
+	out := r.submitAsAgent("--passed", "--stress", "include", includeStress)
+	assert.Contains(t, out, "'review' accepted, deciding to skip stress testing.")
+	assert.Contains(t, r.gf("status"), "Stress decision: skip, by review: no NFRs in .gofast/nfrs.json to stress test against; review asked for it: "+includeStress)
+
+	v := r.expect("integration-testing", progress.AssignmentOpen, 0, 3)
+	assert.Equal(t, progress.StageSkipped, v.Work.Stages[len(v.Work.Stages)-1].Status)
+
+	res := r.gfFails(nil, "stress", "include", "I want numbers")
+	assert.Contains(t, res.stderr, "There are no NFRs in .gofast/nfrs.json")
+}

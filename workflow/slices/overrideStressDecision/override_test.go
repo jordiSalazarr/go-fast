@@ -40,7 +40,7 @@ func workChanged(names ...string) overridestressdecision.StressFacts {
 
 func overriding(decision domain.StressDecision, facts overridestressdecision.StressFacts) func(*eventlog.Session) error {
 	return func(log *eventlog.Session) error {
-		_, err := overridestressdecision.OverrideStressDecision(log, owner, Branch, Owner, decision, Reason("the owner says so"), facts)
+		_, _, err := overridestressdecision.OverrideStressDecision(log, owner, Branch, Owner, decision, Reason("the owner says so"), facts)
 		return err
 	}
 }
@@ -65,10 +65,26 @@ func TestGivenAChangeInAnNFRsArea_WhenTheOwnerIncludesStressTesting_ThenItIsForc
 			ForcedBy: []domain.NFRID{walletNFR.ID()}, Owner: Owner})
 }
 
-func TestGivenWorkPastIntegrationTesting_WhenTheOwnerOverrides_ThenItIsRejected(t *testing.T) {
+func TestGivenWorkOnStressTesting_WhenTheOwnerIncludesIt_ThenItIsRejected(t *testing.T) {
+	eventlogtest.Given(t, WorkOn(domain.StageStressTesting)...).
+		When(overriding(domain.StressInclude, workChanged("server/server.go"))).
+		ThenRejected(domain.ErrStressDecisionClosed)
+}
+
+func TestGivenWorkOnStressTesting_WhenTheOwnerSkipsIt_ThenTheWorkCompletes(t *testing.T) {
 	eventlogtest.Given(t, WorkOn(domain.StageStressTesting)...).
 		When(overriding(domain.StressSkip, workChanged("server/server.go"))).
-		ThenRejected(domain.ErrStressDecisionClosed)
+		Then(domain.StressDecided{WorkID: WorkID, Decision: domain.StressSkip, Reason: Reason("the owner says so"), Owner: Owner},
+			domain.WorkCompleted{WorkID: WorkID})
+}
+
+func TestGivenNoNFRs_WhenTheOwnerIncludesStressTesting_ThenItIsRejected(t *testing.T) {
+	noNFRs := func(domain.ActiveWork) ([]domain.NFR, domain.ChangedFiles, error) {
+		return nil, domain.NewChangedFiles(), nil
+	}
+	eventlogtest.Given(t, WorkOn(domain.StageReview)...).
+		When(overriding(domain.StressInclude, noNFRs)).
+		ThenRejected(domain.ErrNoNFRs)
 }
 
 func TestGivenWorkInTheFixer_WhenTheOwnerOverrides_ThenItIsRejected(t *testing.T) {

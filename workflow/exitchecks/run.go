@@ -37,6 +37,11 @@ type Visit struct {
 	// between their baselines. Zero when the work has none.
 	Specify    domain.AssignmentID
 	SpecifyEnd domain.AssignmentID
+	// EarlierSpecifies are the work's accepted specify visits before the
+	// latest, oldest first, each with the stage visit entered when it was
+	// accepted: a rework that returns to specify needn't cover again what
+	// any of them covered.
+	EarlierSpecifies []SpecifyVisit
 	// Design is the work's latest accepted design visit, whose slices
 	// specify must cover, and DesignEnd the stage visit entered when it was
 	// accepted: the design is read as it was then. Zero when the work has
@@ -73,6 +78,12 @@ type Visit struct {
 	// FirstAssignment is the work's first stage visit: what the work changed
 	// is what changed since its baseline.
 	FirstAssignment domain.AssignmentID
+}
+
+// SpecifyVisit is an accepted specify visit, and the stage visit entered
+// when it was accepted.
+type SpecifyVisit struct {
+	Specify, End domain.AssignmentID
 }
 
 // Runner runs exit checks in one repository.
@@ -358,10 +369,16 @@ func (c *checkRun) specsFail() (finding, error) {
 // returns to implement keeps the specs; one that returns to specify brings
 // new ones.
 func (c *checkRun) specTests() (files []domain.RepoPath, tests []string, problem *finding, err error) {
+	return c.specTestsOf(SpecifyVisit{Specify: c.visit.Specify, End: c.visit.SpecifyEnd})
+}
+
+// specTestsOf are the test files an accepted specify visit changed and the
+// tests it wrote in them.
+func (c *checkRun) specTestsOf(v SpecifyVisit) (files []domain.RepoPath, tests []string, problem *finding, err error) {
 	var specifyBase string
 	ok := false
-	if c.visit.Specify != (domain.AssignmentID{}) {
-		if specifyBase, ok, err = c.baselines.Tree(c.visit.Specify); err != nil {
+	if v.Specify != (domain.AssignmentID{}) {
+		if specifyBase, ok, err = c.baselines.Tree(v.Specify); err != nil {
 			return nil, nil, nil, err
 		}
 	}
@@ -375,7 +392,7 @@ func (c *checkRun) specTests() (files []domain.RepoPath, tests []string, problem
 		return nil, nil, &f, err
 	}
 	specifyEnd := ownBase
-	if end := c.visit.SpecifyEnd; end != (domain.AssignmentID{}) && end != c.visit.Assignment {
+	if end := v.End; end != (domain.AssignmentID{}) && end != c.visit.Assignment {
 		if specifyEnd, ok, err = c.baselines.Tree(end); err != nil || !ok {
 			f := c.missingBaseline(domain.StageSpecify)
 			return nil, nil, &f, err

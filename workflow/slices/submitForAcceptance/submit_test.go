@@ -362,6 +362,18 @@ func TestGivenReviewOfAChangeInAnNFRsArea_WhenIncludingStressTesting_ThenTheDeci
 		Then(domain.AssignmentAccepted{AssignmentID: AssignmentOn(domain.StageReview), WorkID: WorkID, Stage: domain.StageReview, Visit: Visit1, Stress: forced})
 }
 
+// Without NFRs stress testing can't pass, so review's include is recorded as
+// a skip that keeps its reason, instead of stranding the work there.
+func TestGivenNoNFRs_WhenReviewIncludesStressTesting_ThenASkipIsRecorded(t *testing.T) {
+	noNFRs := func(domain.ActiveWork) ([]domain.NFR, domain.ChangedFiles, error) {
+		return nil, domain.NewChangedFiles(), nil
+	}
+	skip := Must(domain.NewStressChoice(domain.StressSkip, Reason("no NFRs in .gofast/nfrs.json to stress test against; review asked for it: the reason"), nil))
+	eventlogtest.Given(t, OpenOn(domain.StageReview)...).
+		When(decidingStress(domain.StressInclude, noNFRs, checksPassing)).
+		Then(domain.AssignmentAccepted{AssignmentID: AssignmentOn(domain.StageReview), WorkID: WorkID, Stage: domain.StageReview, Visit: Visit1, Stress: skip})
+}
+
 func TestGivenAnotherStage_WhenDecidingStressTesting_ThenItIsRejected(t *testing.T) {
 	eventlogtest.Given(t, OpenOn(domain.StageImplement)...).
 		When(decidingStress(domain.StressInclude, workChanged(), checksMustNotRun(t))).
