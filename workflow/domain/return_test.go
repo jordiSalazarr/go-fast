@@ -42,6 +42,20 @@ func TestReturnTo_ClearsTheStressDecision(t *testing.T) {
 	assert.False(t, ok, "the next review decides again")
 }
 
+// A return past review keeps its stress decision: no review runs again to
+// make a new one, and the work can't advance without it.
+func TestReturnTo_PastReview_KeepsTheStressDecision(t *testing.T) {
+	history := append(onIntegration(includeStress), entered(domain.StageStressTesting, 1))
+	w := asInProgress(t, givenWork(t, history...))
+
+	events, err := w.ReturnTo(owner, domain.StageIntegrationTesting, reasonOf("restart after the stress setup commits"))
+	require.NoError(t, err)
+
+	choice, _, ok := asInProgress(t, thenWorkState(t, history, events)).StressDecision()
+	require.True(t, ok, "integration testing advances past review's decision")
+	assert.Equal(t, includeStress, choice)
+}
+
 func TestReturnTo_ALaterStageOrTheCurrentOne_IsRefusedNamingTheTargets(t *testing.T) {
 	w := asInProgress(t, givenWork(t, onReview()...))
 	for _, target := range []domain.Stage{domain.StageReview, domain.StageIntegrationTesting, domain.StageStressTesting, domain.StageFixer} {

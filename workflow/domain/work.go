@@ -575,8 +575,19 @@ func (w active) returned(e WorkReturned, targets []Stage) (InProgressWork, *Stag
 		return InProgressWork{}, nil, false
 	}
 	back := w.onStage(entered)
-	back.stress = nil // the next review decides again
+	if w.reviewRunsAgain(e.Target) {
+		back.stress = nil // the next review decides again
+	}
 	return InProgressWork{back}, &entered, true
+}
+
+// reviewRunsAgain reports whether work returned to target passes the stress
+// decider again: target is the decider or comes before it. A return past it
+// keeps the decision, since no review runs to make a new one.
+func (w active) reviewRunsAgain(target Stage) bool {
+	t, ok := w.path.indexOf(target)
+	decider, hasDecider := w.path.indexOf(StressDecider())
+	return !ok || !hasDecider || t <= decider
 }
 
 // AllowMoreRework extends the rework budget. The work is back in progress
