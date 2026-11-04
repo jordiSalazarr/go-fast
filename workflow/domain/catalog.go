@@ -130,6 +130,10 @@ type SkillLoaded struct {
 	Skill   string
 	Load    SkillLoad
 	Version InstructionsVersion
+	// Improvements are the skill improvements the loaded version contained:
+	// those its record listed as applied and not declined. Empty for a skill
+	// without a record, and on loads recorded before gf read records.
+	Improvements []SkillImprovementID
 }
 
 func (SkillLoaded) isEvent() {}

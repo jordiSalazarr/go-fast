@@ -107,6 +107,14 @@ func (c *Client) SendEvents(ctx context.Context, batch wire.Events) (wire.Events
 	return out, err
 }
 
+// ApprovedSkillImprovements are the improvements the project's clones may
+// apply, in approval order: the one read the project secret makes.
+func (c *Client) ApprovedSkillImprovements(ctx context.Context) (wire.ApprovedSkillImprovements, error) {
+	var out wire.ApprovedSkillImprovements
+	_, err := c.do(ctx, http.MethodGet, "/skill-improvements/approved", nil, "", &out)
+	return out, err
+}
+
 // maxResponse bounds what gf reads of a response.
 const maxResponse = 16 << 20
 

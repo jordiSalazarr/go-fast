@@ -132,6 +132,11 @@ var ownerOnlyReasons = map[string]string{
 //  6. Any tool reading or writing the project secret, .gofast/sync.secret
 //     (Read, Write, Edit, NotebookEdit, and Grep of it or of .gofast/):
 //     deny, everywhere, for every agent. Bash is rule 2's.
+//  7. The improvement agent (gofast:improve-skills) runs only `gf
+//     improvement …` in Bash, and writes only inside the directory of the
+//     skill whose record holds its session's improvement in progress,
+//     never the record itself (decideImprover). Rules 1 to 3 and 6 hold
+//     for it too; rules 4 and 5, about stage visits, don't.
 //
 // Rules 1 to 3 need no workflow state, so they hold even when it cannot be
 // read (fail closed); a Bash call whose input cannot be read is denied too.
@@ -301,7 +306,12 @@ func NewCommand(dir func() string, getenv func(string) string, branchOf func(roo
 					if err != nil {
 						repo.Logger.Error("guard could not read the driving marker", "error", err.Error())
 					}
-					out := decide(in, loadFacts(repo, branchOf), driving, repo.Root)
+					var out claudehooks.Output
+					if in.AgentType == domain.ImproveSkillsAgent {
+						out = decideImprover(in, loadImproverFacts(repo), repo.Root)
+					} else {
+						out = decide(in, loadFacts(repo, branchOf), driving, repo.Root)
+					}
 					if out.HookSpecificOutput != nil {
 						repo.Logger.Info("guard denied a tool call", "tool", in.ToolName, "agent", in.AgentType,
 							"reason", out.HookSpecificOutput.PermissionDecisionReason)

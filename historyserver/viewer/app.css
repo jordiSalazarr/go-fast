@@ -456,3 +456,6 @@ kbd { display: inline-grid; place-items: center; min-width: 1.35rem; padding: .0
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
   .login-route path { stroke-dashoffset: 0; }
 }
+
+/* A skill improvement keeps its line breaks. */
+.improvement-text { white-space: pre-wrap; }

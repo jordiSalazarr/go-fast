@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -24,14 +26,18 @@ import (
 	"github.com/jordiSalazarr/go-fast/workflow/slices/approve"
 	briefagentonsessionstart "github.com/jordiSalazarr/go-fast/workflow/slices/briefAgentOnSessionStart"
 	"github.com/jordiSalazarr/go-fast/workflow/slices/checks"
+	declineskillimprovement "github.com/jordiSalazarr/go-fast/workflow/slices/declineSkillImprovement"
 	extendbudget "github.com/jordiSalazarr/go-fast/workflow/slices/extendBudget"
 	extendreworkbudget "github.com/jordiSalazarr/go-fast/workflow/slices/extendReworkBudget"
 	guardagentactions "github.com/jordiSalazarr/go-fast/workflow/slices/guardAgentActions"
+	improveskill "github.com/jordiSalazarr/go-fast/workflow/slices/improveSkill"
 	keepagentonstage "github.com/jordiSalazarr/go-fast/workflow/slices/keepAgentOnStage"
 	observeskillloads "github.com/jordiSalazarr/go-fast/workflow/slices/observeSkillLoads"
 	overridestressdecision "github.com/jordiSalazarr/go-fast/workflow/slices/overrideStressDecision"
 	"github.com/jordiSalazarr/go-fast/workflow/slices/reject"
+	reportimprovementnotapplied "github.com/jordiSalazarr/go-fast/workflow/slices/reportImprovementNotApplied"
 	returnwork "github.com/jordiSalazarr/go-fast/workflow/slices/returnWork"
+	startskillimprovement "github.com/jordiSalazarr/go-fast/workflow/slices/startSkillImprovement"
 	startwork "github.com/jordiSalazarr/go-fast/workflow/slices/startWork"
 	"github.com/jordiSalazarr/go-fast/workflow/slices/status"
 	submitforacceptance "github.com/jordiSalazarr/go-fast/workflow/slices/submitForAcceptance"
@@ -100,6 +106,7 @@ func (a *app) rootCommand() *cobra.Command {
 		checks.NewCommand(a.repositoryRoot, a.getenv),
 		accepteventlog.NewCommand(a.openStore, a.resolveCaller),
 		synchistory.NewCommand(a.openStore, a.resolveCaller, a.repositoryRoot, a.getenv, nil),
+		a.improvementCommand(),
 		a.hookCommand(),
 	)
 	a.markRun(root)
@@ -115,7 +122,7 @@ func (a *app) hookCommand() *cobra.Command {
 	dir := func() string { return a.dir }
 	hook.AddCommand(
 		guardagentactions.NewCommand(dir, a.getenv, gitbranch.Current),
-		briefagentonsessionstart.NewCommand(dir, a.getenv, gitbranch.Current),
+		briefagentonsessionstart.NewCommand(dir, a.getenv, gitbranch.Current, declineSkillImprovements, nil),
 	)
 	ensureBaseline := func(root string, id domain.AssignmentID) (bool, error) {
 		return worktree.OpenBaselines(root).Ensure(id)
@@ -123,6 +130,48 @@ func (a *app) hookCommand() *cobra.Command {
 	hook.AddCommand(keepagentonstage.NewCommands(dir, a.getenv, gitbranch.Current, ensureBaseline)...)
 	hook.AddCommand(observeskillloads.NewCommands(dir, a.getenv, gitbranch.Current)...)
 	return hook
+}
+
+// improvementCommand groups the commands the improvement agent records a
+// skill improvement's outcome with.
+func (a *app) improvementCommand() *cobra.Command {
+	improvement := &cobra.Command{
+		Use:   "improvement <start|applied|not-applied>",
+		Short: "Apply the approved skill improvements the startup check fetched (run by gofast:improve-skills)",
+	}
+	actor := func() eventlog.Actor {
+		root, err := a.repositoryRoot()
+		if err != nil {
+			return eventlog.AgentActor(domain.ImproveSkillsAgent)
+		}
+		return improvementActor(root)
+	}
+	afterRecord := synchistory.AfterSkillImprovement(a.openStore, a.repositoryRoot, a.getenv, &http.Client{Timeout: 10 * time.Second})
+	improvement.AddCommand(
+		startskillimprovement.NewCommand(a.openStore, a.repositoryRoot, a.getenv, actor),
+		improveskill.NewCommand(a.openStore, a.repositoryRoot, a.getenv, actor, afterRecord),
+		reportimprovementnotapplied.NewCommand(a.openStore, a.repositoryRoot, a.getenv, actor, afterRecord),
+	)
+	return improvement
+}
+
+// improvementActor records a skill improvement's outcome as the clone's
+// owner's, on whose behalf the improvement agent applies it: the history
+// server shows landings by owner. Without an owner identity, it is the
+// agent's.
+func improvementActor(root string) eventlog.Actor {
+	owner, err := caller.Resolve(func(string) string { return "" }, caller.GitConfig(root), false)
+	if err != nil {
+		return eventlog.AgentActor(domain.ImproveSkillsAgent)
+	}
+	return owner.Actor()
+}
+
+// declineSkillImprovements is the startup hook's decline, recorded as the
+// clone's owner's: the owner reverted the skill.
+func declineSkillImprovements(repoRoot, pluginRoot string, store *eventlog.Store) error {
+	_, err := declineskillimprovement.Decline(pluginRoot, store, improvementActor(repoRoot))
+	return err
 }
 
 // markRun wraps every runnable command so execute knows whether cobra

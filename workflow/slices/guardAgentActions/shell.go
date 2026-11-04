@@ -107,6 +107,7 @@ func segments(s string) [][]string {
 		words  []string
 		word   strings.Builder
 		inWord bool
+		gtAt   = -1 // index of the last unquoted '>', so `>&` stays one word
 	)
 	flushWord := func() {
 		if inWord {
@@ -177,9 +178,15 @@ func segments(s string) [][]string {
 			word.WriteString(s[i:min(end+1, len(s))])
 			inWord = true
 			i = end
+		case c == '&' && gtAt == i-1:
+			word.WriteByte(c) // `2>&1` duplicates a descriptor; it ends no command
+			inWord = true
 		case strings.IndexByte(";&|\n(){}", c) >= 0:
 			flushSegment()
 		default:
+			if c == '>' {
+				gtAt = i
+			}
 			word.WriteByte(c)
 			inWord = true
 		}

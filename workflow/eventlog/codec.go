@@ -39,7 +39,51 @@ const (
 	typeWorkFoundNothingToImprove = "WorkFoundNothingToImprove"
 	typeSkillLoaded               = "SkillLoaded"
 	typeAgentStarted              = "AgentStarted"
+	// A plugin directory's skill improvements, on SkillImprovementsStream.
+	typeSkillImprovementStarted    = "skill-improvement.started"
+	typeSkillImproved              = "skill-improvement.applied"
+	typeSkillImprovementNotApplied = "skill-improvement.not-applied"
+	typeSkillImprovementDeclined   = "skill-improvement.declined"
 )
+
+// The causes of skillImprovementNotAppliedV1; a reader defaults an
+// unknown one to conflict.
+const (
+	causeConflict = "conflict"
+	causeRefused  = "refused"
+)
+
+type skillImprovementStartedV1 struct {
+	ImprovementID string `json:"improvementId"`
+	Skill         string `json:"skill"`
+	Session       string `json:"session"`
+	Before        string `json:"before"`
+}
+
+// skillImprovedV1 is published: the history server reads it for landings.
+type skillImprovedV1 struct {
+	ImprovementID string `json:"improvementId"`
+	Skill         string `json:"skill"`
+	Before        string `json:"before"`
+	After         string `json:"after"`
+	Summary       string `json:"summary,omitempty"`
+}
+
+// skillImprovementNotAppliedV1 is published.
+type skillImprovementNotAppliedV1 struct {
+	ImprovementID string `json:"improvementId"`
+	Skill         string `json:"skill"`
+	Version       string `json:"version"`
+	Cause         string `json:"cause"`
+	Reason        string `json:"reason"`
+}
+
+// skillImprovementDeclinedV1 is published.
+type skillImprovementDeclinedV1 struct {
+	ImprovementID string `json:"improvementId"`
+	Skill         string `json:"skill"`
+	Version       string `json:"version"`
+}
 
 // skillLoadedV1: loads recorded before gf told them apart have no load,
 // and none has a version; they were all invoked.
@@ -50,6 +94,9 @@ type skillLoadedV1 struct {
 	Skill   string `json:"skill"`
 	Load    string `json:"load,omitempty"`
 	Version string `json:"sha256,omitempty"`
+	// Improvements are absent on loads recorded before gf read the skill's
+	// record, and for skills without applied improvements.
+	Improvements []string `json:"improvements,omitempty"`
 }
 
 type agentStartedV1 struct {
@@ -375,7 +422,27 @@ func encodeEvent(e domain.Event) (eventType string, stream Stream, payload any, 
 	case domain.SkillLoaded:
 		return typeSkillLoaded, ObservationsStream(e.WorkID), skillLoadedV1{
 			WorkID: e.WorkID.String(), Stage: e.Stage.String(), Visit: e.Visit.Int(), Skill: e.Skill,
-			Load: e.Load.Name(), Version: e.Version.String(),
+			Load: e.Load.Name(), Version: e.Version.String(), Improvements: improvementIDs(e.Improvements),
+		}, nil
+	case domain.SkillImprovementStarted:
+		return typeSkillImprovementStarted, SkillImprovementsStream, skillImprovementStartedV1{
+			ImprovementID: string(e.Improvement), Skill: e.Skill, Session: string(e.Session), Before: e.Before.String(),
+		}, nil
+	case domain.SkillImproved:
+		return typeSkillImproved, SkillImprovementsStream, skillImprovedV1{
+			ImprovementID: string(e.Improvement), Skill: e.Skill, Before: e.Before.String(), After: e.After.String(), Summary: e.Summary,
+		}, nil
+	case domain.SkillImprovementNotApplied:
+		cause := causeConflict
+		if e.Cause == domain.CauseRefused {
+			cause = causeRefused
+		}
+		return typeSkillImprovementNotApplied, SkillImprovementsStream, skillImprovementNotAppliedV1{
+			ImprovementID: string(e.Improvement), Skill: e.Skill, Version: e.Version.String(), Cause: cause, Reason: e.Reason.String(),
+		}, nil
+	case domain.SkillImprovementDeclined:
+		return typeSkillImprovementDeclined, SkillImprovementsStream, skillImprovementDeclinedV1{
+			ImprovementID: string(e.Improvement), Skill: e.Skill, Version: e.Version.String(),
 		}, nil
 	case domain.AgentStarted:
 		return typeAgentStarted, ObservationsStream(e.WorkID), agentStartedV1{
@@ -520,7 +587,37 @@ func decodeEvent(eventType string, payload json.RawMessage) (domain.Event, Strea
 		}
 		event = domain.SkillLoaded{
 			WorkID: d.workID(p.WorkID), Stage: d.stage(p.Stage), Visit: d.visit(p.Visit), Skill: p.Skill,
-			Load: d.skillLoad(p.Load), Version: d.version(p.Version),
+			Load: d.skillLoad(p.Load), Version: d.version(p.Version), Improvements: d.improvementIDs(p.Improvements),
+		}
+	case typeSkillImprovementStarted:
+		var p skillImprovementStartedV1
+		d.unmarshal(payload, &p)
+		event = domain.SkillImprovementStarted{
+			Improvement: d.improvementID(p.ImprovementID), Skill: d.skill(p.Skill), Session: domain.SessionID(p.Session), Before: d.contentHash(p.Before),
+		}
+	case typeSkillImproved:
+		var p skillImprovedV1
+		d.unmarshal(payload, &p)
+		event = domain.SkillImproved{
+			Improvement: d.improvementID(p.ImprovementID), Skill: d.skill(p.Skill),
+			Before: d.contentHash(p.Before), After: d.contentHash(p.After), Summary: p.Summary,
+		}
+	case typeSkillImprovementNotApplied:
+		var p skillImprovementNotAppliedV1
+		d.unmarshal(payload, &p)
+		cause := domain.CauseConflict
+		if p.Cause == causeRefused {
+			cause = domain.CauseRefused
+		}
+		event = domain.SkillImprovementNotApplied{
+			Improvement: d.improvementID(p.ImprovementID), Skill: d.skill(p.Skill), Version: d.contentHash(p.Version),
+			Cause: cause, Reason: d.reason(p.Reason),
+		}
+	case typeSkillImprovementDeclined:
+		var p skillImprovementDeclinedV1
+		d.unmarshal(payload, &p)
+		event = domain.SkillImprovementDeclined{
+			Improvement: d.improvementID(p.ImprovementID), Skill: d.skill(p.Skill), Version: d.contentHash(p.Version),
 		}
 	case typeAgentStarted:
 		var p agentStartedV1
@@ -688,6 +785,35 @@ func (d *decoder) contentHash(s string) domain.ContentHash {
 	v, err := domain.ParseContentHash(s)
 	d.keep(err)
 	return v
+}
+
+func improvementIDs(ids []domain.SkillImprovementID) []string {
+	var out []string
+	for _, id := range ids {
+		out = append(out, string(id))
+	}
+	return out
+}
+
+func (d *decoder) improvementID(s string) domain.SkillImprovementID {
+	v, err := domain.ParseSkillImprovementID(s)
+	d.keep(err)
+	return v
+}
+
+func (d *decoder) improvementIDs(ids []string) []domain.SkillImprovementID {
+	var out []domain.SkillImprovementID
+	for _, id := range ids {
+		out = append(out, d.improvementID(id))
+	}
+	return out
+}
+
+func (d *decoder) skill(s string) string {
+	if s == "" {
+		d.keep(errors.New("skill must not be empty"))
+	}
+	return s
 }
 
 // version is an instructions version; empty when gf could not read it.

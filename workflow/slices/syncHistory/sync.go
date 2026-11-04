@@ -53,7 +53,7 @@ func NewCommand(openStore func() (*eventlog.Store, error), resolveCaller func() 
 			if !config.Configured {
 				return &Error{Message: "Sync is not configured: create " + remote.ConfigPath + " with the server's URL and the project's id. `gf checks` shows the result."}
 			}
-			return run(cmd, root, config, openStore, getenv, httpClient, dryRun)
+			return run(cmd, cmd.OutOrStdout(), root, config, openStore, getenv, httpClient, dryRun)
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "ask the server what it holds and list what would be sent, sending nothing")
@@ -78,7 +78,7 @@ func AfterApprove(openStore func() (*eventlog.Store, error), repositoryRoot func
 			if err != nil || !config.Configured {
 				return err
 			}
-			return run(cmd, root, config, openStore, getenv, httpClient, false)
+			return run(cmd, cmd.OutOrStdout(), root, config, openStore, getenv, httpClient, false)
 		}()
 		if err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "The approval is recorded, but the history isn't synced: %v\n", err)
@@ -86,8 +86,33 @@ func AfterApprove(openStore func() (*eventlog.Store, error), repositoryRoot func
 	}
 }
 
+// AfterSkillImprovement is the sync `gf improvement applied|not-applied`
+// runs once the outcome is recorded, so the history server learns where
+// the improvement landed. It says nothing when it works. Without a sync
+// configuration it does nothing; a sync that fails doesn't fail the
+// command: it says so in one line on stderr, and the next sync sends it.
+func AfterSkillImprovement(openStore func() (*eventlog.Store, error), repositoryRoot func() (string, error), getenv func(string) string,
+	httpClient *http.Client) func(cmd *cobra.Command) {
+	return func(cmd *cobra.Command) {
+		err := func() error {
+			root, err := repositoryRoot()
+			if err != nil {
+				return err
+			}
+			config, err := remote.LoadConfig(root)
+			if err != nil || !config.Configured {
+				return err
+			}
+			return run(cmd, io.Discard, root, config, openStore, getenv, httpClient, false)
+		}()
+		if err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "The outcome is recorded, but the history isn't synced yet: %v\n", err)
+		}
+	}
+}
+
 // run sends the history to the configured server, and says what it sent.
-func run(cmd *cobra.Command, root string, config remote.Config, openStore func() (*eventlog.Store, error), getenv func(string) string,
+func run(cmd *cobra.Command, out io.Writer, root string, config remote.Config, openStore func() (*eventlog.Store, error), getenv func(string) string,
 	httpClient *http.Client, dryRun bool) error {
 	secret, err := remote.LoadSecret(root, getenv)
 	if err != nil {
@@ -114,7 +139,7 @@ func run(cmd *cobra.Command, root string, config remote.Config, openStore func()
 	gf := instructions.GfVersion()
 	server := remote.NewClient(config, secret.Value, "gf/"+gf, httpClient)
 	report, err := remote.Sync(cmd.Context(), root, config, checks.Decisions, log, server, remote.Options{DryRun: dryRun, Client: gf})
-	render(cmd.OutOrStdout(), config, report)
+	render(out, config, report)
 	return explain(err, config, secret)
 }
 

@@ -1,0 +1,95 @@
+{
+  "boundedContext": "skill-improvements (historyserver: writing and approving; workflow: applying in the loaded plugin directory)",
+  "aggregates": [
+    {
+      "name": "SkillImprovement",
+      "invariants": [
+        "An improvement names one skill and an instruction version of that skill its project has recorded.",
+        "An improvement's text changes only while it is proposed.",
+        "Only a proposed improvement is approved, once, for its project or for every project of its organisation.",
+        "An approval approves the text its approver read: the improvement's latest revision.",
+        "Only an approved improvement is withdrawn, and a withdrawn improvement is never approved again."
+      ],
+      "states": ["NoImprovement", "Proposed", "Approved", "Withdrawn"]
+    },
+    {
+      "name": "PluginSkill",
+      "invariants": [
+        "An improvement is recorded at most once in a skill's record, until the owner deletes its line.",
+        "A skill has at most one improvement in progress, held by one session.",
+        "An outcome is recorded only for the improvement in progress on that skill, by the session holding it.",
+        "Only gofast's own skills of the loaded plugin directory are improved, never a vendored skill.",
+        "An applied improvement that changed the skill counts as declined once the skill is back at a version it had before that improvement."
+      ],
+      "states": ["Idle", "Improving"]
+    }
+  ],
+  "commands": [
+    { "name": "ProposeSkillImprovement", "aggregate": "SkillImprovement",
+      "events": ["SkillImprovementProposed"], "rejections": ["UnknownInstructionVersion"] },
+    { "name": "ReviseSkillImprovement", "aggregate": "SkillImprovement",
+      "events": ["SkillImprovementRevised"], "rejections": ["ImprovementTextFixed"] },
+    { "name": "ApproveSkillImprovement", "aggregate": "SkillImprovement",
+      "events": ["SkillImprovementApproved"], "rejections": ["ImprovementAlreadyApproved", "ImprovementWithdrawn", "ImprovementRevisedSinceRead"] },
+    { "name": "WithdrawSkillImprovement", "aggregate": "SkillImprovement",
+      "events": ["SkillImprovementWithdrawn"], "rejections": ["ImprovementNotApproved"] },
+    { "name": "StartSkillImprovement", "aggregate": "PluginSkill",
+      "events": ["SkillImprovementStarted"], "rejections": ["ImprovementAlreadyRecorded", "SkillImprovementInProgress", "SkillOutOfScope"] },
+    { "name": "ImproveSkill", "aggregate": "PluginSkill",
+      "events": ["SkillImproved"], "rejections": ["ImprovementNotInProgress"] },
+    { "name": "ReportImprovementNotApplied", "aggregate": "PluginSkill",
+      "events": ["SkillImprovementNotApplied"], "rejections": ["ImprovementNotInProgress"] },
+    { "name": "DeclineSkillImprovement", "aggregate": "PluginSkill",
+      "events": ["SkillImprovementDeclined"], "rejections": [] }
+  ],
+  "events": [
+    { "name": "SkillImprovementProposed", "aggregate": "SkillImprovement", "visibility": "internal" },
+    { "name": "SkillImprovementRevised", "aggregate": "SkillImprovement", "visibility": "internal" },
+    { "name": "SkillImprovementApproved", "aggregate": "SkillImprovement", "visibility": "internal" },
+    { "name": "SkillImprovementWithdrawn", "aggregate": "SkillImprovement", "visibility": "internal" },
+    { "name": "SkillImprovementStarted", "aggregate": "PluginSkill", "visibility": "internal" },
+    { "name": "SkillImproved", "aggregate": "PluginSkill", "visibility": "external" },
+    { "name": "SkillImprovementNotApplied", "aggregate": "PluginSkill", "visibility": "external" },
+    { "name": "SkillImprovementDeclined", "aggregate": "PluginSkill", "visibility": "external" }
+  ],
+  "readModels": [
+    { "name": "ApprovedSkillImprovements",
+      "from": ["SkillImprovementProposed", "SkillImprovementRevised", "SkillImprovementApproved", "SkillImprovementWithdrawn"] },
+    { "name": "SkillImprovementsOfOrganisation",
+      "from": ["SkillImprovementProposed", "SkillImprovementRevised", "SkillImprovementApproved", "SkillImprovementWithdrawn",
+               "SkillImproved", "SkillImprovementNotApplied", "SkillImprovementDeclined"] },
+    { "name": "PendingSkillImprovements",
+      "from": ["SkillImprovementApproved", "SkillImprovementWithdrawn", "SkillImprovementStarted",
+               "SkillImproved", "SkillImprovementNotApplied", "SkillImprovementDeclined"] }
+  ],
+  "slices": [
+    { "name": "ProposeSkillImprovement", "kind": "command", "command": "ProposeSkillImprovement", "change": "added" },
+    { "name": "ReviseSkillImprovement", "kind": "command", "command": "ReviseSkillImprovement", "change": "added" },
+    { "name": "ApproveSkillImprovement", "kind": "command", "command": "ApproveSkillImprovement", "change": "added" },
+    { "name": "WithdrawSkillImprovement", "kind": "command", "command": "WithdrawSkillImprovement", "change": "added" },
+    { "name": "ApprovedSkillImprovements", "kind": "query", "readModel": "ApprovedSkillImprovements", "change": "added" },
+    { "name": "SkillImprovementsOfOrganisation", "kind": "query", "readModel": "SkillImprovementsOfOrganisation", "change": "added" },
+    { "name": "BriefAgentOnSessionStart", "kind": "query", "readModel": "PendingSkillImprovements", "change": "changed" },
+    { "name": "StartSkillImprovement", "kind": "command", "command": "StartSkillImprovement", "change": "added" },
+    { "name": "ImproveSkill", "kind": "command", "command": "ImproveSkill", "change": "added" },
+    { "name": "ReportImprovementNotApplied", "kind": "command", "command": "ReportImprovementNotApplied", "change": "added" },
+    { "name": "DeclineSkillImprovement", "kind": "command", "command": "DeclineSkillImprovement", "change": "added" }
+  ],
+  "contracts": [
+    { "kind": "http", "name": "POST /v1/projects/{project}/skill-improvements", "slice": "ProposeSkillImprovement" },
+    { "kind": "http", "name": "POST /v1/projects/{project}/skill-improvements/{id}/revise", "slice": "ReviseSkillImprovement" },
+    { "kind": "http", "name": "POST /v1/projects/{project}/skill-improvements/{id}/approve", "slice": "ApproveSkillImprovement" },
+    { "kind": "http", "name": "POST /v1/projects/{project}/skill-improvements/{id}/withdraw", "slice": "WithdrawSkillImprovement" },
+    { "kind": "http", "name": "GET /v1/projects/{project}/skill-improvements/approved", "slice": "ApprovedSkillImprovements" },
+    { "kind": "http", "name": "GET /v1/projects/{project}/skill-improvements", "slice": "SkillImprovementsOfOrganisation" },
+    { "kind": "http", "name": "GET /v1/projects/{project}/skill-improvements/{id}", "slice": "SkillImprovementsOfOrganisation" },
+    { "kind": "event", "name": "SkillImproved",
+      "schema": "type skill-improvement.applied, schemaVersion 1, stream skill-improvements. Core: improvementId (string), skill (string), before (sha256 hex, the skill's instruction version before), after (sha256 hex, after; equal to before when the skill already held the improvement). Optional: summary (string, the agent's one-line summary of the change)." },
+    { "kind": "event", "name": "SkillImprovementNotApplied",
+      "schema": "type skill-improvement.not-applied, schemaVersion 1, stream skill-improvements. Core: improvementId (string), skill (string), version (sha256 hex, the skill's unchanged instruction version), cause (string enum: conflict | refused; readers default unknown values to conflict), reason (string, at most 4000 characters)." },
+    { "kind": "event", "name": "SkillImprovementDeclined",
+      "schema": "type skill-improvement.declined, schemaVersion 1, stream skill-improvements. Core: improvementId (string), skill (string), version (sha256 hex, the version the skill is back at)." },
+    { "kind": "event", "name": "SkillLoaded",
+      "schema": "existing observation event, additive change in place: optional improvements (array of improvement id strings), the improvements the skill's record lists as applied and not declined when the skill was loaded; absent on loads recorded before this change and on skills without a record." }
+  ]
+}

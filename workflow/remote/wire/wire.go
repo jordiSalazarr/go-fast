@@ -214,6 +214,9 @@ type Instruction struct {
 	Version string `json:"version,omitempty"`
 	// Files are the version's kept files, when the server holds them.
 	Files []FileLink `json:"files,omitempty"`
+	// Improvements are the skill improvements the loaded version
+	// contained, as the skill's record listed them; absent when unknown.
+	Improvements []string `json:"improvements,omitempty"`
 }
 
 // FileLink is a file and where to read its bytes.
@@ -260,6 +263,9 @@ type InstructionUse struct {
 	Visit int       `json:"visit"`
 	Load  string    `json:"load,omitempty"`
 	At    time.Time `json:"at"`
+	// Improvements are the skill improvements the loaded version
+	// contained; absent when unknown.
+	Improvements []string `json:"improvements,omitempty"`
 }
 
 // VersionDiff compares two kept versions file by file.

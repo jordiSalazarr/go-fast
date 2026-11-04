@@ -130,7 +130,7 @@ func (s *Store) Instructions(ctx context.Context, project, name string) (wire.In
 			out.Versions = append(out.Versions, v)
 		}
 		out.Versions[j].Uses = append(out.Versions[j].Uses, wire.InstructionUse{
-			Work: workOf(events[i].Stream), Stage: p.Stage, Visit: p.Visit, Load: p.Load, At: events[i].OccurredAt})
+			Work: workOf(events[i].Stream), Stage: p.Stage, Visit: p.Visit, Load: p.Load, At: events[i].OccurredAt, Improvements: p.Improvements})
 	}
 	return out, out.Kind != "", nil
 }

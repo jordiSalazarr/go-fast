@@ -2,7 +2,9 @@
 // server: the event log, and the files its events tell about (the works'
 // artifacts and decision documents, and the kept versions of the plugin's
 // instructions). The event log stays the source of truth; the server holds
-// an append-only copy and never feeds anything back into the workflow.
+// an append-only copy and never feeds anything back into the workflow. The
+// one thing gf reads from it is the list of skill improvements approved for
+// the project, which it asks for at a session's startup (docs/adr/0004).
 package remote
 
 import (

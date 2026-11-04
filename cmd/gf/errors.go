@@ -12,6 +12,7 @@ import (
 	"github.com/jordiSalazarr/go-fast/workflow/eventlog"
 	"github.com/jordiSalazarr/go-fast/workflow/exitchecks"
 	"github.com/jordiSalazarr/go-fast/workflow/gitbranch"
+	"github.com/jordiSalazarr/go-fast/workflow/pluginskills"
 	"github.com/jordiSalazarr/go-fast/workflow/remote"
 	startwork "github.com/jordiSalazarr/go-fast/workflow/slices/startWork"
 	synchistory "github.com/jordiSalazarr/go-fast/workflow/slices/syncHistory"
@@ -38,6 +39,7 @@ func friendly(err error, cmd *cobra.Command, ran bool) string {
 		back      *domain.InvalidReturnError
 		input     *startwork.InputError
 		target    *domain.UnknownTargetNFRError
+		improving *pluginskills.Error
 	)
 	switch {
 	case errors.Is(err, gitbranch.ErrDetachedHead):
@@ -146,6 +148,16 @@ func friendly(err error, cmd *cobra.Command, ran bool) string {
 		return fmt.Sprintf("The event log .gofast/events.jsonl is damaged at line %d. Restore it from git. %s", malformed.Line, seeLog)
 	case errors.As(err, &syncing):
 		return syncing.Message
+	case errors.As(err, &improving):
+		return improving.Message
+	case errors.Is(err, domain.ErrImprovementAlreadyRecorded):
+		return "The skill's record already lists this improvement, so it is not applied again. The owner deletes its line from the record to retry it."
+	case errors.Is(err, domain.ErrSkillImprovementInProgress):
+		return "Another improvement of this skill is in progress, so this one waits: finish that one with `gf improvement applied|not-applied <id>`, or, if its session is gone, the owner deletes its in-progress line from the record."
+	case errors.Is(err, domain.ErrSkillOutOfScope):
+		return "Only gofast's own skills are improved, never a vendored one (a skill with a SOURCE.md). This improvement is not applied here."
+	case errors.Is(err, domain.ErrImprovementNotInProgress):
+		return "This improvement is not in progress for this session: start it first with `gf improvement start <id>`. An outcome is recorded once, by the session that started it."
 	case errors.As(err, &sync):
 		return fmt.Sprintf("The sync configuration %s is invalid: %s. The owner fixes it; `gf checks` shows the result.", remote.ConfigPath, sync.Problem)
 	case errors.As(err, &config):

@@ -52,7 +52,7 @@ One repository's history on the history server, belonging to exactly one organis
 _Avoid_: Repo (on the server side), stream
 
 **Project secret**:
-The one secret every clone of a project syncs with, made by the server when the project is created or its secret rotated; it names the project and grants nothing else.
+The one secret every clone of a project syncs with, made by the server when the project is created or its secret rotated; it names the project, and besides syncing grants only reading the project's approved skill improvements.
 _Avoid_: Sync token, API key
 
 **Member**:
@@ -68,6 +68,19 @@ _Avoid_: Error, incident, issue
 **Assessment**:
 A member's judgement of a stage visit or of a whole work: either good, or went wrong with the reason why. A member has at most one current assessment per stage visit or work.
 _Avoid_: Review (that is a stage), rating, feedback, comment
+
+**Skill improvement**:
+A member's proposed change to one skill, written as text against the instruction version it improves; proposed, then approved (for one project or every project of the organisation), and possibly withdrawn.
+_Avoid_: Feedback, suggestion, patch
+
+**Approved** (skill improvement):
+Accepted by any member for a project or for all projects; its text is fixed from then on.
+
+**Applied** (skill improvement):
+Written into a plugin directory's skill by the improvement agent and listed in the skill's record; the alternatives are declined (the owner reverted it) and not applied (a conflict or a refusal).
+
+**Skill improved**:
+The record that an improvement was applied, with the skill's versions before and after, or why it was not applied.
 
 **Went wrong**:
 The assessment that a stage visit or work did not do what it should have; it always carries the reason.

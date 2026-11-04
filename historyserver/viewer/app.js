@@ -208,7 +208,9 @@ function renderNav(s, section) {
 
 // Routes: #/works[?filters], #/works/<id>[?visit=<stage>-<n>],
 // #/troubles[?filters], #/assessments[?filters], #/instructions,
-// #/instructions/<name>, #/diff/<from>/<to>, #/file/<sha256>?path=<path>.
+// #/instructions/<name>, #/diff/<from>/<to>, #/file/<sha256>?path=<path>,
+// #/improvements[?filters], #/improvements/new?skill=&version=[&work=&stage=&visit=],
+// #/improvements/<id>.
 
 let routing = 0;
 async function route() {
@@ -232,6 +234,9 @@ async function route() {
     else if (parts[0] === "file" && parts[1]) await filePage(parts[1], params.get("path") || parts[1]);
     else if (parts[0] === "troubles") await troublesPage(params);
     else if (parts[0] === "assessments") await assessmentsPage(params);
+    else if (parts[0] === "improvements" && parts[1] === "new") await proposePage(params);
+    else if (parts[0] === "improvements" && parts[1]) await improvementPage(parts[1]);
+    else if (parts[0] === "improvements") await improvementsPage(params);
     else await worksPage(params);
   } catch (err) {
     failed(err);
@@ -409,7 +414,8 @@ function instructionChips(ins) {
   return el("div", { class: "instructions", "aria-label": "Instructed by" }, all.map((x) =>
     el("a", { class: `instr ${x.kind}`, href: `#/instructions/${encodeURIComponent(x.name)}`, title: `${x.kind} ${x.name}${x.load ? `, ${x.load}` : ""}, version ${short(x.version)}` },
       el("span", { class: `kind ${x.kind}` }, x.kind), el("span", { class: "name" }, x.name),
-      el("span", { class: "hash" }, x.version ? x.version.slice(0, 7) : "unversioned"))));
+      el("span", { class: "hash" }, x.version ? x.version.slice(0, 7) : "unversioned"),
+      x.improvements && x.improvements.length > 0 && el("span", { class: "muted", title: "Skill improvements this version contained" }, `with ${x.improvements.join(", ")}`))));
 }
 
 // review is the work page's state the keyboard acts on.
@@ -495,7 +501,8 @@ async function workPage(id, params = new URLSearchParams(), keep) {
           : el("p", { class: "note" }, "No agent or skill was recorded for this visit. The clone that ran it recorded none: an older gf, or the plugin's hooks weren't loaded."),
         arts.length > 0 && el("div", { class: "artifacts" }, arts.map(artifact)),
         record(s.events),
-        assessBox(t, s.stage, s.visit, () => focusVisit(i))));
+        assessBox(t, s.stage, s.visit, () => focusVisit(i)),
+        assessedBy(s.stage, s.visit).some((a) => a.verdict === "went-wrong") && improveFrom(ins, w.id, s.stage, s.visit)));
   });
 
   const workMine = mineOf("", 0);
@@ -912,7 +919,8 @@ async function instructionPage(name) {
           el("h2", {}, short(v.version)),
           n === 0 && el("span", { class: "tag" }, "latest"),
           el("span", { class: "muted" }, "first used ", timeEl(v.firstSeen, ago(v.firstSeen))),
-          previous && el("a", { class: "button", href: `#/diff/${previous.version}/${v.version}` }, `Compare with ${short(previous.version).slice(0, 7)}`)),
+          previous && el("a", { class: "button", href: `#/diff/${previous.version}/${v.version}` }, `Compare with ${short(previous.version).slice(0, 7)}`),
+          it.kind === "skill" && v.version && el("a", { class: "button", href: proposeHref(it.name, v.version) }, "Propose an improvement")),
         v.files.length > 0 && el("div", { class: "facts" }, v.files.map((f) => fileLink(f))),
         !v.version && el("p", { class: "note" }, "Loaded without a version: another plugin's skill, or gf didn't know where the plugin was."),
         el("ul", { class: "uses" }, usesOf(v).map((u) => el("li", {},
@@ -920,6 +928,139 @@ async function instructionPage(name) {
           el("span", { class: "tag" }, `${u.stage}, visit ${u.visit}`), u.load && el("span", { class: "muted" }, u.load),
           el("span", { class: "muted" }, timeEl(u.at, ago(u.at))))))));
   })));
+}
+
+// Skill improvements: members write them against a skill's version, edit
+// them while proposed, approve them for this project or every project of
+// the organisation, and withdraw them. gf fetches the approved ones at a
+// session's startup; the clones' outcomes come back as landings.
+
+const improvementStates = { proposed: "Proposed", approved: "Approved", withdrawn: "Withdrawn" };
+const landingLabels = { applied: "applied", declined: "declined", "not-applied": "not applied" };
+const scopeLabels = { project: "this project", "all-projects": "every project of the organisation" };
+
+function proposeHref(skill, version, from) {
+  const q = new URLSearchParams({ skill, version });
+  if (from) for (const [k, v] of Object.entries(from)) q.set(k, String(v));
+  return `#/improvements/new?${q}`;
+}
+
+// improveFrom links a went-wrong visit's skills to a new improvement.
+function improveFrom(ins, work, stage, visit) {
+  const skills = [...new Map(ins.filter((x) => x.kind === "skill" && x.version).map((x) => [`${x.name} ${x.version}`, x])).values()];
+  if (!skills.length) return null;
+  return el("p", { class: "note" }, "It went wrong: propose an improvement of ",
+    skills.map((x, i) => [i > 0 && ", ", link(proposeHref(x.name, x.version, { work, stage, visit }), x.name)]), ".");
+}
+
+function newImprovementID() {
+  const b = new Uint8Array(8);
+  crypto.getRandomValues(b);
+  return "si-" + [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
+}
+
+async function proposePage(params) {
+  const skill = params.get("skill") || "", version = params.get("version") || "";
+  const from = params.get("work") ? { work: params.get("work"), stage: params.get("stage") || undefined, visit: Number(params.get("visit")) || undefined } : undefined;
+  const id = newImprovementID(); // made once, so a retried send lands on the same improvement
+  const text = el("textarea", { id: "improvement-text", rows: 8, maxlength: 4000, placeholder: "How should the skill's wording change, and why?" });
+  const status = el("span", { class: "status-line", role: "status" });
+  const send = el("button", { type: "submit" }, "Propose");
+  const form = el("form", { class: "panel panel-pad reason-form", onsubmit: async (e) => {
+    e.preventDefault();
+    if (!text.value.trim()) { status.textContent = "Write the improvement first."; status.className = "status-line bad"; text.focus(); return; }
+    send.disabled = true; status.textContent = "Saving…"; status.className = "status-line";
+    try {
+      const out = await api("/skill-improvements", { method: "POST", body: { id, skill, improves: version, text: text.value, fromAssessment: from } });
+      toast(`Proposed: an improvement of ${skill}`);
+      location.hash = `#/improvements/${encodeURIComponent(out.id)}`;
+    } catch (err) {
+      if (err instanceof Unauthorized) { failed(err); return; }
+      send.disabled = false; status.textContent = `Not saved: ${err.message}`; status.className = "status-line bad";
+    }
+  } },
+  el("label", { for: text.id }, "The improvement"),
+  text,
+  el("div", { class: "actions" }, send, status));
+  show(head({ crumbs: [link("#/improvements", "Skill improvements"), "new"], title: `Improve ${skill}`,
+    lede: `Against version ${short(version)}${from ? `, from what went wrong in ${from.stage ? `${from.stage}, visit ${from.visit}, of ` : ""}${from.work}` : ""}. Any member can edit it while it is proposed, and approve it.` }),
+  form);
+}
+
+async function improvementsPage(params) {
+  const form = filterBar("#/improvements", params, [
+    ["state", "State", el("select", {}, el("option", { value: "" }, "Every state"), Object.entries(improvementStates).map(([v, l]) => el("option", { value: v }, l)))],
+    ["skill", "Skill", el("input", { placeholder: "Skill, such as aggregate-design", size: 26 })],
+  ]);
+  const list = (await api(`/skill-improvements${params.size ? "?" + params : ""}`)).improvements;
+  show(head({ title: "Skill improvements", lede: "Changes to the skills' wording the organisation's members proposed. Approved ones reach the clones at their next session's startup. Propose one from a skill's version, or from a visit that went wrong." }),
+    form,
+    list.length
+      ? el("div", { class: "panel rows" }, list.slice().reverse().map((i) => el("a", { class: "row", href: `#/improvements/${encodeURIComponent(i.id)}` },
+        el("span", { class: `lamp ${i.state}` }, improvementStates[i.state] || i.state),
+        el("span", { class: "row-title" }, i.skill, el("span", { class: "muted" }, ` ${i.id}`)),
+        el("span", { class: "row-end" }, el("span", {}, i.project), i.scope && el("span", {}, scopeLabels[i.scope] || i.scope)),
+        el("span", { class: "row-sub" }, i.text.length > 140 ? i.text.slice(0, 140) + "…" : i.text))))
+      : params.size ? empty("No improvement matches", "Try another state or skill.")
+        : empty("No skill improvement yet", "Open a skill's version, or a visit that went wrong, and propose one.", el("p", {}, link("#/instructions", "Go to the skills"))));
+}
+
+async function improvementPage(id) {
+  const i = await api(`/skill-improvements/${encodeURIComponent(id)}`);
+  const status = el("span", { class: "status-line", role: "status" });
+  const act = async (path, body, done) => {
+    status.textContent = "Saving…"; status.className = "status-line";
+    try {
+      await api(`/skill-improvements/${encodeURIComponent(i.id)}/${path}`, { method: "POST", body });
+      toast(done);
+      await improvementPage(i.id);
+    } catch (err) {
+      if (err instanceof Unauthorized) { failed(err); return; }
+      status.textContent = `Not saved: ${err.message}`; status.className = "status-line bad";
+    }
+  };
+  let actions = null;
+  if (i.state === "proposed") {
+    const text = el("textarea", { id: "revise-text", rows: 6, maxlength: 4000 });
+    text.value = i.text;
+    const scope = el("select", { id: "approve-scope", "aria-label": "Approve for" },
+      el("option", { value: "project" }, `this project (${i.project})`), el("option", { value: "all-projects" }, "every project of the organisation"));
+    actions = el("div", { class: "panel panel-pad reason-form" },
+      el("label", { for: text.id }, "Edit while it is proposed"), text,
+      el("div", { class: "actions" },
+        el("button", { type: "button", class: "ghost", onclick: () => act("revise", { text: text.value }, "Revised") }, "Save the text"),
+        el("label", { for: scope.id }, "Approve for "), scope,
+        el("button", { type: "button", onclick: () => act("approve", { scope: scope.value, revision: i.revision }, "Approved") }, `Approve revision ${i.revision}`),
+        status),
+      el("p", { class: "muted" }, "Once approved, its text is fixed. An approval approves the revision you read: if someone edits it first, read it again."));
+  } else if (i.state === "approved") {
+    actions = el("div", { class: "panel panel-pad" },
+      el("div", { class: "actions" },
+        el("button", { type: "button", class: "danger", onclick: () => act("withdraw", {}, "Withdrawn") }, "Withdraw the approval"), status),
+      el("p", { class: "muted" }, "Withdrawing stops the clones that haven't applied it; those that did keep the change."));
+  }
+  const landings = i.landings || [];
+  show(head({ crumbs: [link("#/improvements", "Skill improvements"), el("span", { class: "hash" }, i.id)], title: `Improve ${i.skill}`,
+    facts: el("div", { class: "facts" },
+      el("span", { class: `lamp ${i.state}` }, improvementStates[i.state] || i.state),
+      el("span", { class: "fact" }, `by ${i.author}, in ${i.project}`),
+      el("a", { class: "fact", href: `#/instructions/${encodeURIComponent(i.skill)}` }, `improves ${short(i.improves)}`),
+      el("span", { class: "fact" }, `revision ${i.revision}`),
+      i.scope && el("span", { class: "fact" }, `approved by ${i.approvedBy} for ${scopeLabels[i.scope] || i.scope}`),
+      i.withdrawnBy && el("span", { class: "fact" }, `withdrawn by ${i.withdrawnBy}`),
+      i.fromAssessment && link(workHref(i.fromAssessment.work, i.fromAssessment.stage, i.fromAssessment.visit), "from what went wrong")) }),
+  el("section", { class: "panel panel-pad" }, el("h2", {}, "The improvement"), el("p", { class: "improvement-text" }, i.text)),
+  actions,
+  el("section", { class: "panel panel-pad" },
+    el("h2", {}, "Where it landed"),
+    landings.length
+      ? el("ul", { class: "uses" }, landings.map((l) => el("li", {},
+        el("span", { class: `lamp ${l.outcome === "applied" ? "good" : l.outcome === "declined" ? "" : "went-wrong"}` }, landingLabels[l.outcome] || l.outcome),
+        el("span", {}, `${l.project}, ${l.owner}`),
+        l.before && l.after && el("a", { class: "hash", href: `#/diff/${l.before}/${l.after}` }, `${short(l.before).slice(0, 7)} → ${short(l.after).slice(0, 7)}`),
+        l.reason && el("q", {}, l.reason),
+        el("span", { class: "muted" }, timeEl(l.at, ago(l.at))))))
+      : el("p", { class: "muted" }, "No clone has synced an outcome yet.")));
 }
 
 // diffLines lays a unified diff out on two gutters, old and new line

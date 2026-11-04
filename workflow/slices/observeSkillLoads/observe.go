@@ -19,6 +19,7 @@ import (
 	"github.com/jordiSalazarr/go-fast/workflow/domain"
 	"github.com/jordiSalazarr/go-fast/workflow/eventlog"
 	"github.com/jordiSalazarr/go-fast/workflow/instructions"
+	"github.com/jordiSalazarr/go-fast/workflow/pluginskills"
 	"github.com/jordiSalazarr/go-fast/workflow/skillcatalog"
 )
 
@@ -89,6 +90,21 @@ func (p plugin) skillVersion(skill string) domain.InstructionsVersion {
 	return p.keep(s)
 }
 
+// improvements are the skill improvements a load's version contains: those
+// the skill's record lists as applied and not declined, whichever
+// project's session applied them. None without a version.
+func (p plugin) improvements(load domain.SkillLoaded) []domain.SkillImprovementID {
+	if load.Version.IsZero() {
+		return nil
+	}
+	record, err := pluginskills.ReadRecord(p.root, load.Skill)
+	if err != nil {
+		p.repo.Logger.Warn("could not read a skill's record", "skill", load.Skill, "error", err.Error())
+		return nil
+	}
+	return domain.AppliedImprovements(record)
+}
+
 func (p plugin) keep(s instructions.Snapshot) domain.InstructionsVersion {
 	if err := instructions.Keep(p.repo.Root, s); err != nil {
 		p.repo.Logger.Error("could not keep a version of the plugin's instructions", "error", err.Error())
@@ -102,7 +118,7 @@ func (p plugin) keep(s instructions.Snapshot) domain.InstructionsVersion {
 // skill its definition preloads.
 func (p plugin) agentStart(in claudehooks.Input, v visit) []domain.Event {
 	agent, ok := strings.CutPrefix(in.AgentType, agentPrefix)
-	if !ok || agent == "" || !v.active {
+	if !ok || agent == "" || !v.active || in.AgentType == domain.ImproveSkillsAgent {
 		return nil
 	}
 	started := domain.AgentStarted{
@@ -123,6 +139,7 @@ func (p plugin) agentStart(in claudehooks.Input, v visit) []domain.Event {
 	for _, skill := range definition.Preloads {
 		preloaded := loaded(v, skill, domain.SkillPreloaded)
 		preloaded.Version = p.skillVersion(preloaded.Skill)
+		preloaded.Improvements = p.improvements(preloaded)
 		events = append(events, preloaded)
 	}
 	return events
@@ -155,6 +172,7 @@ func NewCommands(dir func() string, getenv func(string) string, branchOf func(ro
 					return nil
 				}
 				invoked.Version = p.skillVersion(invoked.Skill)
+				invoked.Improvements = p.improvements(invoked)
 				return []domain.Event{invoked}
 			}),
 		hook("agent-start", "SubagentStart hook: record a stage agent's instructions and their versions", "an agent start",

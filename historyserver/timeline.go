@@ -33,6 +33,8 @@ type instructionPayload struct {
 	Skill   string `json:"skill"`
 	Load    string `json:"load"`
 	Version string `json:"sha256"`
+	// Improvements are a SkillLoaded's skill improvements, when recorded.
+	Improvements []string `json:"improvements"`
 }
 
 func (s *Store) events(ctx context.Context, project, where string, args ...any) ([]wire.Envelope, error) {
@@ -127,7 +129,7 @@ func (s *Store) Timeline(ctx context.Context, project, work string) (wire.Timeli
 			visits[key] = i
 			t.Visits = append(t.Visits, wire.Visit{Stage: p.Stage, Visit: p.Visit, Instructions: []wire.Instruction{}})
 		}
-		in := wire.Instruction{Kind: "skill", Name: p.Skill, Load: p.Load, Version: p.Version}
+		in := wire.Instruction{Kind: "skill", Name: p.Skill, Load: p.Load, Version: p.Version, Improvements: p.Improvements}
 		if e.Type == typeAgentStarted {
 			in = wire.Instruction{Kind: "agent", Name: p.Agent, Version: p.Version}
 		} else if in.Load == "" {

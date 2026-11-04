@@ -52,7 +52,7 @@ func drivingStarts(in claudehooks.Input) bool {
 
 // agentStart is what a starting stage agent is recorded as working on.
 func agentStart(in claudehooks.Input, facts assignmentFacts) (agentsessions.AgentStart, bool) {
-	if !strings.HasPrefix(in.AgentType, agentPrefix) || !facts.readable || !facts.active {
+	if !strings.HasPrefix(in.AgentType, agentPrefix) || in.AgentType == domain.ImproveSkillsAgent || !facts.readable || !facts.active {
 		return agentsessions.AgentStart{}, false
 	}
 	return agentsessions.AgentStart{Assignment: facts.assignment, Version: facts.version}, true

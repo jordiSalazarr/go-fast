@@ -17,9 +17,10 @@ import (
 	"github.com/jordiSalazarr/go-fast/workflow/worktree"
 )
 
-// errSkeleton is the error a skeleton returns where its signature returns
-// one; implement replaces every use of it.
-const errSkeleton = "errSkeleton"
+// skeletonErrName names errSkeleton, the error a skeleton returns where
+// its signature returns one; implement replaces every use of it. The
+// constant has another name, so this file never counts as a skeleton.
+const skeletonErrName = "errSkeleton"
 
 // skeletonsOnly: every non-test Go file this specify visit changed was
 // added in it, and declares only what the specs need to compile.
@@ -99,7 +100,7 @@ func skeletonProblems(name string, src []byte) (problems []string, vars int) {
 }
 
 func isErrSkeletonVar(spec *ast.ValueSpec) bool {
-	if len(spec.Names) != 1 || spec.Names[0].Name != errSkeleton || spec.Type != nil || len(spec.Values) != 1 {
+	if len(spec.Names) != 1 || spec.Names[0].Name != skeletonErrName || spec.Type != nil || len(spec.Values) != 1 {
 		return false
 	}
 	call, ok := spec.Values[0].(*ast.CallExpr)
@@ -165,7 +166,7 @@ func panics(stmt ast.Stmt) bool {
 func isZeroValue(e ast.Expr) bool {
 	switch v := e.(type) {
 	case *ast.Ident:
-		return v.Name == "nil" || v.Name == "false" || v.Name == errSkeleton
+		return v.Name == "nil" || v.Name == "false" || v.Name == skeletonErrName
 	case *ast.BasicLit:
 		switch v.Kind {
 		case token.INT, token.FLOAT:
@@ -242,7 +243,7 @@ func (c *checkRun) skeletonsFilled() (finding, error) {
 		if err != nil {
 			return err
 		}
-		if !strings.Contains(string(src), errSkeleton) || !usesErrSkeleton(abs, src) {
+		if !strings.Contains(string(src), skeletonErrName) || !usesErrSkeleton(abs, src) {
 			return nil
 		}
 		rel, err := filepath.Rel(c.Root, abs)
@@ -271,7 +272,7 @@ func usesErrSkeleton(name string, src []byte) bool {
 	}
 	found := false
 	ast.Inspect(file, func(n ast.Node) bool {
-		if id, ok := n.(*ast.Ident); ok && id.Name == errSkeleton {
+		if id, ok := n.(*ast.Ident); ok && id.Name == skeletonErrName {
 			found = true
 		}
 		return !found

@@ -483,6 +483,30 @@ and nothing comes back from it.
    work (`docs/adr/0001-assessments-live-only-on-the-server.md`). So the
    server's backups are their only copy.
 
+7. **Improve the skills from the team's judgement.** On a skill's
+   instruction page, or from a went-wrong assessment, a member writes a
+   **skill improvement**: text that says how the skill's wording should
+   change. Its text can be edited while it is proposed. Any member approves
+   it, for this project or for every project of the organisation, and can
+   withdraw the approval later. At the start of each new session
+   (`startup`, never resume, clear or compact) gf asks the server, with the
+   project secret, which improvements are approved, and the session runs
+   the `gofast:improve-skills` agent on those the loaded plugin directory
+   hasn't recorded yet. It edits only the one skill's directory, and the
+   session shows you a summary and the diff; nothing is committed. If the
+   server can't be reached, the brief says so in one line and the session
+   goes on.
+
+   Each skill keeps its record in `skills/<name>/.applied-improvements`,
+   one line per improvement (`<id> <outcome> <before> <after|-> <session>
+   [# reason]`), committed with the plugin so other clones don't apply it
+   twice. To **decline** an applied improvement, revert the skill's text and
+   keep the line: the next startup marks it `declined`. To **retry** one
+   (declined, not applied, or left `in-progress` by a session that ended),
+   delete its line. The viewer shows where each improvement was applied,
+   declined or not applied, and which improvements each stage visit's skill
+   version contained (`docs/adr/0004-approved-skill-improvements-flow-back-to-the-plugin.md`).
+
 If two clones advanced the same work before merging, or a log was rewritten
 after it was synced, the server refuses that work's stream (`gf sync`
 names it) and syncs the rest. The viewer shows what the server holds.

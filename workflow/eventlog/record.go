@@ -30,6 +30,11 @@ func AssignmentStream(id domain.AssignmentID) Stream { return Stream("assignment
 // skills its stages loaded. It is no aggregate's stream.
 func ObservationsStream(id domain.WorkID) Stream { return Stream("observations-" + id.String()) }
 
+// SkillImprovementsStream holds what happened to the skill improvements of
+// the plugin directories the repository's sessions loaded. It belongs to
+// no work, so it exists without one.
+const SkillImprovementsStream Stream = "skill-improvements"
+
 // ActorKind says who caused an event.
 type ActorKind string
 

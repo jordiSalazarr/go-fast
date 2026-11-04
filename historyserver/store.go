@@ -2,12 +2,14 @@
 // append-only copy of each project's work history, as gf sync sends it
 // (protocol: workflow/remote/wire), in SQLite. It reads the event log's
 // envelopes, never gf's domain: an older server keeps accepting the events
-// of a newer gf. It can't change any workflow state; nothing it holds goes
-// back to a repository.
+// of a newer gf. It can't change any workflow state; the only thing that
+// goes back to a repository is the list of its project's approved skill
+// improvements, which gf asks for (docs/adr/0004).
 //
 // It also keeps what is written here and exists nowhere else: the
-// members' assessments (docs/adr/0001) and the projects, with their
-// secrets' hashes (docs/adr/0003). Its backups are their only copy.
+// members' assessments (docs/adr/0001), the projects, with their
+// secrets' hashes (docs/adr/0003), and the members' skill improvements
+// (docs/adr/0004). Its backups are their only copy.
 package historyserver
 
 import (
@@ -106,6 +108,22 @@ CREATE TRIGGER IF NOT EXISTS events_append_only_update BEFORE UPDATE ON events
 	BEGIN SELECT RAISE(ABORT, 'events are append-only'); END;
 CREATE TRIGGER IF NOT EXISTS events_append_only_delete BEFORE DELETE ON events
 	BEGIN SELECT RAISE(ABORT, 'events are append-only'); END;
+CREATE TABLE IF NOT EXISTS skill_improvement_events (
+	seq         INTEGER PRIMARY KEY AUTOINCREMENT,
+	project     TEXT NOT NULL,
+	improvement TEXT NOT NULL,
+	version     INTEGER NOT NULL,
+	type        TEXT NOT NULL,
+	payload     TEXT NOT NULL,
+	member      TEXT NOT NULL,
+	at          TEXT NOT NULL,
+	UNIQUE (improvement, version)
+);
+CREATE INDEX IF NOT EXISTS skill_improvement_events_of ON skill_improvement_events (project, improvement);
+CREATE TRIGGER IF NOT EXISTS skill_improvement_events_append_only_update BEFORE UPDATE ON skill_improvement_events
+	BEGIN SELECT RAISE(ABORT, 'skill improvement events are append-only'); END;
+CREATE TRIGGER IF NOT EXISTS skill_improvement_events_append_only_delete BEFORE DELETE ON skill_improvement_events
+	BEGIN SELECT RAISE(ABORT, 'skill improvement events are append-only'); END;
 `
 
 // Open opens, and creates if needed, the database at path.
