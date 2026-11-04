@@ -1,11 +1,16 @@
 package exitchecks_test
 
 import (
+	"os"
 	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/jordiSalazarr/go-fast/workflow/domain"
 	. "github.com/jordiSalazarr/go-fast/workflow/domain/domaintest"
 	"github.com/jordiSalazarr/go-fast/workflow/exitchecks"
+	"github.com/jordiSalazarr/go-fast/workflow/worktree"
 )
 
 const (
@@ -144,4 +149,65 @@ func TestA2(t *testing.T) {}
 `)
 
 	passes(t, m.checkSpecify()[domain.CheckSpecsCoverScenarios])
+}
+
+// checkSpecifyRework runs specify's checks for its second visit, after its
+// first visit was accepted and implement's first visit began.
+func (m *module) checkSpecifyRework() map[domain.ExitCheck]domain.CheckResult {
+	m.t.Helper()
+	id := domain.AssignmentIDFor(WorkID, domain.StageSpecify, Visit(2))
+	changed, _, err := worktree.OpenBaselines(m.root).ChangedSince(id)
+	require.NoError(m.t, err)
+	runner := exitchecks.Runner{Root: m.root, Config: exitchecks.Config{Timeout: time.Minute, Decisions: domain.DefaultDecisionsDir()}, Env: append(os.Environ(), "GF_ACTOR=agent")}
+	results, err := runner.Run(exitchecks.Visit{
+		Assignment: id, Work: WorkID, Path: Must(domain.PathFor(domain.WorkTypeNewFeature)), Stage: domain.StageSpecify, Visit: Visit(2), Attempt: Attempt(1),
+		Specify: AssignmentOn(domain.StageSpecify), SpecifyEnd: AssignmentOn(domain.StageImplement),
+		Design: Visit1, DesignEnd: AssignmentOn(domain.StageSpecify),
+		Grill: Visit1, GrillEnd: AssignmentOn(domain.StageSpecify), Changed: changed,
+	})
+	require.NoError(m.t, err)
+	byCheck := map[domain.ExitCheck]domain.CheckResult{}
+	for _, r := range results {
+		byCheck[r.Check()] = r
+	}
+	return byCheck
+}
+
+// reworkingSpecify: specify's first visit covered A1 to A3, implement made
+// them pass, and a rework sent the work back to specify.
+func reworkingSpecify(t *testing.T) *module {
+	m := onSpecifyAfterGrill(t)
+	m.write("server/port_test.go", portSpecs)
+	m.begin(domain.StageImplement)
+	m.write("server/server.go", "package server\n\nfunc Port() int { return 8080 }\n")
+	_, err := worktree.OpenBaselines(m.root).Ensure(domain.AssignmentIDFor(WorkID, domain.StageSpecify, Visit(2)))
+	require.NoError(t, err)
+	m.write(domain.ArtifactFor(WorkID, domain.StageSpecify, Visit(2)).String(), "# specify\n\nRework.\n")
+	return m
+}
+
+// On a rework, the scenarios the earlier specify visit covered are
+// implemented: the visit needs a failing spec only for what it adds.
+func TestSpecsCoverScenarios_OnARework_ScenariosAnEarlierVisitCovered_AreNotRequiredAgain(t *testing.T) {
+	m := reworkingSpecify(t)
+	m.write("server/cap_test.go", "package server\n\nimport \"testing\"\n\nfunc TestCap(t *testing.T) { t.Fatal(\"not yet\") }\n")
+
+	results := m.checkSpecifyRework()
+
+	passes(t, results[domain.CheckSpecsFail])
+	passes(t, results[domain.CheckSpecsCoverScenarios])
+}
+
+// A scenario the earlier visit left uncovered still needs a spec.
+func TestSpecsCoverScenarios_OnARework_AScenarioNoVisitCovered_StillFails(t *testing.T) {
+	m := onSpecifyAfterGrill(t)
+	m.write("server/port_test.go", "package server\n\nimport \"testing\"\n\n// gofast:scenario A1\nfunc TestPort_Is8080(t *testing.T) {\n\tif Port() != 8080 {\n\t\tt.Fatal(\"want 8080\")\n\t}\n}\n")
+	m.begin(domain.StageImplement)
+	m.write("server/server.go", "package server\n\nfunc Port() int { return 8080 }\n")
+	_, err := worktree.OpenBaselines(m.root).Ensure(domain.AssignmentIDFor(WorkID, domain.StageSpecify, Visit(2)))
+	require.NoError(t, err)
+	m.write(domain.ArtifactFor(WorkID, domain.StageSpecify, Visit(2)).String(), "# specify\n\nRework.\n")
+	m.write("server/cap_test.go", "package server\n\nimport \"testing\"\n\nfunc TestCap(t *testing.T) { t.Fatal(\"not yet\") }\n")
+
+	fails(t, m.checkSpecifyRework()[domain.CheckSpecsCoverScenarios], "no spec covers: A2, A3 (")
 }

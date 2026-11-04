@@ -267,6 +267,10 @@ func (c *checkRun) specsCoverScenarios() (finding, error) {
 	if err != nil || problem != nil {
 		return deref(problem), err
 	}
+	toCover, problem, err = c.notCoveredByAnEarlierSpecify(toCover)
+	if err != nil || problem != nil {
+		return deref(problem), err
+	}
 	specs, tests, problem, err := c.specsWritten()
 	if err != nil || problem != nil {
 		return deref(problem), err
@@ -311,6 +315,40 @@ func (c *checkRun) specsCoverScenarios() (finding, error) {
 		return pass, nil
 	}
 	return fail("%s", strings.Join(parts, "; ")), nil
+}
+
+// notCoveredByAnEarlierSpecify are the scenarios to cover that the latest
+// accepted specify visit's specs don't already mark. On a rework that
+// returns to specify, the scenarios an earlier visit covered are
+// implemented and their specs pass, so the visit adds specs only for what
+// the rework brings; on a first visit there is no earlier one and every
+// scenario is left to cover.
+func (c *checkRun) notCoveredByAnEarlierSpecify(toCover []string) ([]string, *finding, error) {
+	if c.visit.Specify == (domain.AssignmentID{}) || c.visit.Specify == c.visit.Assignment {
+		return toCover, nil, nil
+	}
+	files, tests, problem, err := c.specTests()
+	if err != nil || problem != nil {
+		return nil, problem, err
+	}
+	markers := map[string][]string{}
+	for _, p := range files {
+		src, err := os.ReadFile(filepath.Join(c.Root, filepath.FromSlash(p.String())))
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, nil, err
+		}
+		found, err := scenarioMarkers(src)
+		if err != nil {
+			continue // an earlier spec that no longer parses covers nothing
+		}
+		for test, ids := range found {
+			markers[test] = append(markers[test], ids...)
+		}
+	}
+	return domain.UncoveredScenarios(toCover, tests, markers), nil, nil
 }
 
 // WrittenSpecs are the tests a stage visit wrote or changed so far, and the
