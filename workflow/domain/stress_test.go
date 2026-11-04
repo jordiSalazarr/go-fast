@@ -90,6 +90,13 @@ func TestChooseStress(t *testing.T) {
 		assert.Equal(t, domain.StressInclude, c.Decision())
 		assert.Empty(t, c.ForcedBy())
 	})
+	t.Run("no NFRs at all: include is rejected, skip is fine", func(t *testing.T) {
+		_, err := domain.ChooseStress(domain.StressInclude, reasonOf("new query"), nil, changedFiles("internal/users/find.go"))
+		require.ErrorIs(t, err, domain.ErrNoNFRs)
+		c, err := domain.ChooseStress(domain.StressSkip, reasonOf("nothing to test against"), nil, changedFiles("internal/users/find.go"))
+		require.NoError(t, err)
+		assert.Equal(t, domain.StressSkip, c.Decision())
+	})
 	t.Run("an NFR covers the change: skip is rejected naming it and its areas", func(t *testing.T) {
 		_, err := domain.ChooseStress(domain.StressSkip, reasonOf("small change"), nfrs, changedFiles("internal/ledger/entry.go"))
 		require.ErrorIs(t, err, domain.ErrStressForced)
@@ -235,13 +242,25 @@ func TestOverrideStressDecision_OnIntegrationTesting_DecidesWhetherStressTesting
 	thenEvents(t, events, err, domain.WorkEvent(domain.WorkCompleted{WorkID: workID}))
 }
 
-func TestOverrideStressDecision_AfterIntegrationTesting_IsRejected(t *testing.T) {
+func TestOverrideStressDecision_OnStressTesting_AnIncludeIsRejected(t *testing.T) {
+	given := append(onIntegration(includeStress), entered(domain.StageStressTesting, 1))
+	w := asInProgress(t, givenWork(t, given...))
+
+	events, err := w.OverrideStressDecision(owner, includeStress)
+
+	thenRejected(t, events, err, domain.ErrStressDecisionClosed)
+}
+
+// Stress testing that can't pass, say for want of NFRs, needn't strand the
+// work: the owner skips it while the work is on it, and the work completes.
+func TestOverrideStressDecision_OnStressTesting_ASkipCompletesTheWork(t *testing.T) {
 	given := append(onIntegration(includeStress), entered(domain.StageStressTesting, 1))
 	w := asInProgress(t, givenWork(t, given...))
 
 	events, err := w.OverrideStressDecision(owner, skipStress)
 
-	thenRejected(t, events, err, domain.ErrStressDecisionClosed)
+	thenEvents(t, events, err, byOwner(skipStress), domain.WorkEvent(domain.WorkCompleted{WorkID: workID}))
+	thenWorkState(t, given, events)
 }
 
 func TestOverrideStressDecision_NeedsTheOwnerAndAChoice(t *testing.T) {
@@ -277,13 +296,13 @@ func TestRebuildWork_RejectsHistoriesThatBreakTheStressDecision(t *testing.T) {
 	stressEntered := entered(domain.StageStressTesting, 1)
 	forcedSkip := domain.StressDecided{WorkID: workID, Decision: domain.StressSkip, Reason: reasonOf("x"), ForcedBy: []domain.NFRID{walletID}}
 	cases := map[string][]domain.WorkEvent{
-		"past review without a decision":                append(onReview(), entered(domain.StageIntegrationTesting, 1)),
-		"stress testing entered after a skip":           append(onIntegration(skipStress), stressEntered),
-		"completed while stress testing was included":   append(onIntegration(includeStress), domain.WorkCompleted{WorkID: workID}),
-		"review's decision on another stage":            append(started(), decided(skipStress)),
-		"a skip forced by an NFR":                       append(onReview(), forcedSkip),
-		"a decision without a reason":                   append(onReview(), domain.StressDecided{WorkID: workID, Decision: domain.StressSkip}),
-		"the owner's decision after integration passed": append(onIntegration(includeStress), stressEntered, byOwner(skipStress)),
+		"past review without a decision":               append(onReview(), entered(domain.StageIntegrationTesting, 1)),
+		"stress testing entered after a skip":          append(onIntegration(skipStress), stressEntered),
+		"completed while stress testing was included":  append(onIntegration(includeStress), domain.WorkCompleted{WorkID: workID}),
+		"review's decision on another stage":           append(started(), decided(skipStress)),
+		"a skip forced by an NFR":                      append(onReview(), forcedSkip),
+		"a decision without a reason":                  append(onReview(), domain.StressDecided{WorkID: workID, Decision: domain.StressSkip}),
+		"the owner's include after integration passed": append(onIntegration(includeStress), stressEntered, byOwner(includeStress)),
 		"past review again after a rework, with the old decision only": join(onIntegration(includeStress), intoFixer(domain.StageIntegrationTesting, 1, 1),
 			backTo(domain.StageImplement, 2), []domain.WorkEvent{entered(domain.StageReview, 2), entered(domain.StageIntegrationTesting, 2)}),
 	}

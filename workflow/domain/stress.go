@@ -37,9 +37,14 @@ type StressChoice struct {
 // ChooseStress decides stress testing for a work that changed these files,
 // given the repository's NFRs. If any NFR covers the change, stress testing
 // is mandatory: skip is rejected with a *StressForcedError naming the NFRs.
+// Without NFRs, stress testing can't pass, so include is rejected with
+// ErrNoNFRs.
 func ChooseStress(decision StressDecision, reason Reason, nfrs []NFR, changed ChangedFiles) (StressChoice, error) {
 	if err := requirePresent(required{"stress decision", decision}, required{"reason", reason}); err != nil {
 		return StressChoice{}, fmt.Errorf("choose stress testing: %w", err)
+	}
+	if decision == StressInclude && len(nfrs) == 0 {
+		return StressChoice{}, fmt.Errorf("choose stress testing: %w", ErrNoNFRs)
 	}
 	covering := Covering(nfrs, changed)
 	if decision == StressSkip && len(covering) > 0 {

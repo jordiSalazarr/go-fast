@@ -225,7 +225,8 @@ func MandatoryStress(target Target, claim domain.AgentClaim, decided bool, facts
 // DecideStress is review's pass with its stress decision. The NFRs covering
 // what the work changed make stress testing mandatory, so a skip is then
 // refused (domain.StressForcedError) before any check runs, using no
-// attempt. Only review decides.
+// attempt. Without NFRs stress testing can't pass, so an include is
+// recorded as a skip that keeps review's reason. Only review decides.
 func DecideStress(target Target, decision domain.StressDecision, reason domain.Reason, facts StressFacts) (domain.AgentClaim, error) {
 	if stage := target.Open.Stage(); stage != domain.StressDecider() {
 		return domain.AgentClaim{}, fmt.Errorf("submit for acceptance: %s stage: %w", stage, domain.ErrStressOutsideReview)
@@ -235,6 +236,13 @@ func DecideStress(target Target, decision domain.StressDecision, reason domain.R
 		return domain.AgentClaim{}, fmt.Errorf("submit for acceptance: %w", err)
 	}
 	choice, err := domain.ChooseStress(decision, reason, nfrs, changed)
+	if errors.Is(err, domain.ErrNoNFRs) {
+		skip, rerr := domain.NewReason("no NFRs in .gofast/nfrs.json to stress test against; review asked for it: " + reason.String())
+		if rerr != nil {
+			return domain.AgentClaim{}, fmt.Errorf("submit for acceptance: %w", rerr)
+		}
+		choice, err = domain.ChooseStress(domain.StressSkip, skip, nfrs, changed)
+	}
 	if err != nil {
 		return domain.AgentClaim{}, fmt.Errorf("submit for acceptance: %w", err)
 	}

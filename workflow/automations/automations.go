@@ -9,6 +9,7 @@ import (
 	"github.com/jordiSalazarr/go-fast/workflow/eventlog"
 	"github.com/jordiSalazarr/go-fast/workflow/slices/advanceWorkOnAcceptance"
 	"github.com/jordiSalazarr/go-fast/workflow/slices/cancelAssignmentOnAbandon"
+	"github.com/jordiSalazarr/go-fast/workflow/slices/cancelAssignmentOnCompletion"
 	"github.com/jordiSalazarr/go-fast/workflow/slices/cancelAssignmentOnReturn"
 	"github.com/jordiSalazarr/go-fast/workflow/slices/enterFixerOnHandover"
 	"github.com/jordiSalazarr/go-fast/workflow/slices/openAssignmentOnStageEntered"
@@ -48,6 +49,7 @@ func (r Runner) all() []automation {
 		func(l Log) (int, error) { return returnworkonfixeraccepted.Run(l) },
 		func(l Log) (int, error) { return cancelassignmentonabandon.Run(l) },
 		func(l Log) (int, error) { return cancelassignmentonreturn.Run(l) },
+		func(l Log) (int, error) { return cancelassignmentoncompletion.Run(l) },
 	}
 }
 

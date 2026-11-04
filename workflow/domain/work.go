@@ -207,6 +207,13 @@ func (w active) stressStillOpen() bool {
 	return ok && i <= closes
 }
 
+// ownerMayDecide reports whether the owner may record this stress choice
+// now: while the decision is still open, or to skip stress testing while the
+// work is on it.
+func (w active) ownerMayDecide(choice StressChoice) bool {
+	return w.stressStillOpen() || (w.stage == StageStressTesting && choice.decision == StressSkip)
+}
+
 // LastVisit is the last visit of a stage; ok is false if it was never entered.
 func (w active) LastVisit(stage Stage) (Visit, bool) {
 	v, ok := w.visits[stage]
@@ -392,7 +399,8 @@ func (w InProgressWork) AdvancePastStage(stage Stage, visit Visit, stress Stress
 
 // OverrideStressDecision records the owner's stress decision, which stands
 // for the rest of this pass along the path. It is too late once the work has
-// passed integration testing.
+// passed integration testing, except to skip stress testing while the work
+// is on it: the work then moves past it, which completes it.
 func (w InProgressWork) OverrideStressDecision(owner Owner, choice StressChoice) ([]WorkEvent, error) {
 	if err := requirePresent(required{"owner", owner}, required{"stress choice", choice}); err != nil {
 		return nil, fmt.Errorf("override stress decision of work %s: %w", w.id, err)
@@ -403,10 +411,22 @@ func (w InProgressWork) OverrideStressDecision(owner Owner, choice StressChoice)
 	if w.path.StressMandatory() {
 		return nil, fmt.Errorf("override stress decision of work %s: %w", w.id, ErrStressMandatoryOnPath)
 	}
-	if !w.stressStillOpen() {
+	if !w.ownerMayDecide(choice) {
 		return nil, fmt.Errorf("override stress decision of work %s on %s: %w", w.id, w.stage, ErrStressDecisionClosed)
 	}
-	return []WorkEvent{StressDecided{WorkID: w.id, Decision: choice.decision, Reason: choice.reason, ForcedBy: choice.forcedBy, Owner: owner}}, nil
+	decided := StressDecided{WorkID: w.id, Decision: choice.decision, Reason: choice.reason, ForcedBy: choice.forcedBy, Owner: owner}
+	if w.stage != StageStressTesting {
+		return []WorkEvent{decided}, nil
+	}
+	w.stress = decidedBy(decided)
+	next, done, err := w.next()
+	if err != nil {
+		return nil, fmt.Errorf("override stress decision of work %s: %w", w.id, err)
+	}
+	if done {
+		return []WorkEvent{decided, WorkCompleted{WorkID: w.id}}, nil
+	}
+	return []WorkEvent{decided, w.entering(next)}, nil
 }
 
 // EnterFixer takes the work into the fixer because its current stage visit
@@ -705,7 +725,7 @@ func evolveWork(w work, path Path, state WorkState, e WorkEvent) (next WorkState
 		case StressDecided:
 			choice := StressChoice{decision: e.Decision, reason: e.Reason, forcedBy: e.ForcedBy}
 			byReview := e.Owner.isZero() && s.stage == StressDecider()
-			byOwner := !e.Owner.isZero() && s.stressStillOpen()
+			byOwner := !e.Owner.isZero() && s.ownerMayDecide(choice)
 			if !choice.valid() || !(byReview || byOwner) {
 				return nil, nil, false
 			}

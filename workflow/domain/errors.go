@@ -62,6 +62,7 @@ var (
 	ErrStressForced          = errors.New("stress testing is mandatory: the change touches an NFR's areas")
 	ErrStressUndecided       = errors.New("the work has no stress decision")
 	ErrStressDecisionClosed  = errors.New("the stress decision can only change while the work is on a stage up to integration testing")
+	ErrNoNFRs                = errors.New("the repository has no NFRs, so there is nothing to stress test against")
 	// Skill catalogs.
 	ErrSkillLocked = errors.New("the skill unlocks after the diagnosis")
 	// NFR proposals.

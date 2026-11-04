@@ -536,7 +536,10 @@ its rework limit and drive mode ends. The owner runs
 Stress testing is an **optional** stage after integration testing: it runs
 only if the work decided to include it. **Review decides**, when it passes:
 `gf submit --passed --stress <include|skip> "<reason>"` (required in review,
-refused elsewhere). No work gets past review without a decision.
+refused elsewhere). No work gets past review without a decision. Without NFRs in
+`.gofast/nfrs.json` stress testing has nothing to test against, so review's
+`--stress include` is recorded as a skip that keeps review's reason, and the
+owner can't include it either.
 
 If the work's changes (everything changed since its first stage began) touch
 the `areas` of an NFR in `.gofast/nfrs.json`, stress testing is
@@ -545,7 +548,9 @@ without using an attempt.
 
 The owner may override review with `gf stress <include|skip> "<reason>"`
 (owner only, terminal required) until the work has passed integration
-testing; a mandatory stress test still can't be skipped. The owner's
+testing; a mandatory stress test still can't be skipped. On stress testing
+itself the owner may still skip it, for example when it can't pass: the
+work completes and the open stress-testing visit is cancelled. The owner's
 decision stands over review's, unless the change later touches an NFR's
 areas. A rework clears the decision: the next review decides again, since
 the diff may have changed.
@@ -769,7 +774,7 @@ gf status                       # what is waiting, and which artifact to read
 gf approve                      # or: gf reject "<feedback>"
 gf extend 2                     # after an escalation; or: gf abandon "<reason>"
 gf rework-extend 1              # at the rework limit; or: gf abandon "<reason>"
-gf stress include "<reason>"    # until integration testing passes; or: skip
+gf stress include "<reason>"    # until integration testing passes; or: skip (also on stress testing)
 gf return specify "<reason>"    # send the work back to an earlier stage
 gf nfrs adopt                   # while design waits: adopt its NFR proposals,
                                 # commit .gofast/nfrs.json, then gf approve

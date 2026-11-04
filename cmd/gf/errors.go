@@ -111,7 +111,9 @@ func friendly(err error, cmd *cobra.Command, ran bool) string {
 	case errors.Is(err, domain.ErrUnknownStressDecision):
 		return "Stress testing is either `include` or `skip`."
 	case errors.Is(err, domain.ErrStressDecisionClosed):
-		return "The stress decision can only change while the work is on a stage up to integration testing, outside the fixer. Run `gf status` to see where it is."
+		return "The stress decision can only change while the work is on a stage up to integration testing, outside the fixer; on stress testing itself, only `gf stress skip \"<reason>\"`. Run `gf status` to see where it is."
+	case errors.Is(err, domain.ErrNoNFRs):
+		return "There are no NFRs in .gofast/nfrs.json, so stress testing has nothing to test against. Add them first (`gf checks` shows them), or skip it."
 	case errors.Is(err, worktree.ErrNoWorkBaseline):
 		return "gf can't tell what this work changed: the baseline of its first stage is missing (the work was started before this version of gf, or on another machine). The owner should abandon this work with `gf abandon \"<reason>\"` and start it again."
 	case errors.Is(err, domain.ErrUnknownStage):

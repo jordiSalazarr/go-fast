@@ -27,41 +27,50 @@ type StressFacts func(work domain.ActiveWork) ([]domain.NFR, domain.ChangedFiles
 
 // OverrideStressDecision records the owner's stress decision for the active
 // work.
-func OverrideStressDecision(log Log, actor eventlog.Actor, branch domain.Branch, owner domain.Owner, decision domain.StressDecision, reason domain.Reason, facts StressFacts) (domain.StressDecided, error) {
+func OverrideStressDecision(log Log, actor eventlog.Actor, branch domain.Branch, owner domain.Owner, decision domain.StressDecision, reason domain.Reason, facts StressFacts) (decided domain.StressDecided, completed bool, err error) {
 	records, err := log.ReadAll()
 	if err != nil {
-		return domain.StressDecided{}, fmt.Errorf("override stress decision: %w", err)
+		return domain.StressDecided{}, false, fmt.Errorf("override stress decision: %w", err)
 	}
 	history := eventlog.NewHistory(records)
 	fact, err := history.ActiveWorkOn(branch)
 	if err != nil {
-		return domain.StressDecided{}, fmt.Errorf("override stress decision: %w", err)
+		return domain.StressDecided{}, false, fmt.Errorf("override stress decision: %w", err)
 	}
 	work, err := fact.Work()
 	if err != nil {
-		return domain.StressDecided{}, fmt.Errorf("override stress decision: %w", err)
+		return domain.StressDecided{}, false, fmt.Errorf("override stress decision: %w", err)
 	}
 	inProgress, ok := work.(domain.InProgressWork)
 	if !ok {
-		return domain.StressDecided{}, fmt.Errorf("override stress decision of %s: work is %T: %w", work.ID(), work, domain.ErrStressDecisionClosed)
+		return domain.StressDecided{}, false, fmt.Errorf("override stress decision of %s: work is %T: %w", work.ID(), work, domain.ErrStressDecisionClosed)
 	}
 	nfrs, changed, err := facts(work)
 	if err != nil {
-		return domain.StressDecided{}, fmt.Errorf("override stress decision: %w", err)
+		return domain.StressDecided{}, false, fmt.Errorf("override stress decision: %w", err)
 	}
 	choice, err := domain.ChooseStress(decision, reason, nfrs, changed)
 	if err != nil {
-		return domain.StressDecided{}, fmt.Errorf("override stress decision: %w", err)
+		return domain.StressDecided{}, false, fmt.Errorf("override stress decision: %w", err)
 	}
 	events, err := inProgress.OverrideStressDecision(owner, choice)
 	if err != nil {
-		return domain.StressDecided{}, err
+		return domain.StressDecided{}, false, err
 	}
 	version := history.Version(eventlog.WorkStream(work.ID()))
 	if err := log.Append(eventlog.WorkStream(work.ID()), version, actor, eventlog.Events(events)...); err != nil {
-		return domain.StressDecided{}, fmt.Errorf("override stress decision: %w", err)
+		return domain.StressDecided{}, false, fmt.Errorf("override stress decision: %w", err)
 	}
-	return events[0].(domain.StressDecided), nil
+	return events[0].(domain.StressDecided), completes(events), nil
+}
+
+func completes(events []domain.WorkEvent) bool {
+	for _, e := range events {
+		if _, ok := e.(domain.WorkCompleted); ok {
+			return true
+		}
+	}
+	return false
 }
 
 func NewCommand(openStore func() (*eventlog.Store, error), automate automations.Runner, resolveCaller func() (caller.Caller, error), currentBranch func() (domain.Branch, error), facts StressFacts) *cobra.Command {
@@ -69,7 +78,7 @@ func NewCommand(openStore func() (*eventlog.Store, error), automate automations.
 		Use:   `stress <include|skip> "<reason>"`,
 		Short: "Decide whether stress testing runs, overriding review (owner only)",
 		Long: "Decide whether stress testing runs, overriding review's decision (owner only, from a terminal).\n\n" +
-			"Allowed until the work has passed integration testing. A change that touches an NFR's areas can't skip it.",
+			"Allowed until the work has passed integration testing; on stress testing itself, skip is still allowed and completes the work. A change that touches an NFR's areas can't skip it.",
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			decision, err := domain.ParseStressDecision(args[0])
@@ -97,9 +106,10 @@ func NewCommand(openStore func() (*eventlog.Store, error), automate automations.
 				return err
 			}
 			var decided domain.StressDecided
+			var completed bool
 			err = store.Exclusive(func(s *eventlog.Session) error {
 				return automate.AroundCommand(s, func() error {
-					decided, err = OverrideStressDecision(s, c.Actor(), branch, owner, decision, reason, facts)
+					decided, completed, err = OverrideStressDecision(s, c.Actor(), branch, owner, decision, reason, facts)
 					return err
 				})
 			})
@@ -111,6 +121,10 @@ func NewCommand(openStore func() (*eventlog.Store, error), automate automations.
 				fmt.Fprintf(out, "Stress testing will run after integration testing%s: %s\n", mandatory(decided.ForcedBy), decided.Reason)
 			} else {
 				fmt.Fprintf(out, "Stress testing is skipped: %s\n", decided.Reason)
+			}
+			if completed {
+				fmt.Fprintln(out, "The work is complete.")
+				return nil
 			}
 			fmt.Fprintln(out, "Your decision stands over review's until a rework sends the work back.")
 			return nil
