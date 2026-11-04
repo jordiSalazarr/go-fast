@@ -16,7 +16,7 @@ import (
 func TestEachStageRequiresItsExitChecks(t *testing.T) {
 	fixBug := map[domain.Stage][]domain.ExitCheck{
 		domain.StageDiscovery: {domain.CheckArtifactWritten},
-		domain.StageSpecify:   {domain.CheckArtifactWritten, domain.CheckSkeletonsOnly, domain.CheckSpecsFail},
+		domain.StageSpecify:   {domain.CheckArtifactWritten, domain.CheckSkeletonsOnly, domain.CheckFormatted, domain.CheckSpecsFail},
 		domain.StageImplement: {domain.CheckArtifactWritten, domain.CheckBuildPasses, domain.CheckFormatted, domain.CheckSkeletonsFilled, domain.CheckSpecsPass,
 			domain.CheckSpecsUntouched, domain.CheckSuitePasses},
 		domain.StageReview:             {domain.CheckArtifactWritten, domain.CheckReviewVerdictConsistent, domain.CheckFormatted, domain.CheckBuildPasses, domain.CheckSuitePasses},
@@ -26,14 +26,14 @@ func TestEachStageRequiresItsExitChecks(t *testing.T) {
 	}
 	design := []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckDesignValid, domain.CheckNFRProposalsValid}
 	designed := with(with(fixBug, domain.StageDesign, design),
-		domain.StageSpecify, []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckSkeletonsOnly, domain.CheckSpecsFail, domain.CheckSpecsCoverSlices})
+		domain.StageSpecify, []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckSkeletonsOnly, domain.CheckFormatted, domain.CheckSpecsFail, domain.CheckSpecsCoverSlices})
 	feature := with(with(designed, domain.StageEventModelling, []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckEventModelValid}),
 		domain.StageGrill, []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckGrillValid})
-	feature = with(feature, domain.StageSpecify, []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckSkeletonsOnly, domain.CheckSpecsFail, domain.CheckSpecsCoverScenarios})
+	feature = with(feature, domain.StageSpecify, []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckSkeletonsOnly, domain.CheckFormatted, domain.CheckSpecsFail, domain.CheckSpecsCoverScenarios})
 	behaviourDelta := []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckBehaviourDelta}
 	refactor := with(with(with(with(fixBug, domain.StageGrill, []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckGrillValid}),
 		domain.StagePlan, []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckPlanValid}),
-		domain.StageCharacterize, []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckCharacterizationPasses, domain.CheckCoverageSufficient}),
+		domain.StageCharacterize, []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckFormatted, domain.CheckCharacterizationPasses, domain.CheckCoverageSufficient}),
 		domain.StageImplement, []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckBuildPasses, domain.CheckFormatted, domain.CheckTestsUntouched, domain.CheckSuitePasses})
 	performance := with(with(fixBug, domain.StageMeasure, []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckStressScriptsValid, domain.CheckBaselineRecorded, domain.CheckDiagnosisWritten}),
 		domain.StageOptimize, []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckBuildPasses, domain.CheckFormatted, domain.CheckTestsUntouched, domain.CheckSuitePasses})
@@ -92,10 +92,11 @@ func TestCheckFailed_NeedsASummary(t *testing.T) {
 var (
 	inScope      = domain.CheckWriteScope(domain.StageSpecify, workID, decisions, domain.NewChangedFiles(must(domain.NewRepoPath("/repo", "a_test.go"))))
 	outOfScope   = domain.CheckWriteScope(domain.StageSpecify, workID, decisions, domain.NewChangedFiles(must(domain.NewRepoPath("/repo", "a.txt"))))
-	specifyPass  = []domain.CheckResult{domain.CheckPassed(domain.CheckArtifactWritten), domain.CheckPassed(domain.CheckSkeletonsOnly), domain.CheckPassed(domain.CheckSpecsFail)}
+	specifyPass  = []domain.CheckResult{domain.CheckPassed(domain.CheckArtifactWritten), domain.CheckPassed(domain.CheckSkeletonsOnly), domain.CheckPassed(domain.CheckFormatted), domain.CheckPassed(domain.CheckSpecsFail)}
 	specsNotFail = []domain.CheckResult{
 		domain.CheckPassed(domain.CheckArtifactWritten),
 		domain.CheckPassed(domain.CheckSkeletonsOnly),
+		domain.CheckPassed(domain.CheckFormatted),
 		checkFailed(domain.CheckSpecsFail, "no test written in this stage fails"),
 	}
 )

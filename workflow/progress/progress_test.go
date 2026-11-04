@@ -127,7 +127,7 @@ func TestGivenAStageWhoseAssignmentIsNotOpenedYet_WhenQueryingStatus_ThenItIsSho
 	assert.Equal(t, &progress.CurrentView{
 		Stage: "specify", Visit: 1, Gate: "human", Assignment: progress.AssignmentOpen, AttemptsUsed: 0, Budget: 3,
 		Artifact: ".gofast/works/w1/specify-v1.md",
-		Checks:   []string{"artifact-written", "skeletons-only", "specs-fail"},
+		Checks:   []string{"artifact-written", "skeletons-only", "formatted", "specs-fail"},
 	}, v.Current)
 	assert.Equal(t, progress.NextAgent, v.Next.Actor)
 }

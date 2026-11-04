@@ -269,7 +269,7 @@ list them.
 | grill | artifact-written, grill-valid |
 | discovery | artifact-written; on modify-behaviour also behaviour-delta |
 | design | artifact-written, design-valid, nfr-proposals-valid |
-| specify | artifact-written, skeletons-only, specs-fail; on paths with grill (v2, v3) also specs-cover-scenarios; on path v1 with design, specs-cover-slices |
+| specify | artifact-written, skeletons-only, formatted, specs-fail; on paths with grill (v2, v3) also specs-cover-scenarios; on path v1 with design, specs-cover-slices |
 | implement | artifact-written, build-passes, formatted, skeletons-filled, specs-pass, specs-untouched, suite-passes |
 | review | artifact-written, review-verdict-consistent, formatted, build-passes, suite-passes |
 | integration-testing | artifact-written, integration-passes |

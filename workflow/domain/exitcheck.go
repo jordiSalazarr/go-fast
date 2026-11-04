@@ -153,14 +153,18 @@ func (s Stage) checks() []ExitCheck {
 	case StagePlan:
 		return []ExitCheck{CheckArtifactWritten, CheckPlanValid}
 	case StageCharacterize:
-		return []ExitCheck{CheckArtifactWritten, CheckCharacterizationPasses, CheckCoverageSufficient}
+		// Implement can't touch these tests on a refactor, so they must
+		// already be formatted.
+		return []ExitCheck{CheckArtifactWritten, CheckFormatted, CheckCharacterizationPasses, CheckCoverageSufficient}
 	case StageMeasure:
 		return []ExitCheck{CheckArtifactWritten, CheckStressScriptsValid, CheckBaselineRecorded, CheckDiagnosisWritten}
 	case StageOptimize:
 		// Performance work changes no behaviour: every existing test stays.
 		return []ExitCheck{CheckArtifactWritten, CheckBuildPasses, CheckFormatted, CheckTestsUntouched, CheckSuitePasses}
 	case StageSpecify:
-		return []ExitCheck{CheckArtifactWritten, CheckSkeletonsOnly, CheckSpecsFail}
+		// Implement can't touch specify's tests, so they must already be
+		// formatted.
+		return []ExitCheck{CheckArtifactWritten, CheckSkeletonsOnly, CheckFormatted, CheckSpecsFail}
 	case StageImplement:
 		return []ExitCheck{CheckArtifactWritten, CheckBuildPasses, CheckFormatted, CheckSkeletonsFilled, CheckSpecsPass, CheckSpecsUntouched, CheckSuitePasses}
 	case StageReview:
