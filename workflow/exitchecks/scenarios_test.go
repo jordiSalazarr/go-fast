@@ -211,3 +211,40 @@ func TestSpecsCoverScenarios_OnARework_AScenarioNoVisitCovered_StillFails(t *tes
 
 	fails(t, m.checkSpecifyRework()[domain.CheckSpecsCoverScenarios], "no spec covers: A2, A3 (")
 }
+
+// On a second rework, the scenarios the first specify visit covered count
+// as covered too, not only those of the latest accepted visit.
+func TestSpecsCoverScenarios_OnASecondRework_ScenariosTheFirstVisitCovered_AreNotRequiredAgain(t *testing.T) {
+	m := reworkingSpecify(t)
+	m.write("server/cap_test.go", "package server\n\nimport \"testing\"\n\nfunc TestCap(t *testing.T) { t.Fatal(\"not yet\") }\n")
+	visit2 := domain.AssignmentIDFor(WorkID, domain.StageSpecify, Visit(2))
+	implement2 := domain.AssignmentIDFor(WorkID, domain.StageImplement, Visit(2))
+	_, err := worktree.OpenBaselines(m.root).Ensure(implement2)
+	require.NoError(t, err)
+	m.write("server/server.go", "package server\n\nfunc Port() int { return 8080 }\n\nfunc Cap() int { return 1 }\n")
+	m.write("server/cap_test.go", "package server\n\nimport \"testing\"\n\nfunc TestCap(t *testing.T) {}\n")
+	visit3 := domain.AssignmentIDFor(WorkID, domain.StageSpecify, Visit(3))
+	_, err = worktree.OpenBaselines(m.root).Ensure(visit3)
+	require.NoError(t, err)
+	m.write(domain.ArtifactFor(WorkID, domain.StageSpecify, Visit(3)).String(), "# specify\n\nSecond rework.\n")
+	m.write("server/limit_test.go", "package server\n\nimport \"testing\"\n\nfunc TestLimit(t *testing.T) { t.Fatal(\"not yet\") }\n")
+
+	changed, _, err := worktree.OpenBaselines(m.root).ChangedSince(visit3)
+	require.NoError(t, err)
+	runner := exitchecks.Runner{Root: m.root, Config: exitchecks.Config{Timeout: time.Minute, Decisions: domain.DefaultDecisionsDir()}, Env: append(os.Environ(), "GF_ACTOR=agent")}
+	results, err := runner.Run(exitchecks.Visit{
+		Assignment: visit3, Work: WorkID, Path: Must(domain.PathFor(domain.WorkTypeNewFeature)), Stage: domain.StageSpecify, Visit: Visit(3), Attempt: Attempt(1),
+		Specify: visit2, SpecifyEnd: implement2,
+		EarlierSpecifies: []exitchecks.SpecifyVisit{{Specify: AssignmentOn(domain.StageSpecify), End: AssignmentOn(domain.StageImplement)}},
+		Design:           Visit1, DesignEnd: AssignmentOn(domain.StageSpecify),
+		Grill: Visit1, GrillEnd: AssignmentOn(domain.StageSpecify), Changed: changed,
+	})
+	require.NoError(t, err)
+	byCheck := map[domain.ExitCheck]domain.CheckResult{}
+	for _, r := range results {
+		byCheck[r.Check()] = r
+	}
+
+	passes(t, byCheck[domain.CheckSpecsFail])
+	passes(t, byCheck[domain.CheckSpecsCoverScenarios])
+}

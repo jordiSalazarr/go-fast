@@ -100,6 +100,37 @@ func (h History) ActiveWorkOn(branch domain.Branch) (domain.ActiveWorkFact, erro
 	return fact, nil
 }
 
+// AcceptedVisit is an accepted stage visit, and the stage visit entered
+// when it was accepted (zero while that visit is still to be entered).
+type AcceptedVisit struct {
+	Accepted, End domain.AssignmentID
+}
+
+// Accepted are a work's accepted visits of a stage, oldest first.
+func (h History) Accepted(work domain.WorkID, stage domain.Stage) []AcceptedVisit {
+	var visits []AcceptedVisit
+	ending := false
+	for _, r := range h.Records(WorkStream(work)) {
+		entered, ok := r.Event.(domain.StageEntered)
+		if !ok {
+			continue
+		}
+		id := domain.AssignmentIDFor(work, entered.Stage, entered.Visit)
+		if ending {
+			visits[len(visits)-1].End, ending = id, false
+		}
+		if entered.Stage != stage {
+			continue
+		}
+		if state, _, err := h.Assignment(id); err == nil {
+			if _, ok := state.(domain.Accepted); ok {
+				visits, ending = append(visits, AcceptedVisit{Accepted: id}), true
+			}
+		}
+	}
+	return visits
+}
+
 // LatestAccepted is a work's latest accepted visit of a stage, and the stage
 // visit entered when it was accepted (zero while that visit is still to be
 // entered); all zero when no visit of the stage was accepted.

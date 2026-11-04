@@ -84,8 +84,10 @@ type Target struct {
 	// specify is the latest accepted specify visit, and specifyEnd the visit
 	// entered when it was accepted; designVisit and designEnd the same for
 	// design, eventModelVisit and eventModelEnd for event modelling,
-	// grillVisit and grillEnd for grill.
+	// grillVisit and grillEnd for grill; earlierSpecifies are the accepted
+	// specify visits before the latest.
 	specify, specifyEnd domain.AssignmentID
+	earlierSpecifies    []exitchecks.SpecifyVisit
 	designVisit         domain.Visit
 	designEnd           domain.AssignmentID
 	eventModelVisit     domain.Visit
@@ -168,6 +170,11 @@ func Find(log Reader, branch domain.Branch) (Target, error) {
 	}
 	target := Target{Open: open, version: version, work: work}
 	target.specify, target.specifyEnd, _ = history.LatestAccepted(work.ID(), domain.StageSpecify)
+	if accepted := history.Accepted(work.ID(), domain.StageSpecify); len(accepted) > 1 {
+		for _, a := range accepted[:len(accepted)-1] {
+			target.earlierSpecifies = append(target.earlierSpecifies, exitchecks.SpecifyVisit{Specify: a.Accepted, End: a.End})
+		}
+	}
 	_, target.designEnd, target.designVisit = history.LatestAccepted(work.ID(), domain.StageDesign)
 	_, target.eventModelEnd, target.eventModelVisit = history.LatestAccepted(work.ID(), domain.StageEventModelling)
 	_, target.grillEnd, target.grillVisit = history.LatestAccepted(work.ID(), domain.StageGrill)
@@ -253,7 +260,7 @@ func Check(target Target, claim domain.AgentClaim, changes Changes, scope Scope,
 	}
 	checked.Results, err = checks(exitchecks.Visit{
 		Assignment: open.ID(), Work: open.Work(), Path: target.work.Path(), Stage: open.Stage(), Visit: open.Visit(),
-		Attempt: currentAttempt(open), Specify: target.specify, SpecifyEnd: target.specifyEnd,
+		Attempt: currentAttempt(open), Specify: target.specify, SpecifyEnd: target.specifyEnd, EarlierSpecifies: target.earlierSpecifies,
 		Design: target.designVisit, DesignEnd: target.designEnd,
 		EventModel: target.eventModelVisit, EventModelEnd: target.eventModelEnd, HasEventModel: hasEventModel(target.work),
 		Grill: target.grillVisit, GrillEnd: target.grillEnd, Plan: target.planVisit, PlanEnd: target.planEnd,
