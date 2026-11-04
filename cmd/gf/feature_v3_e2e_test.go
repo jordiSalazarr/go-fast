@@ -197,7 +197,7 @@ func TestNewFeatureV3_FromASpec_EndToEnd(t *testing.T) {
 	r.expect("specify", progress.AssignmentOpen, 1, 3)
 	r.write("server/posting.go", walletSkeleton)
 	out = r.submitAsAgent("--passed")
-	assert.Contains(t, out, "✓ skeletons-only\n✓ specs-fail\n✓ specs-cover-scenarios")
+	assert.Contains(t, out, "✓ skeletons-only\n✓ formatted\n✓ specs-fail\n✓ specs-cover-scenarios")
 	r.expect("specify", progress.AssignmentAwaitingApproval, 1, 3)
 	r.gf("approve")
 

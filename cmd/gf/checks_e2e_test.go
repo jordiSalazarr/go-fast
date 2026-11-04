@@ -18,7 +18,7 @@ func TestChecks_ShowsTheConfigurationAndEachStagesChecks(t *testing.T) {
 	out := r.gf("checks")
 	assert.Contains(t, out, "defaults; .gofast/checks.json does not exist")
 	assert.Contains(t, out, "integration  not configured: integration-passes fails until the owner adds one to .gofast/checks.json")
-	assert.Contains(t, out, "  specify              artifact-written, skeletons-only, specs-fail\n")
+	assert.Contains(t, out, "  specify              artifact-written, skeletons-only, formatted, specs-fail\n")
 	assert.Contains(t, out, "  discovery            artifact-written\n                       modify-behaviour also: behaviour-delta\n")
 	assert.Contains(t, out, "  design               artifact-written, design-valid, nfr-proposals-valid\n")
 	assert.Contains(t, out, "  implement            artifact-written, build-passes, formatted, suite-passes\n"+
@@ -120,11 +120,11 @@ func TestExitChecks_FixBugRun_EndToEnd(t *testing.T) {
 
 	// Specify: a test that already passes is not a spec of the bug.
 	v = r.expect("specify", progress.AssignmentOpen, 0, 3)
-	assert.Equal(t, []string{"artifact-written", "skeletons-only", "specs-fail"}, v.Current.Checks)
+	assert.Equal(t, []string{"artifact-written", "skeletons-only", "formatted", "specs-fail"}, v.Current.Checks)
 	r.write("server/positive_test.go", "package server\n\nimport \"testing\"\n\nfunc TestPort_IsPositive(t *testing.T) {\n\tif Port() <= 0 {\n\t\tt.Fatal(\"no port\")\n\t}\n}\n")
 	r.write(v.Current.Artifact, "# specify\n\nTestPort_IsPositive.\n")
 	out = r.submitAsAgent("--passed")
-	assert.Contains(t, out, "✓ artifact-written\n✓ skeletons-only\n✗ specs-fail: no test written in this stage fails (TestPort_IsPositive passed)")
+	assert.Contains(t, out, "✓ artifact-written\n✓ skeletons-only\n✓ formatted\n✗ specs-fail: no test written in this stage fails (TestPort_IsPositive passed)")
 	v = r.expect("specify", progress.AssignmentOpen, 1, 3)
 	assert.True(t, strings.HasPrefix(v.Current.LastProblem.Text, "specs-fail: no test written in this stage fails (TestPort_IsPositive passed) (log: .gofast/runtime/checks/"),
 		v.Current.LastProblem.Text)

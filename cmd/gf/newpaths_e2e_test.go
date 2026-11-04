@@ -126,7 +126,7 @@ func TestRefactorPath_EndToEnd(t *testing.T) {
 
 	// Characterize: below the owner's 80% it fails; a passing test pins Port.
 	v = r.expect("characterize", progress.AssignmentOpen, 0, 3)
-	assert.Equal(t, []string{"artifact-written", "characterization-passes", "coverage-sufficient"}, v.Current.Checks)
+	assert.Equal(t, []string{"artifact-written", "formatted", "characterization-passes", "coverage-sufficient"}, v.Current.Checks)
 	r.workOnStage()
 	out = r.submitAsAgent("--passed")
 	assert.Contains(t, out, "below the owner's minimum coverage of 80%: server 0%")

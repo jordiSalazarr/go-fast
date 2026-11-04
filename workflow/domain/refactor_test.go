@@ -40,7 +40,7 @@ func TestRefactorPath(t *testing.T) {
 	assert.Equal(t, domain.WriteScopeArtifacts, domain.StagePlan.WriteScope())
 	assert.Equal(t, domain.WriteScopeTestsAndArtifacts, domain.StageCharacterize.WriteScope())
 	assert.Equal(t, []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckPlanValid}, domain.RequiredChecks(domain.StagePlan, path))
-	assert.Equal(t, []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckCharacterizationPasses, domain.CheckCoverageSufficient},
+	assert.Equal(t, []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckFormatted, domain.CheckCharacterizationPasses, domain.CheckCoverageSufficient},
 		domain.RequiredChecks(domain.StageCharacterize, path))
 	assert.Equal(t, []domain.ExitCheck{domain.CheckArtifactWritten, domain.CheckBuildPasses, domain.CheckFormatted, domain.CheckTestsUntouched, domain.CheckSuitePasses},
 		domain.RequiredChecks(domain.StageImplement, path), "no specs on a refactor: it keeps every existing test instead")
