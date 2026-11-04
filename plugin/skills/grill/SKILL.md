@@ -22,6 +22,7 @@ You run the **grill** stage of the work gofast is driving, **in this session, li
    - **scope**: what is in, and what is explicitly out;
    - with an event model, **every assumption** under its `## Assumptions`, by id, and its gaps: missing events, unclear rejections, edge cases;
    - **behaviour choices**: what happens on each edge case, each failure, each concurrent or repeated action;
+   - **every "update", "edit" or "save"** in the inputs: which business actions it stands for (rescheduling an appointment, not updating it), so design never has to invent them;
    - anything a later stage (design, specify) would otherwise have to guess.
 
    On a **refactor** (`work.type` is `refactor`), cover instead:

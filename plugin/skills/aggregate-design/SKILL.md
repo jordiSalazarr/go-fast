@@ -26,6 +26,15 @@ Example: `Wallet` protects "balance never negative" and "a transaction applies a
 - **Events**: the fact, in the past tense (`TransactionPosted`, `WalletFrozen`). An event named `WalletUpdated` or `StatusChanged` records a property change, not a business fact; find the fact.
 - **Rejections**: named after the rule that refused (`InsufficientFunds`, `WalletFrozen`). Each maps to one invariant; a rejection with no invariant behind it means a rule is missing from the list.
 - **States**: what the business calls them (`Open`, `Frozen`, `Closed`), each its own type (see functional-domain).
+- **Slices and HTTP contracts** take the command's name and intent. `UpdateAppointment` behind `PUT /appointments/{id}` says a row is overwritten, not what happened to the appointment; the endpoint names the action: `POST /appointments/{id}/reschedule`.
+
+## "Update" is not a business action
+
+When an input, an event model or your own draft has an `Update…`/`Edit…`/`Save…` command, or a `PUT`/`PATCH` on a whole resource, ask what the business means by it: which fields change, who changes them, and why.
+- **Several intents**: split it, one command per intent, each with its own rules and events. `UpdateAppointment` is `RescheduleAppointment` (the slot must be free, not in the past), `AssignPractitioner`, `CancelAppointment`. `UpdatePatient` is `CorrectPatientDetails`, `ChangePatientAddress`, `RecordAllergy`.
+- **One intent**: name it. A typo fix is `CorrectPatientName`, and saying so is what tells you it has no rules.
+- **No rule reads the fields**: they are not aggregate state (see "Keep only the state those rules read"). Name the correction, or keep the data outside the domain model, and say which you chose.
+- **Can't tell the intent from the inputs**: don't invent one. Put the candidate intents under `## Decisions for the owner`, with your recommendation.
 
 ## Business rules live in the aggregate
 
@@ -64,6 +73,7 @@ For each aggregate write: its name, its invariants as sentences, its states, the
 - [ ] No business `if` outside the domain.
 - [ ] Other aggregates referenced by ID only.
 - [ ] Business names throughout: no CRUD verbs, no `…Updated` events, no generic suffixes.
+- [ ] No `Update…` command or slice, and no `PUT`/`PATCH` contract on a whole resource: each names a business intent.
 - [ ] Every rejection maps to an invariant.
 - [ ] Nothing changes two aggregates in one transaction except a domain service with a stated reason.
 - [ ] Every command that can race or repeat has a concurrency and idempotency choice.
