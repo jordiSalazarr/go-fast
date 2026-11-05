@@ -609,6 +609,9 @@ func (c *checkRun) testsChanged(files []domain.RepoPath, from, to string) (tests
 		if err != nil {
 			return nil, "", err
 		}
+		if !buildsByDefault(src) {
+			continue // excluded by build tags: the checks' plain `go test` never runs it
+		}
 		names, err := changedTests(old, src)
 		if err != nil {
 			return nil, firstLines(err.Error(), 1), nil

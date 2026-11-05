@@ -5,8 +5,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"go/ast"
+	"go/build/constraint"
 	"go/parser"
 	"go/token"
+	"runtime"
 	"slices"
 	"strings"
 	"unicode"
@@ -212,4 +214,37 @@ func firstLines(s string, n int) string {
 		}
 	}
 	return strings.Join(lines, "; ")
+}
+
+// buildsByDefault reports whether a Go file's //go:build constraint, if it
+// has one, holds without extra tags, as for the plain `go test` the checks
+// run: a test behind a tag such as "integration" is never compiled there, so
+// it is not a spec. A constraint that doesn't parse counts as building, so
+// the compile error surfaces.
+func buildsByDefault(src []byte) bool {
+	for _, line := range strings.Split(string(src), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "package ") {
+			return true
+		}
+		if !constraint.IsGoBuild(line) {
+			continue
+		}
+		expr, err := constraint.Parse(line)
+		if err != nil {
+			return true
+		}
+		return expr.Eval(func(tag string) bool {
+			switch {
+			case tag == runtime.GOOS, tag == runtime.GOARCH, tag == "gc", tag == "cgo":
+				return true
+			case tag == "unix":
+				return runtime.GOOS != "windows" && runtime.GOOS != "plan9" && runtime.GOOS != "js" && runtime.GOOS != "wasip1"
+			case strings.HasPrefix(tag, "go1."):
+				return true
+			}
+			return false
+		})
+	}
+	return true
 }

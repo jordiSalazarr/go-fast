@@ -473,3 +473,18 @@ func TestImplement_OnALaterVisit_TheSpecsAreSpecifysNotTheTestsTheFirstVisitWrot
 	m.write("server/server_test.go", passingSpec) // but not specify's
 	fails(t, m.checkImplementVisit(2)[domain.CheckSpecsUntouched], "server/server_test.go (modified)")
 }
+
+// A spec behind a build tag never compiles in the checks' plain `go test`,
+// so it isn't one of the specs implement must make pass.
+func TestImplement_ASpecBehindABuildTag_IsNotRequired(t *testing.T) {
+	m := newModule(t)
+	m.begin(domain.StageSpecify)
+	m.write("server/server_test.go", failingSpec)
+	m.write("server/render_test.go", "//go:build pdfrender\n\npackage server\n\nimport \"testing\"\n\nfunc TestPort_RendersAPDF(t *testing.T) { t.Fatal(\"needs the renderer\") }\n")
+	m.writeArtifact(domain.StageSpecify)
+	m.begin(domain.StageImplement)
+	m.write("server/server.go", fixedCode)
+	m.writeArtifact(domain.StageImplement)
+
+	passes(t, m.check(domain.StageImplement, exitchecks.Config{})[domain.CheckSpecsPass])
+}
